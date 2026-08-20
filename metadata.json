@@ -1,0 +1,7 @@
+{
+  "name": "Automatic Video Clipper",
+  "description": "Local automatic video clipping and editing application running entirely in the browser.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

@@ -1,5 +1,6 @@
-import React from 'react';
-import { Settings, Cpu, HardDrive, Sparkles, Film, Zap, CheckCircle2 } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Settings, Cpu, HardDrive, Sparkles, Film, Zap, CheckCircle2, Gauge, Layers } from 'lucide-react';
+import { detectCapabilities } from '../services/capabilityDetector';
 
 export default function ExportPanel({
   exportSettings,
@@ -8,10 +9,50 @@ export default function ExportPanel({
   detectedQuality,
   detectedFps
 }) {
+  const [capabilities, setCapabilities] = useState(null);
+
+  useEffect(() => {
+    detectCapabilities().then(setCapabilities).catch(() => {});
+  }, []);
+
   const updateSetting = (key, value) => {
     onChange({
       ...exportSettings,
       [key]: value
+    });
+  };
+
+  const presets = [
+    {
+      id: 'fast',
+      label: 'Fast',
+      desc: '720p / Standard Bitrate',
+      config: { resolution: '720p', bitrate: 'standard', fps: '30' }
+    },
+    {
+      id: 'balanced',
+      label: 'Balanced (Rec.)',
+      desc: '1080p / High Bitrate / Smooth',
+      config: { resolution: '1080p', bitrate: 'high', fps: '30' }
+    },
+    {
+      id: 'high',
+      label: 'High Quality',
+      desc: '1080p / Ultra Bitrate / 60 FPS',
+      config: { resolution: '1080p', bitrate: 'ultra', fps: '60' }
+    },
+    {
+      id: 'ultra',
+      label: 'Ultra 4K',
+      desc: '4K / Maximum Quality',
+      config: { resolution: '4k', bitrate: 'ultra', fps: '60' }
+    }
+  ];
+
+  const applyPreset = (preset) => {
+    onChange({
+      ...exportSettings,
+      ...preset.config
     });
   };
 
@@ -25,8 +66,8 @@ export default function ExportPanel({
 
   const bitrates = [
     { id: 'standard', label: 'Standard (5 Mbps)', mbps: 5 },
-    { id: 'high', label: 'High (8 Mbps - Rec.)', mbps: 8 },
-    { id: 'ultra', label: 'Ultra (14 Mbps)', mbps: 14 }
+    { id: 'high', label: 'High (8.5 Mbps - Rec.)', mbps: 8.5 },
+    { id: 'ultra', label: 'Ultra (16 Mbps)', mbps: 16 }
   ];
 
   const frameRates = [
@@ -38,34 +79,81 @@ export default function ExportPanel({
 
   return (
     <div className="space-y-5 sm:space-y-6">
-      {/* ── AUTO-DETECTED MEDIA RECOMMENDATIONS BADGE ── */}
-      {(detectedQuality || detectedFps) && (
-        <div className="bg-gradient-to-r from-orange-500/10 via-amber-500/5 to-slate-900 border border-orange-500/30 p-3 sm:p-3.5 rounded-xl flex flex-wrap items-center justify-between gap-2.5">
+      {/* ── HARDWARE ACCELERATION & AUTO PROFILE BADGE ── */}
+      <div className="bg-gradient-to-r from-orange-500/10 via-amber-500/5 to-slate-900 border border-orange-500/30 p-3 sm:p-3.5 rounded-xl space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2.5">
           <div className="flex items-center space-x-2.5 min-w-0">
             <div className="w-8 h-8 rounded-lg bg-orange-500/20 border border-orange-500/40 flex items-center justify-center text-orange-400 shrink-0">
-              <Sparkles className="w-4 h-4" />
+              <Zap className="w-4 h-4" />
             </div>
             <div className="min-w-0">
-              <span className="text-xs font-bold text-white truncate block">Auto-Optimized Export Profile</span>
-              <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
-                {detectedQuality && (
-                  <span className="text-[10px] bg-orange-500/20 text-orange-300 px-1.5 py-0.5 rounded font-mono shrink-0">
-                    🎬 {detectedQuality.label}
-                  </span>
-                )}
-                {detectedFps && (
-                  <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded font-mono shrink-0">
-                    ⚡ {detectedFps.label}
-                  </span>
-                )}
-              </div>
+              <span className="text-xs font-bold text-white truncate block">
+                {capabilities?.isHardwareAccelerated ? 'Hardware Acceleration Active' : 'Deterministic Export Engine'}
+              </span>
+              <p className="text-[10px] sm:text-[11px] text-slate-400 truncate">
+                {capabilities?.webCodecs
+                  ? 'WebCodecs GPU H.264 Encoder + Offline Audio Mixer'
+                  : 'Fast Hardware Stream Recorder + GPU Canvas'}
+              </p>
             </div>
           </div>
           <span className="text-[11px] text-emerald-400 font-medium flex items-center shrink-0">
-            <CheckCircle2 className="w-3.5 h-3.5 mr-1 inline" /> Auto-Optimized
+            <CheckCircle2 className="w-3.5 h-3.5 mr-1 inline" /> 100% Private Local
           </span>
         </div>
-      )}
+
+        {/* Capability Chips */}
+        <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-orange-500/20">
+          {capabilities?.h264EncoderSupported && (
+            <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded font-mono">
+              ⚡ WebCodecs H.264
+            </span>
+          )}
+          {capabilities?.webGL && (
+            <span className="text-[10px] bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded font-mono">
+              🎮 WebGL Shader Pipeline
+            </span>
+          )}
+          {detectedQuality && (
+            <span className="text-[10px] bg-orange-500/20 text-orange-300 px-1.5 py-0.5 rounded font-mono">
+              🎬 {detectedQuality.label}
+            </span>
+          )}
+          {detectedFps && (
+            <span className="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded font-mono">
+              ⚡ {detectedFps.label}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* ── SMART EXPORT PRESETS ── */}
+      <div className="space-y-2">
+        <label className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center space-x-1.5">
+          <Gauge className="w-3.5 h-3.5 text-orange-400" />
+          <span>Smart Export Profiles</span>
+        </label>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {presets.map((p) => {
+            const isActive = exportSettings.resolution === p.config.resolution &&
+                             exportSettings.bitrate === p.config.bitrate;
+            return (
+              <button
+                key={p.id}
+                onClick={() => applyPreset(p)}
+                className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer touch-manipulation ${
+                  isActive
+                    ? 'bg-orange-500/15 border-orange-500 text-white ring-1 ring-orange-500/40 shadow-sm'
+                    : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <span className="font-bold text-xs text-white block">{p.label}</span>
+                <span className="text-[10px] text-slate-400 mt-0.5 block leading-tight">{p.desc}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
       {/* Container Format */}
       <div className="space-y-2">

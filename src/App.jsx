@@ -136,6 +136,7 @@ export default function App() {
     isZipping,
     zipProgress,
     addJob,
+    addJobs,
     cancelJob,
     clearQueue,
     downloadClip,
@@ -218,17 +219,17 @@ export default function App() {
       return;
     }
 
-    partsToGenerate.forEach((part, idx) => {
+    const newJobs = partsToGenerate.map((part, idx) => {
       const partNum = part.partNumber || (idx + 1);
-      const filename = generateClipFilename(
-        textSettings.movieName || 'Clip',
-        partNum,
-        totalPossibleParts,
-        exportSettings.format || 'mp4',
-        textSettings.zeroPad
-      );
+      const filename = generateClipFilename({
+        movieName: textSettings.movieName || 'Clip',
+        partNumber: partNum,
+        template: textSettings.template || '{movie} - Part {part}',
+        zeroPad: textSettings.zeroPad,
+        extension: exportSettings.format || 'mp4'
+      });
 
-      addJob({
+      return {
         id: `job-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 6)}`,
         name: filename,
         partNumber: partNum,
@@ -247,10 +248,12 @@ export default function App() {
         effectsSettings,
         audioSettings,
         exportSettings
-      });
+      };
     });
 
-    showToast(`Added ${partsToGenerate.length} clips to processing queue!`, 'success');
+    addJobs(newJobs);
+
+    showToast(`Added ${newJobs.length} clips to processing queue!`, 'success');
   };
 
   const handleApplyToAll = () => {

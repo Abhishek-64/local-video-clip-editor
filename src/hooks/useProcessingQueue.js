@@ -9,13 +9,34 @@ export function useProcessingQueue() {
   const [isZipping, setIsZipping] = useState(false);
   const [zipProgress, setZipProgress] = useState(0);
 
+  const queueRef = useRef([]);
+  const completedClipsRef = useRef([]);
   const abortControllersRef = useRef(new Map());
-  const processingRef = useRef(false);
+  const activeWorkersRef = useRef(0);
+  const isDestroyedRef = useRef(false);
 
-  // Clean up object URLs on unmount
+  // Keep refs in sync with state
   useEffect(() => {
+    queueRef.current = queue;
+  }, [queue]);
+
+  useEffect(() => {
+    completedClipsRef.current = completedClips;
+  }, [completedClips]);
+
+  // Clean up object URLs and abort pending controllers on unmount
+  useEffect(() => {
+    isDestroyedRef.current = false;
     return () => {
-      completedClips.forEach((clip) => {
+      isDestroyedRef.current = true;
+      abortControllersRef.current.forEach((c) => {
+        try {
+          c.abort();
+        } catch (e) {}
+      });
+      abortControllersRef.current.clear();
+
+      completedClipsRef.current.forEach((clip) => {
         if (clip.outputUrl) {
           try {
             URL.revokeObjectURL(clip.outputUrl);
@@ -23,114 +44,218 @@ export function useProcessingQueue() {
         }
       });
     };
-  }, [completedClips]);
+  }, []);
 
   /**
-   * Set jobs in queue and start processing immediately
+   * Internal runner to process next pending jobs in queue
    */
-  const setAndStartQueue = useCallback((newJobs, videoSource, concurrency = 1) => {
-    // Revoke previous URLs
-    completedClips.forEach((clip) => {
-      if (clip.outputUrl) {
-        try {
-          URL.revokeObjectURL(clip.outputUrl);
-        } catch (e) {}
-      }
-    });
+  const triggerQueueProcessor = useCallback(() => {
+    if (isDestroyedRef.current) return;
 
-    setQueue(newJobs);
-    setCompletedClips([]);
+    const waitingJobs = queueRef.current.filter((j) => j.status === 'waiting');
+
+    if (waitingJobs.length === 0) {
+      if (activeWorkersRef.current === 0) {
+        setIsProcessing(false);
+      }
+      return;
+    }
+
     setIsProcessing(true);
-    processingRef.current = true;
 
-    runQueue(newJobs, videoSource, concurrency);
-  }, [completedClips]);
+    // Determine concurrency limit from first job export config (capped between 1 and 2 for browser canvas/GPU stability)
+    const concurrencyLimit = Math.max(
+      1,
+      Math.min(2, parseInt(waitingJobs[0]?.exportSettings?.concurrency || waitingJobs[0]?.settings?.export?.concurrency || 1, 10))
+    );
+
+    while (activeWorkersRef.current < concurrencyLimit) {
+      const nextJob = queueRef.current.find((j) => j.status === 'waiting');
+      if (!nextJob) break;
+
+      // Mark this job as processing
+      nextJob.status = 'processing';
+      nextJob.progress = 0;
+
+      queueRef.current = [...queueRef.current];
+      setQueue([...queueRef.current]);
+
+      activeWorkersRef.current += 1;
+      runSingleJob(nextJob);
+    }
+  }, []);
 
   /**
-   * Internal queue runner handling concurrency limit
+   * Execute single video clip processing job
    */
-  const runQueue = async (initialJobs, videoSource, concurrencyLimit = 1) => {
-    let currentJobs = [...initialJobs];
-    const maxConcurrent = Math.max(1, concurrencyLimit || 1);
+  const runSingleJob = async (job) => {
+    const controller = new AbortController();
+    abortControllersRef.current.set(job.id, controller);
 
-    const executeJob = async (job) => {
-      if (!processingRef.current) return;
+    try {
+      const videoSource =
+        job.videoSource ||
+        job.videoData?.url ||
+        job.videoData?.file ||
+        job.videoData;
 
-      const controller = new AbortController();
-      abortControllersRef.current.set(job.id, controller);
+      const settings = job.settings || {
+        crop: job.cropSettings || {},
+        background: job.bgSettings || {},
+        text: job.textSettings || {},
+        logo: job.logoSettings || {},
+        effects: job.effectsSettings || {},
+        audio: job.audioSettings || {},
+        export: job.exportSettings || {}
+      };
 
-      // Update status to processing
-      setQueue((prev) =>
-        prev.map((j) => (j.id === job.id ? { ...j, status: 'processing', progress: 0 } : j))
+      const result = await processVideoClip({
+        videoSource,
+        startTime: job.startTime,
+        endTime: job.endTime,
+        partNumber: job.partNumber || 1,
+        settings,
+        onProgress: (pct) => {
+          if (isDestroyedRef.current) return;
+          const target = queueRef.current.find((j) => j.id === job.id);
+          if (target && target.status === 'processing') {
+            target.progress = pct;
+            setQueue([...queueRef.current]);
+          }
+        },
+        signal: controller.signal
+      });
+
+      const completedJob = {
+        ...job,
+        status: 'completed',
+        progress: 100,
+        outputUrl: result.url,
+        blob: result.blob,
+        format: result.format,
+        size: result.size,
+        duration: result.duration
+      };
+
+      // Update in queue
+      queueRef.current = queueRef.current.map((j) =>
+        j.id === job.id ? completedJob : j
       );
+      setQueue([...queueRef.current]);
 
-      try {
-        const result = await processVideoClip({
-          videoSource,
-          startTime: job.startTime,
-          endTime: job.endTime,
-          partNumber: job.partNumber,
-          settings: job.settings,
-          onProgress: (pct) => {
-            setQueue((prev) =>
-              prev.map((j) => (j.id === job.id ? { ...j, progress: pct } : j))
-            );
-          },
-          signal: controller.signal
-        });
+      // Add to completedClips
+      setCompletedClips((prev) => [...prev, completedJob]);
+    } catch (err) {
+      if (isDestroyedRef.current) return;
 
-        const completedJob = {
-          ...job,
-          status: 'completed',
-          progress: 100,
-          outputUrl: result.url,
-          blob: result.blob,
-          format: result.format,
-          size: result.size,
-          duration: result.duration
-        };
+      const isCancelled = controller.signal.aborted || err.message?.includes('cancelled');
+      const updatedJob = {
+        ...job,
+        status: isCancelled ? 'cancelled' : 'failed',
+        error: isCancelled ? 'Cancelled by user' : (err.message || 'Processing failed')
+      };
 
-        // Update queue item
-        setQueue((prev) =>
-          prev.map((j) => (j.id === job.id ? completedJob : j))
-        );
+      queueRef.current = queueRef.current.map((j) =>
+        j.id === job.id ? updatedJob : j
+      );
+      setQueue([...queueRef.current]);
 
-        // Add to completed clips immediately so user can download/preview right away
-        setCompletedClips((prev) => [...prev, completedJob]);
-      } catch (err) {
-        if (err.message?.includes('cancelled')) {
-          setQueue((prev) =>
-            prev.map((j) => (j.id === job.id ? { ...j, status: 'cancelled' } : j))
-          );
-        } else {
-          console.error(`Error processing clip ${job.name}:`, err);
-          setQueue((prev) =>
-            prev.map((j) => (j.id === job.id ? { ...j, status: 'failed', error: err.message } : j))
-          );
-        }
-      } finally {
-        abortControllersRef.current.delete(job.id);
+      if (!isCancelled) {
+        console.error(`Error processing clip ${job.name}:`, err);
       }
-    };
-
-    // Concurrency runner pool
-    const pendingPool = [...currentJobs];
-    const workers = Array.from({ length: maxConcurrent }).map(async () => {
-      while (pendingPool.length > 0 && processingRef.current) {
-        const nextJob = pendingPool.shift();
-        if (nextJob) {
-          await executeJob(nextJob);
-        }
-      }
-    });
-
-    await Promise.all(workers);
-    setIsProcessing(false);
-    processingRef.current = false;
+    } finally {
+      abortControllersRef.current.delete(job.id);
+      activeWorkersRef.current = Math.max(0, activeWorkersRef.current - 1);
+      // Trigger next job in queue
+      triggerQueueProcessor();
+    }
   };
 
   /**
-   * Cancel an individual running job
+   * Add a single job to queue and start processing
+   */
+  const addJob = useCallback(
+    (newJob) => {
+      const jobWithDefaults = {
+        status: 'waiting',
+        progress: 0,
+        ...newJob,
+        id: newJob.id || `job-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`
+      };
+
+      queueRef.current = [...queueRef.current, jobWithDefaults];
+      setQueue([...queueRef.current]);
+
+      setTimeout(() => {
+        triggerQueueProcessor();
+      }, 0);
+    },
+    [triggerQueueProcessor]
+  );
+
+  /**
+   * Add multiple jobs to queue at once and start processing
+   */
+  const addJobs = useCallback(
+    (newJobs) => {
+      if (!Array.isArray(newJobs) || newJobs.length === 0) return;
+
+      const formattedJobs = newJobs.map((j, idx) => ({
+        status: 'waiting',
+        progress: 0,
+        ...j,
+        id: j.id || `job-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 7)}`
+      }));
+
+      queueRef.current = [...queueRef.current, ...formattedJobs];
+      setQueue([...queueRef.current]);
+
+      setTimeout(() => {
+        triggerQueueProcessor();
+      }, 0);
+    },
+    [triggerQueueProcessor]
+  );
+
+  /**
+   * Reset & set new jobs in queue and start processing immediately (batch replacement)
+   */
+  const setAndStartQueue = useCallback(
+    (newJobs, videoSource, concurrency = 1) => {
+      // Revoke previous URLs
+      completedClipsRef.current.forEach((clip) => {
+        if (clip.outputUrl) {
+          try {
+            URL.revokeObjectURL(clip.outputUrl);
+          } catch (e) {}
+        }
+      });
+
+      const formattedJobs = (newJobs || []).map((j, idx) => ({
+        status: 'waiting',
+        progress: 0,
+        videoSource: videoSource || j.videoSource || j.videoData?.url || j.videoData?.file,
+        exportSettings: {
+          ...(j.exportSettings || {}),
+          concurrency
+        },
+        ...j,
+        id: j.id || `job-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 7)}`
+      }));
+
+      setCompletedClips([]);
+      queueRef.current = formattedJobs;
+      setQueue(formattedJobs);
+
+      setTimeout(() => {
+        triggerQueueProcessor();
+      }, 0);
+    },
+    [triggerQueueProcessor]
+  );
+
+  /**
+   * Cancel an individual running or waiting job
    */
   const cancelJob = useCallback((id) => {
     const controller = abortControllersRef.current.get(id);
@@ -138,20 +263,26 @@ export function useProcessingQueue() {
       controller.abort();
       abortControllersRef.current.delete(id);
     }
-    setQueue((prev) =>
-      prev.map((j) => (j.id === id ? { ...j, status: 'cancelled' } : j))
+
+    queueRef.current = queueRef.current.map((j) =>
+      j.id === id ? { ...j, status: 'cancelled' } : j
     );
+    setQueue([...queueRef.current]);
   }, []);
 
   /**
-   * Clear all queue items and revoke URLs
+   * Clear all queue items and revoke object URLs
    */
   const clearQueue = useCallback(() => {
-    processingRef.current = false;
-    abortControllersRef.current.forEach((c) => c.abort());
+    abortControllersRef.current.forEach((c) => {
+      try {
+        c.abort();
+      } catch (e) {}
+    });
     abortControllersRef.current.clear();
+    activeWorkersRef.current = 0;
 
-    completedClips.forEach((c) => {
+    completedClipsRef.current.forEach((c) => {
       if (c.outputUrl) {
         try {
           URL.revokeObjectURL(c.outputUrl);
@@ -159,15 +290,17 @@ export function useProcessingQueue() {
       }
     });
 
+    queueRef.current = [];
     setQueue([]);
     setCompletedClips([]);
     setIsProcessing(false);
-  }, [completedClips]);
+  }, []);
 
   /**
    * Download a single completed clip
    */
   const downloadClip = useCallback((clip) => {
+    if (!clip) return;
     if (!clip.outputUrl && !clip.blob) {
       console.warn('Clip is not ready for download yet');
       return;
@@ -176,34 +309,35 @@ export function useProcessingQueue() {
     const url = clip.outputUrl || URL.createObjectURL(clip.blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = clip.name;
+    a.download = clip.name || `clip-${clip.partNumber || 1}.mp4`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
   }, []);
 
   /**
-   * Download all completed clips as a ZIP
+   * Download all completed clips as a ZIP archive
    */
   const downloadAllZip = useCallback(
     async (movieName = 'Clips') => {
-      if (completedClips.length === 0) return;
+      if (completedClipsRef.current.length === 0) return;
 
       setIsZipping(true);
       setZipProgress(0);
 
       try {
-        await downloadClipsAsZip(completedClips, `${movieName} - Clips`, (pct) => {
+        await downloadClipsAsZip(completedClipsRef.current, `${movieName} - Clips`, (pct) => {
           setZipProgress(pct);
         });
       } catch (err) {
         console.error('ZIP generation error:', err);
+        throw err;
       } finally {
         setIsZipping(false);
         setZipProgress(0);
       }
     },
-    [completedClips]
+    []
   );
 
   return {
@@ -213,6 +347,8 @@ export function useProcessingQueue() {
     isProcessing,
     isZipping,
     zipProgress,
+    addJob,
+    addJobs,
     setAndStartQueue,
     cancelJob,
     clearQueue,

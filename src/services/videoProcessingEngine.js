@@ -131,11 +131,20 @@ function wrapAndFitText(ctx, rawText, maxAllowedWidth, initialFontSize, font, mi
   };
 }
 
+import { exportVideoClip } from './exportEngine';
+
 /**
- * Process and render a single video clip with zero stutter, unthrottled GPU pipeline,
- * multi-voice mixing & smart auto-ducking, and universal hardware compatibility.
+ * Process and render a single video clip with maximum speed, zero dropped frames,
+ * deterministic timestamps, and universal hardware compatibility.
  */
-export async function processVideoClip({
+export async function processVideoClip(params) {
+  return exportVideoClip(params);
+}
+
+/**
+ * Enhanced Real-Time Hardware MediaRecorder Fallback Pipeline
+ */
+export async function processVideoClipLegacy({
   videoSource,
   startTime,
   endTime,
@@ -176,11 +185,18 @@ export async function processVideoClip({
     let animFrameId = null;
     let heartbeatTimer = null;
     let watchdogTimer = null;
+    let temporaryObjectUrl = null;
     let isFinished = false;
     const recordedChunks = [];
 
     const cleanup = () => {
       isFinished = true;
+      if (temporaryObjectUrl) {
+        try {
+          URL.revokeObjectURL(temporaryObjectUrl);
+        } catch (e) {}
+        temporaryObjectUrl = null;
+      }
       if (heartbeatTimer) {
         clearInterval(heartbeatTimer);
         heartbeatTimer = null;
@@ -290,7 +306,25 @@ export async function processVideoClip({
       videoEl.style.cssText = 'width:100%;height:100%;object-fit:contain;';
       hiddenContainer.appendChild(videoEl);
 
-      const srcUrl = typeof videoSource === 'string' ? videoSource : videoSource.src || videoSource.url;
+      let srcUrl = '';
+      if (typeof videoSource === 'string') {
+        srcUrl = videoSource;
+      } else if (videoSource?.url) {
+        srcUrl = videoSource.url;
+      } else if (videoSource?.src) {
+        srcUrl = videoSource.src;
+      } else if (videoSource?.file && typeof window !== 'undefined') {
+        temporaryObjectUrl = URL.createObjectURL(videoSource.file);
+        srcUrl = temporaryObjectUrl;
+      } else if (videoSource instanceof Blob && typeof window !== 'undefined') {
+        temporaryObjectUrl = URL.createObjectURL(videoSource);
+        srcUrl = temporaryObjectUrl;
+      }
+
+      if (!srcUrl) {
+        throw new Error('No valid video source provided for processing');
+      }
+
       videoEl.src = srcUrl;
 
       await new Promise((res, rej) => {

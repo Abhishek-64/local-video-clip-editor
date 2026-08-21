@@ -190,15 +190,18 @@ export default function VideoPreview({
   // ── Multi-Handle Manual Crop Drag & Resize ───────────────────────────────────
   const startCropDrag = (e, handle = 'center') => {
     if (!onCropChange || cropSettings?.mode === 'original') return;
-    e.preventDefault();
+    if (e.cancelable) e.preventDefault();
     e.stopPropagation();
+
+    const clientX = e.touches && e.touches.length > 0 ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches && e.touches.length > 0 ? e.touches[0].clientY : e.clientY;
 
     setIsDraggingCrop(true);
     dragCropRef.current = {
       active: true,
       handle,
-      startX: e.clientX,
-      startY: e.clientY,
+      startX: clientX,
+      startY: clientY,
       startCropX: cropSettings?.x || 0,
       startCropY: cropSettings?.y || 0,
       startWidth: cropSettings?.customWidth ?? (cropSettings?.mode === '9:16' ? 42 : cropSettings?.mode === '1:1' ? 62 : 88),
@@ -426,6 +429,37 @@ export default function VideoPreview({
 
     const handleTouchMove = (e) => {
       const touch = e.touches[0];
+
+      // 1. Crop box drag / resize on touch
+      if (dragCropRef.current.active && onCropChange) {
+        const dx = touch.clientX - dragCropRef.current.startX;
+        const dy = touch.clientY - dragCropRef.current.startY;
+        const h = dragCropRef.current.handle;
+
+        if (h === 'center') {
+          const newX = Math.max(-200, Math.min(200, dragCropRef.current.startCropX + dx * 1.5));
+          const newY = Math.max(-200, Math.min(200, dragCropRef.current.startCropY + dy * 1.5));
+          onCropChange({ ...cropSettings, x: Math.round(newX), y: Math.round(newY) });
+        } else {
+          let deltaW = 0;
+          let deltaH = 0;
+
+          if (h.includes('r')) deltaW = (dx / 300) * 100;
+          if (h.includes('l')) deltaW = (-dx / 300) * 100;
+          if (h.includes('b')) deltaH = (dy / 250) * 100;
+          if (h.includes('t')) deltaH = (-dy / 250) * 100;
+
+          const newW = Math.max(15, Math.min(100, Math.round(dragCropRef.current.startWidth + deltaW)));
+          const newH = Math.max(15, Math.min(100, Math.round(dragCropRef.current.startHeight + deltaH)));
+
+          onCropChange({
+            ...cropSettings,
+            mode: 'custom',
+            customWidth: newW,
+            customHeight: newH
+          });
+        }
+      }
 
       if (dragTextRef.current.active && onTextChange) {
         const dy = touch.clientY - dragTextRef.current.startY;
@@ -706,41 +740,40 @@ export default function VideoPreview({
   return (
     <div
       ref={containerRef}
-      className="relative bg-black rounded-2xl overflow-hidden border border-slate-800 shadow-2xl flex flex-col justify-between group"
-      style={{ minHeight: '440px' }}
+      className="relative bg-black rounded-2xl overflow-hidden border border-slate-800 shadow-2xl flex flex-col justify-between group min-h-[300px] sm:min-h-[440px]"
     >
       {/* Top Bar with Mode Switch */}
-      <div className="bg-slate-900/90 border-b border-slate-800 px-4 py-2 flex items-center justify-between z-20 backdrop-blur">
-        <div className="flex items-center space-x-2">
-          <span className="text-xs font-semibold text-white flex items-center space-x-1.5">
+      <div className="bg-slate-900/90 border-b border-slate-800 px-3 sm:px-4 py-2 flex flex-wrap items-center justify-between gap-2 z-20 backdrop-blur">
+        <div className="flex items-center space-x-1.5 sm:space-x-2 min-w-0">
+          <span className="text-xs font-semibold text-white flex items-center space-x-1.5 truncate">
             <span>Video Preview</span>
             {isVerticalCrop && (
-              <span className={`text-[10px] border px-2 py-0.5 rounded font-mono ${
+              <span className={`text-[9px] sm:text-[10px] border px-1.5 sm:px-2 py-0.5 rounded font-mono shrink-0 ${
                 !isFillMode
                   ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
                   : 'bg-orange-500/10 text-orange-400 border-orange-500/30'
               }`}>
-                9:16 {!isFillMode ? 'Full Horizontal (Fit)' : 'Zoom Fill'}
+                9:16 {!isFillMode ? 'Fit' : 'Zoom'}
               </span>
             )}
             {isCustomCrop && (
-              <span className="text-[10px] border px-2 py-0.5 rounded font-mono bg-amber-500/10 text-amber-300 border-amber-500/30">
-                Manual Crop ({cropSettings.customWidth ?? 60}% × {cropSettings.customHeight ?? 85}%)
+              <span className="text-[9px] sm:text-[10px] border px-1.5 sm:px-2 py-0.5 rounded font-mono bg-amber-500/10 text-amber-300 border-amber-500/30 shrink-0">
+                Crop ({cropSettings.customWidth ?? 60}%×{cropSettings.customHeight ?? 85}%)
               </span>
             )}
             {cropSettings?.mode === '16:9' && (
-              <span className="text-[10px] border px-2 py-0.5 rounded font-mono bg-red-500/10 text-red-300 border-red-500/30">
-                YouTube 16:9
+              <span className="text-[9px] sm:text-[10px] border px-1.5 sm:px-2 py-0.5 rounded font-mono bg-red-500/10 text-red-300 border-red-500/30 shrink-0">
+                16:9
               </span>
             )}
             {cropSettings?.mode === '1:1' && (
-              <span className="text-[10px] border px-2 py-0.5 rounded font-mono bg-pink-500/10 text-pink-300 border-pink-500/30">
-                Instagram 1:1
+              <span className="text-[9px] sm:text-[10px] border px-1.5 sm:px-2 py-0.5 rounded font-mono bg-pink-500/10 text-pink-300 border-pink-500/30 shrink-0">
+                1:1
               </span>
             )}
             {cropSettings?.mode === '4:5' && (
-              <span className="text-[10px] border px-2 py-0.5 rounded font-mono bg-purple-500/10 text-purple-300 border-purple-500/30">
-                Instagram 4:5
+              <span className="text-[9px] sm:text-[10px] border px-1.5 sm:px-2 py-0.5 rounded font-mono bg-purple-500/10 text-purple-300 border-purple-500/30 shrink-0">
+                4:5
               </span>
             )}
           </span>
@@ -748,38 +781,38 @@ export default function VideoPreview({
 
         {/* View Switch Buttons */}
         {cropSettings?.mode !== 'original' && (
-          <div className="inline-flex rounded-lg bg-slate-950 p-0.5 border border-slate-800">
+          <div className="inline-flex rounded-lg bg-slate-950 p-0.5 border border-slate-800 shrink-0">
             <button
               onClick={() => setPreviewMode('vertical')}
-              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer flex items-center space-x-1 ${
+              className={`px-2 sm:px-2.5 py-1 text-[11px] sm:text-xs font-medium rounded-md transition-colors cursor-pointer flex items-center space-x-1 touch-manipulation ${
                 previewMode === 'vertical'
                   ? 'bg-orange-500 text-white font-semibold shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
               title="Full 9:16 Vertical Screen Preview"
             >
-              <Smartphone className="w-3.5 h-3.5" />
-              <span>Phone View</span>
+              <Smartphone className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+              <span>Phone</span>
             </button>
 
             <button
               onClick={() => setPreviewMode('framing')}
-              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer flex items-center space-x-1 ${
+              className={`px-2 sm:px-2.5 py-1 text-[11px] sm:text-xs font-medium rounded-md transition-colors cursor-pointer flex items-center space-x-1 touch-manipulation ${
                 previewMode === 'framing' || isCustomCrop
                   ? 'bg-orange-500 text-white font-semibold shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
               title="Interactive manual crop box and framing handles"
             >
-              <LayoutGrid className="w-3.5 h-3.5" />
-              <span>Crop Framing</span>
+              <LayoutGrid className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+              <span>Framing</span>
             </button>
           </div>
         )}
       </div>
 
       {/* Main Viewport */}
-      <div className="relative flex-1 flex items-center justify-center overflow-hidden bg-slate-950 p-2 sm:p-4 min-h-[380px]">
+      <div className="relative flex-1 flex items-center justify-center overflow-hidden bg-slate-950 p-2 sm:p-4 min-h-[260px] sm:min-h-[380px]">
         {videoData?.url ? (
           previewMode === 'vertical' && isVerticalCrop && !isCustomCrop ? (
             /* ── VERTICAL 9:16 PHONE VIEWPORT ── */
@@ -788,8 +821,8 @@ export default function VideoPreview({
               className="relative rounded-2xl overflow-hidden shadow-2xl border-2 border-slate-700 bg-black flex items-center justify-center select-none"
               style={{
                 aspectRatio: '9 / 16',
-                height: '420px',
-                maxHeight: '70vh'
+                height: '380px',
+                maxHeight: '55vh'
               }}
             >
               {/* ── BACKGROUND LAYER (Hardware Fast Canvas Blit) ── */}
@@ -873,7 +906,7 @@ export default function VideoPreview({
                   style={getTextOverlayStyle()}
                   onMouseDown={handleTextMouseDown}
                   onTouchStart={handleTextTouchStart}
-                  className={`group/text transition-shadow ${
+                  className={`group/text transition-shadow touch-manipulation ${
                     isDraggingText
                       ? 'ring-2 ring-orange-500 ring-offset-2 ring-offset-black/50 shadow-2xl'
                       : 'hover:ring-1 hover:ring-amber-400/60'
@@ -902,7 +935,7 @@ export default function VideoPreview({
                     style={getExtraTextStyle(extra)}
                     onMouseDown={(e) => handleExtraTextMouseDown(e, extra)}
                     onTouchStart={(e) => handleExtraTextTouchStart(e, extra)}
-                    className={`group/extra transition-shadow ${
+                    className={`group/extra transition-shadow touch-manipulation ${
                       isThisDragging
                         ? 'ring-2 ring-emerald-400 ring-offset-2 ring-offset-black/50 shadow-2xl'
                         : 'hover:ring-1 hover:ring-emerald-400/60'
@@ -925,7 +958,7 @@ export default function VideoPreview({
                   style={getLogoOverlayStyle()}
                   onMouseDown={handleLogoMouseDown}
                   onTouchStart={handleLogoTouchStart}
-                  className={`group/logo transition-shadow ${
+                  className={`group/logo transition-shadow touch-manipulation ${
                     isDraggingLogo
                       ? 'ring-2 ring-orange-500 ring-offset-2 ring-offset-black/50 shadow-2xl'
                       : 'hover:ring-1 hover:ring-amber-400/60'
@@ -942,7 +975,7 @@ export default function VideoPreview({
               )}
 
               {/* Phone Status bar */}
-              <div className="absolute top-2 inset-x-0 flex justify-between px-4 text-[9px] font-mono text-white/50 pointer-events-none z-30 drop-shadow">
+              <div className="absolute top-2 inset-x-0 flex justify-between px-3 sm:px-4 text-[9px] font-mono text-white/50 pointer-events-none z-30 drop-shadow">
                 <span>9:16 SHORTS / REELS</span>
                 <span className={!isFillMode ? 'text-emerald-400 font-semibold' : 'text-amber-400 font-semibold'}>
                   {!isFillMode ? (bgType === 'blur-video' ? 'BLURRED BACKDROP' : bgType === 'image' ? 'CUSTOM BACKDROP' : 'FIT') : 'ZOOM FILL'}
@@ -955,7 +988,7 @@ export default function VideoPreview({
               <video
                 ref={videoRef}
                 src={videoData.url}
-                className="max-h-[420px] w-auto max-w-full object-contain mx-auto transition-all"
+                className="max-h-[300px] sm:max-h-[420px] w-auto max-w-full object-contain mx-auto transition-all"
                 style={getFilterStyle()}
                 onTimeUpdate={handleTimeUpdateInternal}
                 onEnded={() => setIsPlaying(false)}
@@ -968,7 +1001,7 @@ export default function VideoPreview({
               {showCropGuide && cropSettings?.mode !== 'original' && (
                 <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
                   <div
-                    className={`relative border-2 border-dashed rounded-lg pointer-events-auto select-none transition-shadow ${
+                    className={`relative border-2 border-dashed rounded-lg pointer-events-auto select-none transition-shadow touch-manipulation ${
                       isDraggingCrop
                         ? 'border-orange-400 shadow-[0_0_0_9999px_rgba(0,0,0,0.65)] ring-2 ring-orange-500/50'
                         : 'border-amber-400/90 shadow-[0_0_0_9999px_rgba(0,0,0,0.55)] hover:border-amber-300'
@@ -979,59 +1012,68 @@ export default function VideoPreview({
                       transform: `translate(${(cropSettings?.x || 0) * 0.35}px, ${(cropSettings?.y || 0) * 0.35}px) scale(${cropSettings?.zoom || 1})`
                     }}
                     onMouseDown={(e) => startCropDrag(e, 'center')}
+                    onTouchStart={(e) => startCropDrag(e, 'center')}
                   >
                     {/* 4 Corner Resize Handles */}
                     <div
-                      className="absolute -top-2 -left-2 w-4 h-4 bg-amber-400 hover:bg-white rounded-full border-2 border-black cursor-nwse-resize z-30 shadow"
+                      className="absolute -top-2.5 -left-2.5 w-5 h-5 bg-amber-400 hover:bg-white rounded-full border-2 border-black cursor-nwse-resize z-30 shadow touch-manipulation"
                       onMouseDown={(e) => startCropDrag(e, 'tl')}
+                      onTouchStart={(e) => startCropDrag(e, 'tl')}
                       title="Drag to resize top-left"
                     />
                     <div
-                      className="absolute -top-2 -right-2 w-4 h-4 bg-amber-400 hover:bg-white rounded-full border-2 border-black cursor-nesw-resize z-30 shadow"
+                      className="absolute -top-2.5 -right-2.5 w-5 h-5 bg-amber-400 hover:bg-white rounded-full border-2 border-black cursor-nesw-resize z-30 shadow touch-manipulation"
                       onMouseDown={(e) => startCropDrag(e, 'tr')}
+                      onTouchStart={(e) => startCropDrag(e, 'tr')}
                       title="Drag to resize top-right"
                     />
                     <div
-                      className="absolute -bottom-2 -left-2 w-4 h-4 bg-amber-400 hover:bg-white rounded-full border-2 border-black cursor-nesw-resize z-30 shadow"
+                      className="absolute -bottom-2.5 -left-2.5 w-5 h-5 bg-amber-400 hover:bg-white rounded-full border-2 border-black cursor-nesw-resize z-30 shadow touch-manipulation"
                       onMouseDown={(e) => startCropDrag(e, 'bl')}
+                      onTouchStart={(e) => startCropDrag(e, 'bl')}
                       title="Drag to resize bottom-left"
                     />
                     <div
-                      className="absolute -bottom-2 -right-2 w-4 h-4 bg-amber-400 hover:bg-white rounded-full border-2 border-black cursor-nwse-resize z-30 shadow"
+                      className="absolute -bottom-2.5 -right-2.5 w-5 h-5 bg-amber-400 hover:bg-white rounded-full border-2 border-black cursor-nwse-resize z-30 shadow touch-manipulation"
                       onMouseDown={(e) => startCropDrag(e, 'br')}
+                      onTouchStart={(e) => startCropDrag(e, 'br')}
                       title="Drag to resize bottom-right"
                     />
 
                     {/* 4 Edge Resize Handles */}
                     <div
-                      className="absolute top-0 inset-x-8 h-2 -translate-y-1 bg-transparent hover:bg-amber-400/50 cursor-ns-resize z-20"
+                      className="absolute top-0 inset-x-8 h-3 -translate-y-1.5 bg-transparent hover:bg-amber-400/50 cursor-ns-resize z-20 touch-manipulation"
                       onMouseDown={(e) => startCropDrag(e, 't')}
+                      onTouchStart={(e) => startCropDrag(e, 't')}
                       title="Resize height"
                     />
                     <div
-                      className="absolute bottom-0 inset-x-8 h-2 translate-y-1 bg-transparent hover:bg-amber-400/50 cursor-ns-resize z-20"
+                      className="absolute bottom-0 inset-x-8 h-3 translate-y-1.5 bg-transparent hover:bg-amber-400/50 cursor-ns-resize z-20 touch-manipulation"
                       onMouseDown={(e) => startCropDrag(e, 'b')}
+                      onTouchStart={(e) => startCropDrag(e, 'b')}
                       title="Resize height"
                     />
                     <div
-                      className="absolute left-0 inset-y-8 w-2 -translate-x-1 bg-transparent hover:bg-amber-400/50 cursor-ew-resize z-20"
+                      className="absolute left-0 inset-y-8 w-3 -translate-x-1.5 bg-transparent hover:bg-amber-400/50 cursor-ew-resize z-20 touch-manipulation"
                       onMouseDown={(e) => startCropDrag(e, 'l')}
+                      onTouchStart={(e) => startCropDrag(e, 'l')}
                       title="Resize width"
                     />
                     <div
-                      className="absolute right-0 inset-y-8 w-2 translate-x-1 bg-transparent hover:bg-amber-400/50 cursor-ew-resize z-20"
+                      className="absolute right-0 inset-y-8 w-3 translate-x-1.5 bg-transparent hover:bg-amber-400/50 cursor-ew-resize z-20 touch-manipulation"
                       onMouseDown={(e) => startCropDrag(e, 'r')}
+                      onTouchStart={(e) => startCropDrag(e, 'r')}
                       title="Resize width"
                     />
 
                     {/* Center Move Badge */}
                     <div className="absolute inset-0 flex items-center justify-center cursor-move">
-                      <div className="flex items-center space-x-1.5 text-[10px] font-bold text-amber-300 bg-black/80 px-2.5 py-1 rounded-full border border-amber-500/40 backdrop-blur-sm shadow-lg pointer-events-none">
-                        <Move className="w-3 h-3" />
-                        <span>
+                      <div className="flex items-center space-x-1 text-[9px] sm:text-[10px] font-bold text-amber-300 bg-black/80 px-2 sm:px-2.5 py-1 rounded-full border border-amber-500/40 backdrop-blur-sm shadow-lg pointer-events-none">
+                        <Move className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+                        <span className="truncate max-w-[150px] sm:max-w-none">
                           {cropSettings?.mode === 'custom'
-                            ? `Crop: ${cropSettings.customWidth ?? 60}% × ${cropSettings.customHeight ?? 85}%`
-                            : `${cropSettings?.mode} · Drag to Move or Resize`}
+                            ? `${cropSettings.customWidth ?? 60}% × ${cropSettings.customHeight ?? 85}%`
+                            : `${cropSettings?.mode} · Drag to Move`}
                         </span>
                       </div>
                     </div>
@@ -1045,7 +1087,7 @@ export default function VideoPreview({
                   style={getTextOverlayStyle()}
                   onMouseDown={handleTextMouseDown}
                   onTouchStart={handleTextTouchStart}
-                  className="hover:ring-1 hover:ring-amber-400/60 rounded"
+                  className="hover:ring-1 hover:ring-amber-400/60 rounded touch-manipulation"
                 >
                   {getRenderedText()}
                 </div>
@@ -1060,7 +1102,7 @@ export default function VideoPreview({
                     style={getExtraTextStyle(extra)}
                     onMouseDown={(e) => handleExtraTextMouseDown(e, extra)}
                     onTouchStart={(e) => handleExtraTextTouchStart(e, extra)}
-                    className="hover:ring-1 hover:ring-emerald-400/60 rounded"
+                    className="hover:ring-1 hover:ring-emerald-400/60 rounded touch-manipulation"
                   >
                     {extra.text}
                   </div>
@@ -1073,7 +1115,7 @@ export default function VideoPreview({
                   style={getLogoOverlayStyle()}
                   onMouseDown={handleLogoMouseDown}
                   onTouchStart={handleLogoTouchStart}
-                  className="hover:ring-1 hover:ring-emerald-400/60 rounded"
+                  className="hover:ring-1 hover:ring-emerald-400/60 rounded touch-manipulation"
                 >
                   <img src={logoSettings.url} alt="Logo" className="w-full h-auto object-contain pointer-events-none" />
                 </div>
@@ -1090,10 +1132,10 @@ export default function VideoPreview({
 
       {/* Control Bar */}
       {videoData && (
-        <div className="bg-slate-900/95 border-t border-slate-800 px-4 py-3 z-10 backdrop-blur">
+        <div className="bg-slate-900/95 border-t border-slate-800 px-3 sm:px-4 py-2.5 sm:py-3 z-10 backdrop-blur">
           {/* Timeline Scrubber */}
-          <div className="flex items-center space-x-3 mb-2">
-            <span className="text-xs font-mono text-slate-300 min-w-[44px]">
+          <div className="flex items-center space-x-2 sm:space-x-3 mb-2">
+            <span className="text-[11px] sm:text-xs font-mono text-slate-300 min-w-[36px] sm:min-w-[44px]">
               {formatTime(currentTime)}
             </span>
             <div className="relative flex-1 flex items-center">
@@ -1104,23 +1146,23 @@ export default function VideoPreview({
                 step="0.05"
                 value={currentTime}
                 onChange={handleSeek}
-                className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-orange-500 focus:outline-none"
+                className="w-full h-2 sm:h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-orange-500 focus:outline-none touch-manipulation"
               />
             </div>
-            <span className="text-xs font-mono text-slate-400 min-w-[44px]">
+            <span className="text-[11px] sm:text-xs font-mono text-slate-400 min-w-[36px] sm:min-w-[44px] text-right">
               {formatTime(videoData.duration)}
             </span>
           </div>
 
           {/* Buttons */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center space-x-2 sm:space-x-3">
               <button
                 onClick={togglePlay}
-                className="w-9 h-9 rounded-xl bg-orange-500 hover:bg-orange-600 text-white flex items-center justify-center transition-all shadow-md shadow-orange-500/20 cursor-pointer"
+                className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-orange-500 hover:bg-orange-600 active:scale-95 text-white flex items-center justify-center transition-all shadow-md shadow-orange-500/20 cursor-pointer shrink-0 touch-manipulation"
                 title={isPlaying ? 'Pause' : 'Play'}
               >
-                {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 fill-white translate-x-0.5" />}
+                {isPlaying ? <Pause className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4 fill-white translate-x-0.5" />}
               </button>
 
               <button
@@ -1130,16 +1172,17 @@ export default function VideoPreview({
                     onTimeUpdate(0);
                   }
                 }}
-                className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                className="p-1.5 sm:p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer touch-manipulation"
                 title="Restart"
               >
-                <RotateCcw className="w-4 h-4" />
+                <RotateCcw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               </button>
 
-              <div className="flex items-center space-x-2 pl-2 border-l border-slate-800">
+              <div className="flex items-center space-x-1.5 sm:space-x-2 pl-1.5 sm:pl-2 border-l border-slate-800">
                 <button
                   onClick={toggleMute}
-                  className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                  className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer touch-manipulation"
+                  title={isMuted ? 'Unmute' : 'Mute'}
                 >
                   {isMuted || volume === 0 ? (
                     <VolumeX className="w-4 h-4 text-rose-400" />
@@ -1154,15 +1197,15 @@ export default function VideoPreview({
                   step="0.05"
                   value={isMuted ? 0 : volume}
                   onChange={handleVolumeChange}
-                  className="w-16 sm:w-20 h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-orange-500 focus:outline-none"
+                  className="hidden xs:block w-14 sm:w-20 h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-orange-500 focus:outline-none touch-manipulation"
                 />
               </div>
             </div>
 
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-1 sm:space-x-2">
               <button
                 onClick={toggleFullscreen}
-                className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                className="p-1.5 sm:p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer touch-manipulation"
                 title="Fullscreen"
               >
                 {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}

@@ -8,12 +8,15 @@ import ProcessingQueue from './components/ProcessingQueue';
 import GeneratedClips from './components/GeneratedClips';
 import { generateClipFilename } from './utils/filename';
 import { useProcessingQueue } from './hooks/useProcessingQueue';
-import { Check, Info, X } from 'lucide-react';
+import { Check, Info, X, Film, Palette, Layers, Sparkles } from 'lucide-react';
 
 export default function App() {
   // Video Source State
   const [videoData, setVideoData] = useState(null);
   const [currentTime, setCurrentTime] = useState(0);
+
+  // Mobile Active View: 'preview' (Preview + Timeline), 'style' (EditorTabs), 'queue' (Queue + Output)
+  const [mobileView, setMobileView] = useState('preview');
 
   // Timeline / Range / Parts State
   const [startTime, setStartTime] = useState(0);
@@ -125,73 +128,160 @@ export default function App() {
     concurrency: 1
   });
 
-  // Background Processing Queue Hook
+  // Processing Queue Hook
   const {
     queue,
     completedClips,
     isProcessing,
     isZipping,
     zipProgress,
-    setAndStartQueue,
+    addJob,
     cancelJob,
     clearQueue,
     downloadClip,
     downloadAllZip
   } = useProcessingQueue();
 
-  // Handle Video Selection with Smart Auto-Detection
+  // Handle Video Loading and Auto-Detection
   const handleVideoSelect = (data) => {
-    if (videoData?.url) {
-      URL.revokeObjectURL(videoData.url);
-    }
     setVideoData(data);
-    setCurrentTime(0);
     setStartTime(0);
-    setEndTime(data.duration || 60);
+    setEndTime(data.duration);
+    setCurrentTime(0);
 
-    const baseName = data.name.replace(/\.[^/.]+$/, '');
+    // Auto-populate movie name from filename (cleaned)
+    const baseName = data.file.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
     setTextSettings((prev) => ({
       ...prev,
       movieName: baseName
     }));
 
-    // Auto-tune Export settings from detected quality & FPS
-    if (data.detectedQuality?.resolutionKey) {
+    // Auto configure smart export profile based on detected media
+    if (data.detectedQuality || data.detectedFps) {
       setExportSettings((prev) => ({
         ...prev,
-        resolution: data.detectedQuality.resolutionKey,
-        fps: data.detectedFps?.fpsKey || prev.fps
+        resolution: data.detectedQuality?.recommendedRes || prev.resolution,
+        fps: data.detectedFps?.recommendedFps || prev.fps
       }));
     }
 
-    clearQueue();
-    setCustomParts([]);
-    showToast(
-      `✨ Auto-Detected: ${data.detectedQuality?.shortName || '1080p'} · ${data.detectedFps?.fps || 30} FPS · ${data.detectedAudio?.channels || 'Stereo'} Audio`,
-      'success'
-    );
+    showToast(`Loaded "${data.file.name}" (${Math.round(data.duration)}s) successfully!`, 'success');
   };
 
-  const handleResetVideo = () => {
-    if (videoData?.url) {
-      URL.revokeObjectURL(videoData.url);
+  // Derive total calculated parts
+  const selectedDuration = Math.max(0, endTime - startTime);
+  const totalPossibleParts = customParts && customParts.length > 0
+    ? customParts.length
+    : clipDuration > 0 && selectedDuration > 0
+    ? Math.ceil(selectedDuration / clipDuration)
+    : 1;
+
+  // Batch Generation Trigger
+  const handleGenerateQueue = ({ mode, count, start, end }) => {
+    if (!videoData) return;
+
+    let partsToGenerate = [];
+
+    if (customParts && customParts.length > 0) {
+      if (mode === 'all') {
+        partsToGenerate = [...customParts];
+      } else if (mode === 'first-n') {
+        partsToGenerate = customParts.slice(0, count);
+      } else if (mode === 'range') {
+        partsToGenerate = customParts.slice(Math.max(0, start - 1), end);
+      }
+    } else {
+      // Fallback math calculation if customParts isn't set
+      const numClips = Math.max(1, Math.ceil(selectedDuration / clipDuration));
+      const fullList = [];
+      for (let i = 0; i < numClips; i++) {
+        const segStart = Math.round((startTime + i * clipDuration) * 10) / 10;
+        const segEnd = Math.min(endTime, Math.round((segStart + clipDuration) * 10) / 10);
+        fullList.push({
+          partNumber: i + 1,
+          startTime: segStart,
+          endTime: segEnd
+        });
+      }
+
+      if (mode === 'all') {
+        partsToGenerate = fullList;
+      } else if (mode === 'first-n') {
+        partsToGenerate = fullList.slice(0, count);
+      } else if (mode === 'range') {
+        partsToGenerate = fullList.slice(Math.max(0, start - 1), end);
+      }
     }
-    setVideoData(null);
-    clearQueue();
-    setCustomParts([]);
-    setCurrentTime(0);
-    setStartTime(0);
-    setEndTime(0);
+
+    if (partsToGenerate.length === 0) {
+      showToast('No parts selected for generation.', 'error');
+      return;
+    }
+
+    partsToGenerate.forEach((part, idx) => {
+      const partNum = part.partNumber || (idx + 1);
+      const filename = generateClipFilename(
+        textSettings.movieName || 'Clip',
+        partNum,
+        totalPossibleParts,
+        exportSettings.format || 'mp4',
+        textSettings.zeroPad
+      );
+
+      addJob({
+        id: `job-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 6)}`,
+        name: filename,
+        partNumber: partNum,
+        startTime: part.startTime,
+        endTime: part.endTime,
+        duration: part.endTime - part.startTime,
+        videoData,
+        cropSettings,
+        bgSettings,
+        textSettings: {
+          ...textSettings,
+          currentPart: partNum,
+          totalParts: totalPossibleParts
+        },
+        logoSettings,
+        effectsSettings,
+        audioSettings,
+        exportSettings
+      });
+    });
+
+    showToast(`Added ${partsToGenerate.length} clips to processing queue!`, 'success');
+  };
+
+  const handleApplyToAll = () => {
+    showToast('Current styling & presets will be applied to all generated parts!', 'success');
+  };
+
+  const handleDownloadAllZip = async () => {
+    if (completedClips.length === 0) {
+      showToast('No completed clips to download.', 'error');
+      return;
+    }
+    try {
+      await downloadAllZip(textSettings.movieName || 'Video_Clips');
+      showToast('Downloaded all clips in a single ZIP file!', 'success');
+    } catch (err) {
+      showToast('Failed to create ZIP file. Try downloading clips individually.', 'error');
+    }
   };
 
   const handleCropReset = () => {
-    setCropSettings((prev) => ({
-      ...prev,
+    setCropSettings({
+      mode: '9:16',
+      fillMode: 'fit',
+      customWidth: 60,
+      customHeight: 85,
       x: 0,
       y: 0,
-      zoom: 1
-    }));
-    showToast('Framing reset to center', 'info');
+      zoom: 1,
+      faceTracking: false
+    });
+    showToast('Crop settings reset to default.', 'info');
   };
 
   const handleEffectsReset = () => {
@@ -209,119 +299,16 @@ export default function App() {
       fadeOut: false,
       fadeOutDuration: 0.5
     });
-    showToast('Visual effects reset to default', 'info');
-  };
-
-  // Derive total possible parts
-  const selectedDuration = Math.max(0, endTime - startTime);
-  const effectivePartsList = customParts && customParts.length > 0
-    ? customParts
-    : [];
-  const totalPossibleParts = effectivePartsList.length > 0
-    ? effectivePartsList.length
-    : selectedDuration > 0
-    ? Math.max(1, Math.ceil(selectedDuration / Math.max(5, clipDuration)))
-    : 1;
-
-  // Generate Queue of Clips based on custom parts list or auto segmentation
-  const handleGenerateQueue = (filterOptions = {}) => {
-    if (!videoData) return;
-
-    if (selectedDuration <= 0) {
-      showToast('Please select a valid timeline range greater than 0 seconds', 'error');
-      return;
-    }
-
-    let partsToProcess = [];
-
-    if (customParts && customParts.length > 0) {
-      partsToProcess = customParts.map((p, idx) => ({
-        partNumber: p.partNumber || idx + 1,
-        startTime: p.startTime,
-        endTime: p.endTime,
-        duration: Math.max(0.5, p.endTime - p.startTime),
-        title: p.title || `Part ${p.partNumber || idx + 1}`
-      }));
-    } else {
-      const segLength = Math.max(5, clipDuration);
-      let curStart = startTime;
-      let partIdx = 1;
-
-      while (curStart < endTime) {
-        const curEnd = Math.min(endTime, curStart + segLength);
-        if (curEnd - curStart >= 0.5) {
-          partsToProcess.push({
-            partNumber: partIdx,
-            startTime: curStart,
-            endTime: curEnd,
-            duration: curEnd - curStart,
-            title: `Part ${partIdx}`
-          });
-          partIdx++;
-        }
-        curStart = curEnd;
-      }
-    }
-
-    if (filterOptions.singlePartNumber) {
-      partsToProcess = partsToProcess.filter((p) => p.partNumber === filterOptions.singlePartNumber);
-    } else if (filterOptions.selectedPartNumbers && Array.isArray(filterOptions.selectedPartNumbers)) {
-      partsToProcess = partsToProcess.filter((p) => filterOptions.selectedPartNumbers.includes(p.partNumber));
-    }
-
-    if (partsToProcess.length === 0) {
-      showToast('No parts matching the selection were found.', 'warning');
-      return;
-    }
-
-    const newJobs = partsToProcess.map((p) => {
-      const filename = generateClipFilename({
-        movieName: textSettings.movieName,
-        partNumber: p.partNumber,
-        zeroPad: textSettings.zeroPad,
-        format: exportSettings.format || 'mp4'
-      });
-
-      return {
-        id: `job_${Date.now()}_${p.partNumber}_${Math.random().toString(36).substr(2, 6)}`,
-        partNumber: p.partNumber,
-        name: filename,
-        startTime: p.startTime,
-        endTime: p.endTime,
-        duration: p.duration,
-        status: 'pending',
-        progress: 0,
-        settings: {
-          crop: { ...cropSettings },
-          background: { ...bgSettings },
-          text: { ...textSettings, startPart: p.partNumber },
-          logo: { ...logoSettings },
-          effects: { ...effectsSettings },
-          audio: { ...audioSettings },
-          export: { ...exportSettings }
-        }
-      };
-    });
-
-    setAndStartQueue(newJobs, videoData.url, exportSettings.concurrency || 1);
-    showToast(`Started batch rendering ${newJobs.length} clips in background`, 'success');
-  };
-
-  const handleApplyToAll = () => {
-    showToast('Current styles, overlays and crop settings applied to all clips!', 'success');
-  };
-
-  const handleDownloadAllZip = () => {
-    downloadAllZip(textSettings.movieName || 'Movie_Clips');
+    showToast('Effects reset to normal.', 'info');
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-orange-500 selection:text-white">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-orange-500/30 selection:text-orange-200 pb-safe">
       {/* Toast Notification */}
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 animate-bounce">
+        <div className="fixed bottom-4 sm:bottom-6 left-4 right-4 sm:left-auto sm:right-6 z-50 animate-bounce">
           <div
-            className={`flex items-center space-x-3 px-4 py-3 rounded-xl border shadow-2xl backdrop-blur-md ${
+            className={`flex items-center justify-between sm:justify-start space-x-3 px-4 py-3 rounded-xl border shadow-2xl backdrop-blur-md ${
               toastMessage.type === 'success'
                 ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
                 : toastMessage.type === 'error'
@@ -329,15 +316,17 @@ export default function App() {
                 : 'bg-orange-500/10 border-orange-500/30 text-orange-300'
             }`}
           >
-            {toastMessage.type === 'success' ? (
-              <Check className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-            ) : (
-              <Info className="w-4 h-4 text-orange-400 flex-shrink-0" />
-            )}
-            <span className="text-xs font-medium">{toastMessage.message}</span>
+            <div className="flex items-center space-x-2.5 min-w-0">
+              {toastMessage.type === 'success' ? (
+                <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+              ) : (
+                <Info className="w-4 h-4 text-orange-400 shrink-0" />
+              )}
+              <span className="text-xs font-medium truncate">{toastMessage.message}</span>
+            </div>
             <button
               onClick={() => setToastMessage(null)}
-              className="p-1 hover:bg-white/10 rounded-md cursor-pointer ml-2"
+              className="p-1 hover:bg-white/10 rounded-md cursor-pointer ml-2 shrink-0 touch-manipulation"
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -349,7 +338,7 @@ export default function App() {
       <Header />
 
       {/* Main Application Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6">
         {/* Step 1: Video Uploader Area */}
         <section className="space-y-2">
           <VideoUploader onVideoSelect={handleVideoSelect} currentVideo={videoData} />
@@ -358,9 +347,51 @@ export default function App() {
         {/* Workspace Grid (When video is loaded) */}
         {videoData && (
           <>
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Mobile View Mode Navigation Switcher (visible on screens < lg) */}
+            <div className="lg:hidden bg-slate-900 border border-slate-800 rounded-2xl p-1.5 grid grid-cols-3 gap-1 shadow-lg touch-manipulation sticky top-16 z-30 backdrop-blur-md bg-slate-900/95">
+              <button
+                onClick={() => setMobileView('preview')}
+                className={`py-2 px-1 text-xs font-semibold rounded-xl flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
+                  mobileView === 'preview'
+                    ? 'bg-orange-500 text-white shadow-md'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Film className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">Preview &amp; Cut</span>
+              </button>
+
+              <button
+                onClick={() => setMobileView('style')}
+                className={`py-2 px-1 text-xs font-semibold rounded-xl flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
+                  mobileView === 'style'
+                    ? 'bg-orange-500 text-white shadow-md'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Palette className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">Style &amp; Text</span>
+              </button>
+
+              <button
+                onClick={() => setMobileView('queue')}
+                className={`py-2 px-1 text-xs font-semibold rounded-xl flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
+                  mobileView === 'queue'
+                    ? 'bg-orange-500 text-white shadow-md'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">
+                  Queue {queue.length > 0 || completedClips.length > 0 ? `(${queue.length + completedClips.length})` : ''}
+                </span>
+              </button>
+            </div>
+
+            {/* Desktop 2-Column Workspace Layout (and Responsive Mobile Panels) */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
               {/* Left Column: Player & Interactive Canvas */}
-              <div className="lg:col-span-7 space-y-6">
+              <div className={`lg:col-span-7 space-y-4 sm:space-y-6 ${mobileView === 'preview' ? 'block' : 'hidden lg:block'}`}>
                 <VideoPreview
                   videoData={videoData}
                   currentTime={currentTime}
@@ -394,7 +425,7 @@ export default function App() {
               </div>
 
               {/* Right Column: Multi-tab Editing Panel */}
-              <div className="lg:col-span-5 space-y-6">
+              <div className={`lg:col-span-5 space-y-4 sm:space-y-6 ${mobileView === 'style' ? 'block' : 'hidden lg:block'}`}>
                 <EditorTabs
                   cropSettings={cropSettings}
                   onCropChange={setCropSettings}
@@ -422,7 +453,7 @@ export default function App() {
             </div>
 
             {/* Bottom Row: Batch Processing Queue & Output */}
-            <div className="space-y-6 pt-2">
+            <div className={`space-y-4 sm:space-y-6 pt-1 sm:pt-2 ${mobileView === 'queue' ? 'block' : 'hidden lg:block'}`}>
               <ProcessingQueue
                 queue={queue}
                 onGenerateQueue={handleGenerateQueue}
@@ -449,29 +480,29 @@ export default function App() {
 
       {/* Completed Clip Modal Preview */}
       {previewClipModal && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-150">
-            <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-              <span className="font-semibold text-sm text-white truncate max-w-xs">{previewClipModal.name}</span>
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-150 max-h-[92vh] flex flex-col">
+            <div className="p-3.5 sm:p-4 border-b border-slate-800 flex items-center justify-between">
+              <span className="font-semibold text-xs sm:text-sm text-white truncate max-w-[200px] sm:max-w-xs">{previewClipModal.name}</span>
               <button
                 onClick={() => setPreviewClipModal(null)}
-                className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+                className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer touch-manipulation"
               >
-                <X className="w-4 h-4" />
+                <X className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
             </div>
-            <div className="p-4 bg-black flex justify-center">
+            <div className="p-3 sm:p-4 bg-black flex justify-center flex-1 min-h-0">
               <video
                 src={previewClipModal.outputUrl}
                 controls
                 autoPlay
-                className="max-h-[60vh] rounded-lg shadow-lg"
+                className="max-h-[55vh] rounded-lg shadow-lg w-auto object-contain"
               />
             </div>
-            <div className="p-4 border-t border-slate-800 flex justify-end space-x-2">
+            <div className="p-3.5 sm:p-4 border-t border-slate-800 flex justify-end">
               <button
                 onClick={() => downloadClip(previewClipModal)}
-                className="px-4 py-2 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-medium text-xs rounded-xl shadow-lg shadow-orange-500/20 cursor-pointer"
+                className="w-full sm:w-auto px-4 py-2.5 sm:py-2 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 active:scale-98 text-white font-semibold text-xs rounded-xl shadow-lg shadow-orange-500/20 cursor-pointer touch-manipulation flex items-center justify-center space-x-1.5"
               >
                 Download This Part
               </button>

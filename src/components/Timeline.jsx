@@ -188,38 +188,38 @@ export default function Timeline({
     : generateDefaultPartsList(splitMode, numParts, clipDuration);
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
+    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 sm:p-5 shadow-lg space-y-4">
       {/* Top Header info */}
-      <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
+      <div className="flex flex-wrap items-center justify-between gap-2.5 pb-3 border-b border-slate-800">
         <div className="flex items-center space-x-2">
-          <Scissors className="w-5 h-5 text-orange-400" />
-          <h3 className="font-semibold text-sm text-white">Timeline &amp; Range Selection</h3>
+          <Scissors className="w-4 h-4 sm:w-5 sm:h-5 text-orange-400" />
+          <h3 className="font-semibold text-xs sm:text-sm text-white">Timeline &amp; Range Selection</h3>
         </div>
 
-        <div className="flex items-center space-x-3 text-xs">
+        <div className="flex flex-wrap items-center gap-2 text-xs">
           <button
             onClick={handleFullVideoConvert}
-            className="px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 rounded-lg flex items-center space-x-1.5 transition-colors cursor-pointer"
+            className="px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 active:scale-95 border border-emerald-500/30 text-emerald-300 rounded-lg flex items-center space-x-1.5 transition-all cursor-pointer touch-manipulation text-[11px] sm:text-xs"
             title="Select entire video as 1 complete clip"
           >
             <Film className="w-3.5 h-3.5" />
-            <span>Convert Full Video (1 Part)</span>
+            <span>Full Video (1 Part)</span>
           </button>
 
-          <span className="text-slate-400 hidden sm:inline">
+          <span className="text-slate-400 hidden md:inline text-xs">
             Range: <strong className="text-white font-mono">{formatTime(startTime)}</strong> &rarr;{' '}
             <strong className="text-white font-mono">{formatTime(endTime)}</strong>
           </span>
-          <span className="px-2 py-0.5 bg-orange-500/10 border border-orange-500/30 text-orange-300 rounded font-mono font-medium">
+          <span className="px-2 py-0.5 bg-orange-500/10 border border-orange-500/30 text-orange-300 rounded font-mono font-medium text-[11px] sm:text-xs">
             {formatTime(selectedDuration, true)}
           </span>
         </div>
       </div>
 
       {/* Visual Scrubber Timeline Track */}
-      <div className="relative pt-4 pb-2">
+      <div className="relative pt-2 sm:pt-4 pb-2">
         {/* Main Track Background */}
-        <div className="relative h-12 bg-slate-950 rounded-xl overflow-hidden border border-slate-800 cursor-pointer">
+        <div className="relative h-10 sm:h-12 bg-slate-950 rounded-xl overflow-hidden border border-slate-800 cursor-pointer">
           {/* Active Range Highlight */}
           <div
             className="absolute top-0 bottom-0 bg-gradient-to-r from-orange-500/30 via-amber-500/20 to-orange-500/30 border-y border-orange-500/60 transition-all pointer-events-none"
@@ -239,10 +239,10 @@ export default function Timeline({
                 return (
                   <div
                     key={part.id || idx}
-                    className="absolute top-0 bottom-0 border-r border-dashed border-amber-400/40 flex items-end justify-start pl-1.5 pb-1"
+                    className="absolute top-0 bottom-0 border-r border-dashed border-amber-400/40 flex items-end justify-start pl-1 pb-0.5"
                     style={{ left: `${segLeftPct}%`, width: `${Math.max(1, segWidthPct)}%` }}
                   >
-                    <span className="text-[9px] font-mono text-amber-300/90 bg-black/70 px-1 rounded truncate border border-amber-500/20">
+                    <span className="text-[8px] sm:text-[9px] font-mono text-amber-300/90 bg-black/80 px-1 rounded truncate border border-amber-500/20">
                       P{part.partNumber || idx + 1}
                     </span>
                   </div>
@@ -261,11 +261,11 @@ export default function Timeline({
         </div>
 
         {/* Global Start / End Range Sliders */}
-        <div className="relative mt-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="space-y-1">
+        <div className="relative mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+          <div className="space-y-1 bg-slate-950/40 p-2.5 sm:p-0 rounded-xl border sm:border-0 border-slate-800/80">
             <div className="flex justify-between text-xs">
               <span className="text-slate-400 font-medium">Video Start Point</span>
-              <span className="font-mono text-amber-400">{formatTime(startTime)}</span>
+              <span className="font-mono text-amber-400 font-bold">{formatTime(startTime)}</span>
             </div>
             <input
               type="range"
@@ -277,14 +277,14 @@ export default function Timeline({
                 const val = parseFloat(e.target.value);
                 if (val < endTime) onStartChange(val);
               }}
-              className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500"
+              className="w-full h-2 sm:h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500 touch-manipulation"
             />
           </div>
 
-          <div className="space-y-1">
+          <div className="space-y-1 bg-slate-950/40 p-2.5 sm:p-0 rounded-xl border sm:border-0 border-slate-800/80">
             <div className="flex justify-between text-xs">
               <span className="text-slate-400 font-medium">Video End Point</span>
-              <span className="font-mono text-amber-400">{formatTime(endTime)}</span>
+              <span className="font-mono text-amber-400 font-bold">{formatTime(endTime)}</span>
             </div>
             <input
               type="range"
@@ -296,7 +296,7 @@ export default function Timeline({
                 const val = parseFloat(e.target.value);
                 if (val > startTime) onEndChange(val);
               }}
-              className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500"
+              className="w-full h-2 sm:h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500 touch-manipulation"
             />
           </div>
         </div>
@@ -307,45 +307,45 @@ export default function Timeline({
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center space-x-2">
             <Layers className="w-4 h-4 text-slate-400" />
-            <span className="text-xs font-medium text-slate-300">Quick Auto-Split:</span>
+            <span className="text-xs font-semibold text-slate-300">Quick Auto-Split:</span>
           </div>
 
-          <div className="inline-flex rounded-lg bg-slate-950 p-0.5 border border-slate-800">
+          <div className="grid grid-cols-2 sm:inline-flex w-full sm:w-auto rounded-lg bg-slate-950 p-0.5 border border-slate-800">
             <button
               onClick={() => handleSplitModeChange('duration')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer flex items-center space-x-1.5 ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer flex items-center justify-center space-x-1.5 touch-manipulation ${
                 splitMode === 'duration'
                   ? 'bg-orange-500 text-white font-semibold shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              <Clock className="w-3 h-3" />
+              <Clock className="w-3 h-3 shrink-0" />
               <span>By Length (sec)</span>
             </button>
             <button
               onClick={() => handleSplitModeChange('count')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer flex items-center space-x-1.5 ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer flex items-center justify-center space-x-1.5 touch-manipulation ${
                 splitMode === 'count'
                   ? 'bg-orange-500 text-white font-semibold shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              <Hash className="w-3 h-3" />
-              <span>By Number of Parts</span>
+              <Hash className="w-3 h-3 shrink-0" />
+              <span>By Part Count</span>
             </button>
           </div>
         </div>
 
         {splitMode === 'duration' ? (
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center space-x-2">
-              <span className="text-xs font-medium text-slate-300">Preset Length:</span>
+            <div className="flex items-center space-x-2 flex-wrap gap-1.5">
+              <span className="text-xs font-medium text-slate-300">Presets:</span>
               <div className="inline-flex rounded-lg bg-slate-950 p-0.5 border border-slate-800">
                 {[15, 30, 60, 90].map((sec) => (
                   <button
                     key={sec}
                     onClick={() => setPresetDuration(sec)}
-                    className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer ${
+                    className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer touch-manipulation ${
                       clipDuration === sec
                         ? 'bg-orange-500 text-white font-semibold shadow-sm'
                         : 'text-slate-400 hover:text-slate-200'
@@ -371,7 +371,7 @@ export default function Timeline({
                   const fresh = generateDefaultPartsList('duration', numParts, val);
                   if (onCustomPartsChange) onCustomPartsChange(fresh);
                 }}
-                className="w-16 bg-slate-950 border border-slate-800 text-white font-mono text-xs px-2 py-1 rounded-md text-center focus:border-orange-500 focus:outline-none"
+                className="w-16 bg-slate-950 border border-slate-800 text-white font-mono text-xs px-2 py-1.5 rounded-lg text-center focus:border-orange-500 focus:outline-none"
               />
               <div className="text-xs text-slate-400 pl-1">
                 &rarr; <span className="text-amber-300 font-semibold">{displayPartsList.length} part{displayPartsList.length > 1 ? 's' : ''}</span>
@@ -379,8 +379,8 @@ export default function Timeline({
             </div>
           </div>
         ) : (
-          <div className="flex flex-wrap items-center gap-4">
-            <div className="flex items-center space-x-3 bg-slate-950/70 border border-slate-800 rounded-xl px-4 py-2.5">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center space-x-3 bg-slate-950/70 border border-slate-800 rounded-xl px-3.5 py-2">
               <Hash className="w-4 h-4 text-orange-400 shrink-0" />
               <div className="flex items-center space-x-2">
                 <span className="text-xs text-slate-300">Parts count:</span>
@@ -395,12 +395,12 @@ export default function Timeline({
               </div>
             </div>
 
-            <div className="flex items-center space-x-1.5">
+            <div className="flex items-center space-x-1.5 flex-wrap gap-1">
               {[1, 2, 3, 5, 10].map((n) => (
                 <button
                   key={n}
                   onClick={() => handleNumPartsChange(n)}
-                  className={`px-2 py-1 text-xs rounded-lg border transition-colors cursor-pointer ${
+                  className={`px-2.5 py-1 text-xs rounded-lg border transition-colors cursor-pointer touch-manipulation ${
                     numParts === n
                       ? 'bg-orange-500/10 border-orange-500 text-orange-300 font-semibold'
                       : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
@@ -416,29 +416,29 @@ export default function Timeline({
 
       {/* ── MANUAL SECONDS EDITOR FOR EACH PART ── */}
       <div className="pt-2 border-t border-slate-800 space-y-3">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <button
             onClick={() => setShowManualEditor(!showManualEditor)}
-            className="flex items-center space-x-2 text-xs font-semibold text-white hover:text-orange-400 cursor-pointer transition-colors"
+            className="flex items-center space-x-1.5 text-xs font-semibold text-white hover:text-orange-400 cursor-pointer transition-colors touch-manipulation"
           >
             <ListOrdered className="w-4 h-4 text-orange-400" />
-            <span>Detailed Parts Time Table ({displayPartsList.length} Parts)</span>
+            <span>Parts Time Table ({displayPartsList.length} Parts)</span>
             {showManualEditor ? <ChevronUp className="w-3.5 h-3.5 text-slate-400" /> : <ChevronDown className="w-3.5 h-3.5 text-slate-400" />}
           </button>
 
           <div className="flex items-center space-x-2">
             <button
               onClick={handleResetPartsToEqual}
-              className="px-2.5 py-1 text-[11px] text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg flex items-center space-x-1 transition-colors cursor-pointer"
+              className="px-2.5 py-1 text-[11px] text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg flex items-center space-x-1 transition-colors cursor-pointer touch-manipulation"
               title="Reset all parts back to equal intervals"
             >
               <RefreshCw className="w-3 h-3" />
-              <span>Reset to Equal</span>
+              <span>Reset</span>
             </button>
 
             <button
               onClick={handleAddPart}
-              className="px-2.5 py-1 text-[11px] font-semibold text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 rounded-lg flex items-center space-x-1 transition-colors cursor-pointer"
+              className="px-2.5 py-1 text-[11px] font-semibold text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 rounded-lg flex items-center space-x-1 transition-colors cursor-pointer touch-manipulation"
             >
               <Plus className="w-3 h-3" />
               <span>Add Part</span>
@@ -451,62 +451,82 @@ export default function Timeline({
             {displayPartsList.map((part, index) => (
               <div
                 key={part.id || index}
-                className="bg-slate-950/80 border border-slate-800/90 hover:border-slate-700 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 transition-colors"
+                className="bg-slate-950/80 border border-slate-800/90 hover:border-slate-700 rounded-xl p-3 space-y-2 sm:space-y-0 sm:flex sm:items-center sm:justify-between sm:gap-3 transition-colors"
               >
-                {/* Part Badge & Seek Preview */}
-                <div className="flex items-center space-x-2 min-w-[90px]">
-                  <span className="w-7 h-7 rounded-lg bg-orange-500/10 border border-orange-500/30 text-orange-300 font-bold text-xs flex items-center justify-center font-mono">
-                    P{part.partNumber || index + 1}
-                  </span>
-                  <button
-                    onClick={() => handleSeekToPart(part.startTime)}
-                    className="p-1 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-md transition-colors cursor-pointer"
-                    title={`Jump preview to ${formatTime(part.startTime)}`}
-                  >
-                    <Play className="w-3.5 h-3.5 fill-current" />
-                  </button>
-                </div>
-
-                {/* Editable Start Second */}
-                <div className="flex items-center space-x-2">
-                  <span className="text-xs text-slate-400">Start (sec):</span>
-                  <div className="flex items-center space-x-1">
-                    <input
-                      type="number"
-                      step="0.5"
-                      min="0"
-                      max={part.endTime || duration}
-                      value={part.startTime}
-                      onChange={(e) => handlePartTimeChange(index, 'startTime', e.target.value)}
-                      className="w-20 bg-slate-900 border border-slate-700 text-white font-mono text-xs px-2 py-1 rounded-lg text-center font-semibold focus:border-orange-500 focus:outline-none"
-                    />
-                    <span className="text-[10px] font-mono text-slate-500">
-                      ({formatTime(part.startTime)})
+                {/* Top Row in mobile: Part Badge & Seek Preview & Duration Badge & Delete */}
+                <div className="flex items-center justify-between sm:justify-start sm:space-x-2">
+                  <div className="flex items-center space-x-2">
+                    <span className="w-7 h-7 rounded-lg bg-orange-500/10 border border-orange-500/30 text-orange-300 font-bold text-xs flex items-center justify-center font-mono shrink-0">
+                      P{part.partNumber || index + 1}
                     </span>
+                    <button
+                      onClick={() => handleSeekToPart(part.startTime)}
+                      className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-md transition-colors cursor-pointer touch-manipulation"
+                      title={`Jump preview to ${formatTime(part.startTime)}`}
+                    >
+                      <Play className="w-3.5 h-3.5 fill-current" />
+                    </button>
+                  </div>
+
+                  <div className="flex items-center space-x-2 sm:hidden">
+                    <span className="px-2 py-0.5 bg-slate-900 border border-slate-800 text-amber-300 rounded font-mono text-xs">
+                      {formatTime(Math.max(0, part.endTime - part.startTime), true)}
+                    </span>
+                    {displayPartsList.length > 1 && (
+                      <button
+                        onClick={() => handleDeletePart(index)}
+                        className="p-1 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-md transition-colors cursor-pointer touch-manipulation"
+                        title="Delete this part"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
 
-                {/* Editable End Second */}
-                <div className="flex items-center space-x-2">
-                  <span className="text-xs text-slate-400">End (sec):</span>
-                  <div className="flex items-center space-x-1">
-                    <input
-                      type="number"
-                      step="0.5"
-                      min={part.startTime || 0}
-                      max={duration || 9999}
-                      value={part.endTime}
-                      onChange={(e) => handlePartTimeChange(index, 'endTime', e.target.value)}
-                      className="w-20 bg-slate-900 border border-slate-700 text-white font-mono text-xs px-2 py-1 rounded-lg text-center font-semibold focus:border-orange-500 focus:outline-none"
-                    />
-                    <span className="text-[10px] font-mono text-slate-500">
-                      ({formatTime(part.endTime)})
-                    </span>
+                {/* Inputs Grid */}
+                <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 sm:gap-3">
+                  {/* Editable Start Second */}
+                  <div className="flex items-center space-x-1.5">
+                    <span className="text-[11px] sm:text-xs text-slate-400">Start:</span>
+                    <div className="flex items-center space-x-1">
+                      <input
+                        type="number"
+                        step="0.5"
+                        min="0"
+                        max={part.endTime || duration}
+                        value={part.startTime}
+                        onChange={(e) => handlePartTimeChange(index, 'startTime', e.target.value)}
+                        className="w-16 sm:w-20 bg-slate-900 border border-slate-700 text-white font-mono text-xs px-2 py-1 rounded-lg text-center font-semibold focus:border-orange-500 focus:outline-none"
+                      />
+                      <span className="text-[10px] font-mono text-slate-500 hidden xs:inline">
+                        ({formatTime(part.startTime)})
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Editable End Second */}
+                  <div className="flex items-center space-x-1.5">
+                    <span className="text-[11px] sm:text-xs text-slate-400">End:</span>
+                    <div className="flex items-center space-x-1">
+                      <input
+                        type="number"
+                        step="0.5"
+                        min={part.startTime || 0}
+                        max={duration || 9999}
+                        value={part.endTime}
+                        onChange={(e) => handlePartTimeChange(index, 'endTime', e.target.value)}
+                        className="w-16 sm:w-20 bg-slate-900 border border-slate-700 text-white font-mono text-xs px-2 py-1 rounded-lg text-center font-semibold focus:border-orange-500 focus:outline-none"
+                      />
+                      <span className="text-[10px] font-mono text-slate-500 hidden xs:inline">
+                        ({formatTime(part.endTime)})
+                      </span>
+                    </div>
                   </div>
                 </div>
 
-                {/* Duration Badge */}
-                <div className="flex items-center space-x-2">
+                {/* Duration Badge & Delete for Tablet / Desktop */}
+                <div className="hidden sm:flex items-center space-x-2">
                   <span className="px-2 py-0.5 bg-slate-900 border border-slate-800 text-amber-300 rounded font-mono text-xs">
                     {formatTime(Math.max(0, part.endTime - part.startTime), true)}
                   </span>
@@ -514,7 +534,7 @@ export default function Timeline({
                   {displayPartsList.length > 1 && (
                     <button
                       onClick={() => handleDeletePart(index)}
-                      className="p-1 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-md transition-colors cursor-pointer"
+                      className="p-1 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-md transition-colors cursor-pointer touch-manipulation"
                       title="Delete this part"
                     >
                       <Trash2 className="w-3.5 h-3.5" />

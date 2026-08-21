@@ -127,19 +127,19 @@ export default function CropEditor({
   const currentFillMode = cropSettings.fillMode || 'fit';
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 sm:space-y-6">
       {/* Platform Aspect Ratio Selector */}
-      <div className="space-y-3">
+      <div className="space-y-2.5 sm:space-y-3">
         <div className="flex items-center justify-between">
           <label className="text-xs font-semibold uppercase tracking-wider text-slate-300">
-            Platform &amp; Video Aspect Ratio
+            Platform &amp; Video Format
           </label>
-          <span className="text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded font-mono">
+          <span className="text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded font-mono font-medium">
             {currentMode.toUpperCase()}
           </span>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-2.5">
           {platformModes.map((m) => {
             const Icon = m.icon;
             const isSelected = currentMode === m.id;
@@ -147,18 +147,18 @@ export default function CropEditor({
               <button
                 key={m.id}
                 onClick={() => updateCrop('mode', m.id)}
-                className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                className={`p-3 rounded-xl border text-left transition-all cursor-pointer touch-manipulation ${
                   isSelected
                     ? 'bg-orange-500/10 border-orange-500 text-white shadow-md ring-1 ring-orange-500/40'
                     : 'bg-slate-950/70 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
                 }`}
               >
                 <div className="flex items-center justify-between mb-1">
-                  <div className="flex items-center space-x-2">
-                    <Icon className={`w-4 h-4 ${isSelected ? 'text-orange-400' : m.color}`} />
-                    <span className="font-bold text-xs text-white">{m.label}</span>
+                  <div className="flex items-center space-x-2 min-w-0">
+                    <Icon className={`w-4 h-4 shrink-0 ${isSelected ? 'text-orange-400' : m.color}`} />
+                    <span className="font-bold text-xs text-white truncate">{m.label}</span>
                   </div>
-                  <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded ${
+                  <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded shrink-0 ml-1 ${
                     isSelected
                       ? 'bg-orange-500/20 text-orange-300 font-bold border border-orange-500/30'
                       : 'bg-slate-900 text-slate-400 border border-slate-800'
@@ -174,31 +174,31 @@ export default function CropEditor({
       </div>
 
       {/* ── SMART AI FACE TRACKING TOGGLE ── */}
-      <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <div className={`w-9 h-9 rounded-xl flex items-center justify-center border ${
+      <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 sm:p-4 flex items-center justify-between gap-3">
+        <div className="flex items-center space-x-3 min-w-0">
+          <div className={`w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center border shrink-0 ${
             cropSettings.faceTracking
               ? 'bg-orange-500/10 border-orange-500/40 text-orange-400'
               : 'bg-slate-900 border-slate-800 text-slate-400'
           }`}>
-            <ScanFace className="w-5 h-5" />
+            <ScanFace className="w-4 h-4 sm:w-5 sm:h-5" />
           </div>
-          <div>
-            <div className="flex items-center space-x-2">
-              <h4 className="text-xs font-bold text-white">Smart AI Face Detection &amp; Auto-Tracking</h4>
-              <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 rounded font-mono font-semibold">
+          <div className="min-w-0">
+            <div className="flex items-center space-x-1.5 sm:space-x-2">
+              <h4 className="text-xs font-bold text-white truncate">Smart AI Face Tracking</h4>
+              <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 rounded font-mono font-semibold shrink-0">
                 LOCAL AI
               </span>
             </div>
-            <p className="text-[11px] text-slate-400 mt-0.5">
-              Automatically detects and keeps the active speaker centered in vertical clips.
+            <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+              Auto-centers the active speaker in vertical clips.
             </p>
           </div>
         </div>
 
         <button
           onClick={() => updateCrop('faceTracking', !cropSettings.faceTracking)}
-          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer shrink-0 ml-3 ${
+          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer shrink-0 touch-manipulation ${
             cropSettings.faceTracking ? 'bg-orange-500' : 'bg-slate-800'
           }`}
         >
@@ -212,56 +212,56 @@ export default function CropEditor({
 
       {/* ── 9:16 MOBILE FORMAT (Instagram Reel / Shorts / TikTok) ── */}
       {currentMode === '9:16' && (
-        <div className="space-y-3 bg-slate-950/80 border border-slate-800 rounded-xl p-4">
-          <div className="flex items-center justify-between">
+        <div className="space-y-3 bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 sm:p-4">
+          <div className="flex items-center justify-between gap-2">
             <label className="text-xs font-semibold uppercase tracking-wider text-slate-300 flex items-center space-x-1.5">
-              <Smartphone className="w-4 h-4 text-orange-400" />
-              <span>9:16 Reel &amp; Shorts Display Style</span>
+              <Smartphone className="w-4 h-4 text-orange-400 shrink-0" />
+              <span>9:16 Display Style</span>
             </label>
-            <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded font-mono">
-              {currentFillMode === 'fit' ? 'NO CROPPING (FULL HORIZONTAL)' : 'ZOOM CROP'}
+            <span className="text-[9px] sm:text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-1.5 sm:px-2 py-0.5 rounded font-mono shrink-0">
+              {currentFillMode === 'fit' ? 'FIT (NO CROP)' : 'ZOOM CROP'}
             </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3">
             {/* Fit Mode - Full Horizontal Video */}
             <button
               onClick={() => updateCrop('fillMode', 'fit')}
-              className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer relative ${
+              className={`p-3 sm:p-3.5 rounded-xl border text-left transition-all cursor-pointer relative touch-manipulation ${
                 currentFillMode === 'fit'
                   ? 'bg-orange-500/10 border-orange-500 text-white shadow-md ring-1 ring-orange-500/40'
                   : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
               }`}
             >
-              <div className="flex items-center justify-between mb-1.5">
+              <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center space-x-2">
-                  <Tv className="w-4 h-4 text-emerald-400" />
-                  <span className="font-bold text-xs text-white">Full Horizontal (No Crop)</span>
+                  <Tv className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span className="font-bold text-xs text-white">Full Horizontal (Fit)</span>
                 </div>
-                <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-1.5 py-0.5 rounded font-bold">
-                  RECOMMENDED
+                <span className="text-[8px] sm:text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-1.5 py-0.5 rounded font-bold">
+                  POPULAR
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 leading-relaxed">
-                Shows the <strong>complete widescreen video</strong> in the center with backdrop image/blur above &amp; below. Zero pixels cut from sides.
+                Shows <strong>entire widescreen video</strong> with backdrop image/blur above &amp; below. Zero pixels cropped.
               </p>
             </button>
 
             {/* Fill Mode - Zoom to Full Screen */}
             <button
               onClick={() => updateCrop('fillMode', 'fill')}
-              className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
+              className={`p-3 sm:p-3.5 rounded-xl border text-left transition-all cursor-pointer touch-manipulation ${
                 currentFillMode === 'fill'
                   ? 'bg-orange-500/10 border-orange-500 text-white shadow-md ring-1 ring-orange-500/40'
                   : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
               }`}
             >
-              <div className="flex items-center space-x-2 mb-1.5">
-                <Maximize2 className="w-4 h-4 text-orange-400" />
+              <div className="flex items-center space-x-2 mb-1">
+                <Maximize2 className="w-4 h-4 text-orange-400 shrink-0" />
                 <span className="font-bold text-xs text-white">Zoom to Fill Screen</span>
               </div>
               <p className="text-[11px] text-slate-400 leading-relaxed">
-                Zooms to fill 100% of the vertical display. Left and right sides are cropped.
+                Zooms to fill 100% of vertical screen. Left and right sides are cropped.
               </p>
             </button>
           </div>
@@ -270,15 +270,15 @@ export default function CropEditor({
 
       {/* ── MANUAL FREEFORM CROP CONTROLS (Active in Custom Mode) ── */}
       {currentMode === 'custom' && (
-        <div className="space-y-4 bg-slate-950/90 border border-slate-800 rounded-xl p-4">
+        <div className="space-y-4 bg-slate-950/90 border border-slate-800 rounded-xl p-3.5 sm:p-4">
           <div className="flex items-center justify-between">
             <label className="text-xs font-semibold uppercase tracking-wider text-slate-300 flex items-center space-x-1.5">
-              <Crop className="w-4 h-4 text-orange-400" />
+              <Crop className="w-4 h-4 text-orange-400 shrink-0" />
               <span>Manual Freeform Crop Box</span>
             </label>
             <button
               onClick={onReset}
-              className="text-xs text-slate-400 hover:text-white flex items-center space-x-1 cursor-pointer"
+              className="text-xs text-slate-400 hover:text-white flex items-center space-x-1 cursor-pointer touch-manipulation"
             >
               <RotateCcw className="w-3 h-3" />
               <span>Reset</span>
@@ -286,16 +286,16 @@ export default function CropEditor({
           </div>
 
           <p className="text-[11px] text-slate-400">
-            Drag the 8 corner and edge handles directly on the video player or use the sliders below:
+            Drag the 8 corner and edge handles directly on the video player or adjust below:
           </p>
 
           {/* Width & Height Sliders */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <div className="space-y-1">
               <div className="flex justify-between text-xs text-slate-300">
                 <span className="flex items-center space-x-1">
                   <MoveHorizontal className="w-3 h-3 text-orange-400" />
-                  <span>Crop Box Width</span>
+                  <span>Width</span>
                 </span>
                 <span className="font-mono text-amber-400 font-bold">{cropSettings.customWidth ?? 60}%</span>
               </div>
@@ -305,7 +305,7 @@ export default function CropEditor({
                 max="100"
                 value={cropSettings.customWidth ?? 60}
                 onChange={(e) => updateCrop('customWidth', parseInt(e.target.value))}
-                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500"
+                className="w-full h-2 sm:h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500 touch-manipulation"
               />
             </div>
 
@@ -313,7 +313,7 @@ export default function CropEditor({
               <div className="flex justify-between text-xs text-slate-300">
                 <span className="flex items-center space-x-1">
                   <MoveVertical className="w-3 h-3 text-orange-400" />
-                  <span>Crop Box Height</span>
+                  <span>Height</span>
                 </span>
                 <span className="font-mono text-amber-400 font-bold">{cropSettings.customHeight ?? 85}%</span>
               </div>
@@ -323,13 +323,13 @@ export default function CropEditor({
                 max="100"
                 value={cropSettings.customHeight ?? 85}
                 onChange={(e) => updateCrop('customHeight', parseInt(e.target.value))}
-                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500"
+                className="w-full h-2 sm:h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500 touch-manipulation"
               />
             </div>
           </div>
 
           {/* Position X, Y & Zoom */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2 border-t border-slate-900">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 pt-2 border-t border-slate-900">
             <div className="space-y-1">
               <div className="flex justify-between text-xs text-slate-400">
                 <span>Center X</span>
@@ -341,7 +341,7 @@ export default function CropEditor({
                 max="200"
                 value={cropSettings.x || 0}
                 onChange={(e) => updateCrop('x', parseInt(e.target.value))}
-                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500"
+                className="w-full h-2 sm:h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500 touch-manipulation"
               />
             </div>
 
@@ -356,7 +356,7 @@ export default function CropEditor({
                 max="200"
                 value={cropSettings.y || 0}
                 onChange={(e) => updateCrop('y', parseInt(e.target.value))}
-                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500"
+                className="w-full h-2 sm:h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500 touch-manipulation"
               />
             </div>
 
@@ -372,20 +372,20 @@ export default function CropEditor({
                 step="0.05"
                 value={cropSettings.zoom || 1}
                 onChange={(e) => updateCrop('zoom', parseFloat(e.target.value))}
-                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500"
+                className="w-full h-2 sm:h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500 touch-manipulation"
               />
             </div>
           </div>
 
           {/* Snap Alignment Shortcuts */}
           <div className="pt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-900">
-            <div className="flex items-center space-x-1.5">
-              <span className="text-xs text-slate-400">Snap to:</span>
+            <div className="flex items-center space-x-1.5 flex-wrap gap-1">
+              <span className="text-xs text-slate-400 mr-1">Snap:</span>
               {['center', 'left', 'right', 'top', 'bottom'].map((pos) => (
                 <button
                   key={pos}
                   onClick={() => setAlignment(pos)}
-                  className="px-2.5 py-1 text-xs capitalize bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 rounded-md transition-colors cursor-pointer"
+                  className="px-2.5 py-1 text-xs capitalize bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 rounded-md transition-colors cursor-pointer touch-manipulation"
                 >
                   {pos}
                 </button>
@@ -400,7 +400,7 @@ export default function CropEditor({
                 updateCrop('y', 0);
                 updateCrop('zoom', 1);
               }}
-              className="px-3 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-amber-300 rounded-lg border border-slate-700 cursor-pointer"
+              className="px-3 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-amber-300 rounded-lg border border-slate-700 cursor-pointer touch-manipulation"
             >
               Full Frame
             </button>
@@ -410,7 +410,7 @@ export default function CropEditor({
 
       {/* Manual Zoom & Pan for other aspect ratios */}
       {currentMode !== 'custom' && (currentFillMode === 'fill' || currentMode !== '9:16') && currentMode !== 'original' && (
-        <div className="space-y-4 bg-slate-950/60 border border-slate-800/80 rounded-xl p-4">
+        <div className="space-y-3 sm:space-y-4 bg-slate-950/60 border border-slate-800/80 rounded-xl p-3.5 sm:p-4">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center space-x-1.5">
               <Move className="w-3.5 h-3.5" />
@@ -418,14 +418,14 @@ export default function CropEditor({
             </span>
             <button
               onClick={onReset}
-              className="text-xs text-slate-400 hover:text-white flex items-center space-x-1 cursor-pointer"
+              className="text-xs text-slate-400 hover:text-white flex items-center space-x-1 cursor-pointer touch-manipulation"
             >
               <RotateCcw className="w-3 h-3" />
               <span>Reset</span>
             </button>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
             <div className="space-y-1">
               <div className="flex justify-between text-xs text-slate-400">
                 <span>Horizontal (X)</span>
@@ -437,7 +437,7 @@ export default function CropEditor({
                 max="200"
                 value={cropSettings.x || 0}
                 onChange={(e) => updateCrop('x', parseInt(e.target.value))}
-                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500"
+                className="w-full h-2 sm:h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500 touch-manipulation"
               />
             </div>
 
@@ -452,7 +452,7 @@ export default function CropEditor({
                 max="200"
                 value={cropSettings.y || 0}
                 onChange={(e) => updateCrop('y', parseInt(e.target.value))}
-                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500"
+                className="w-full h-2 sm:h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500 touch-manipulation"
               />
             </div>
 
@@ -468,7 +468,7 @@ export default function CropEditor({
                 step="0.05"
                 value={cropSettings.zoom || 1}
                 onChange={(e) => updateCrop('zoom', parseFloat(e.target.value))}
-                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500"
+                className="w-full h-2 sm:h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500 touch-manipulation"
               />
             </div>
           </div>

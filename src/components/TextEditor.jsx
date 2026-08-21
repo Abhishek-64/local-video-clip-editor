@@ -61,7 +61,7 @@ export default function TextEditor({
 
   const positions = [
     { id: 'top-left', label: 'Top Left' },
-    { id: 'top-center', label: 'Top Center (Default)' },
+    { id: 'top-center', label: 'Top Center' },
     { id: 'top-right', label: 'Top Right' },
     { id: 'center', label: 'Center' },
     { id: 'bottom-left', label: 'Bottom Left' },
@@ -85,21 +85,21 @@ export default function TextEditor({
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 sm:space-y-6">
       {/* ── SECTION 1: PRIMARY TITLE & PART NUMBERING ── */}
       <div className="space-y-4">
-        <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-          <div className="flex items-center space-x-2">
-            <Type className="w-5 h-5 text-orange-400" />
-            <div>
-              <h4 className="text-sm font-semibold text-white">Title &amp; Automatic Part Numbering</h4>
-              <p className="text-xs text-slate-400">Overlays movie title and sequential part numbers on each clip</p>
+        <div className="flex items-center justify-between pb-3 border-b border-slate-800 gap-2">
+          <div className="flex items-center space-x-2 min-w-0">
+            <Type className="w-4 h-4 sm:w-5 sm:h-5 text-orange-400 shrink-0" />
+            <div className="min-w-0">
+              <h4 className="text-xs sm:text-sm font-semibold text-white truncate">Title &amp; Part Numbering</h4>
+              <p className="text-[11px] sm:text-xs text-slate-400 truncate">Overlays title and part numbers</p>
             </div>
           </div>
 
           <button
             onClick={() => updateSetting('enabled', !textSettings.enabled)}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer ${
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer shrink-0 touch-manipulation ${
               textSettings.enabled ? 'bg-orange-500' : 'bg-slate-800'
             }`}
           >
@@ -114,34 +114,34 @@ export default function TextEditor({
         {textSettings.enabled && (
           <div className="space-y-4">
             {/* Movie Name & Template */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+              <div className="space-y-1">
                 <label className="text-xs font-medium text-slate-300">Movie / Series Name</label>
                 <input
                   type="text"
                   value={textSettings.movieName}
                   onChange={(e) => updateSetting('movieName', e.target.value)}
-                  placeholder="e.g. Inception, Podcast Episode 4"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-white focus:border-orange-500 focus:outline-none"
+                  placeholder="e.g. Inception, Episode 1"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs sm:text-sm text-white focus:border-orange-500 focus:outline-none"
                 />
               </div>
 
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <label className="text-xs font-medium text-slate-300">Naming Template</label>
                 <input
                   type="text"
                   value={textSettings.template}
                   onChange={(e) => updateSetting('template', e.target.value)}
                   placeholder="{movie} - Part {part}"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-white font-mono focus:border-orange-500 focus:outline-none"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs sm:text-sm text-white font-mono focus:border-orange-500 focus:outline-none"
                 />
-                <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                  <span className="text-[10px] text-slate-500">Presets:</span>
+                <div className="flex flex-wrap items-center gap-1 pt-1">
+                  <span className="text-[10px] text-slate-500 mr-1">Presets:</span>
                   {templatePresets.map((p) => (
                     <button
                       key={p.label}
                       onClick={() => updateSetting('template', p.value)}
-                      className="px-2 py-0.5 text-[10px] bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded border border-slate-800 cursor-pointer"
+                      className="px-2 py-0.5 text-[10px] bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded border border-slate-800 cursor-pointer touch-manipulation"
                     >
                       {p.label}
                     </button>
@@ -151,9 +151,9 @@ export default function TextEditor({
             </div>
 
             {/* Part Options */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-950/60 p-3 sm:p-3.5 rounded-xl border border-slate-800">
               <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-300">Starting Part Number:</span>
+                <span className="text-xs text-slate-300">Start Part #:</span>
                 <input
                   type="number"
                   min="1"
@@ -168,7 +168,7 @@ export default function TextEditor({
                 <span className="text-xs text-slate-300">Zero-Pad Numbers:</span>
                 <button
                   onClick={() => updateSetting('zeroPad', !textSettings.zeroPad)}
-                  className={`px-3 py-1 rounded-lg text-xs font-mono font-medium border cursor-pointer ${
+                  className={`px-3 py-1 rounded-lg text-xs font-mono font-medium border cursor-pointer touch-manipulation ${
                     textSettings.zeroPad
                       ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
                       : 'bg-slate-900 border-slate-700 text-slate-400'
@@ -180,21 +180,21 @@ export default function TextEditor({
             </div>
 
             {/* Position Selector */}
-            <div className="space-y-3 bg-slate-950/60 p-4 rounded-xl border border-slate-800">
+            <div className="space-y-3 bg-slate-950/60 p-3.5 sm:p-4 rounded-xl border border-slate-800">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                  Screen Position Preset
+                  Position Preset
                 </label>
-                <span className="text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded font-mono">
-                  🖱️ DRAG ON VIDEO SUPPORTED
+                <span className="text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/30 px-1.5 py-0.5 rounded font-mono">
+                  🖱️ DRAG ON VIDEO
                 </span>
               </div>
 
               <p className="text-[11px] text-slate-400 -mt-1">
-                Click and drag the main title directly on the video player to place it anywhere!
+                Drag the title directly on the video player or choose a preset:
               </p>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2">
                 {positions.map((pos) => (
                   <button
                     key={pos.id}
@@ -204,7 +204,7 @@ export default function TextEditor({
                       else if (pos.id.startsWith('bottom')) updateSetting('customY', 88);
                       else updateSetting('customY', 50);
                     }}
-                    className={`px-3 py-2 text-xs rounded-lg border text-left transition-colors cursor-pointer ${
+                    className={`px-2.5 py-1.5 text-xs rounded-lg border text-left transition-colors cursor-pointer touch-manipulation ${
                       textSettings.position === pos.id
                         ? 'bg-orange-500/10 border-orange-500 text-white font-medium shadow-sm'
                         : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
@@ -216,12 +216,12 @@ export default function TextEditor({
               </div>
 
               {/* Fine-Tuning Sliders */}
-              <div className="pt-2 grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-slate-800/80">
+              <div className="pt-2 grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 border-t border-slate-800/80">
                 <div className="space-y-1">
                   <div className="flex justify-between text-xs text-slate-400">
                     <span className="flex items-center space-x-1">
                       <MoveVertical className="w-3 h-3 text-orange-400" />
-                      <span>Vertical Position (Y-Height)</span>
+                      <span>Vertical Height (Y)</span>
                     </span>
                     <span className="font-mono text-amber-400">{textSettings.customY ?? 10}%</span>
                   </div>
@@ -231,7 +231,7 @@ export default function TextEditor({
                     max="96"
                     value={textSettings.customY ?? 10}
                     onChange={(e) => updateSetting('customY', parseInt(e.target.value))}
-                    className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500"
+                    className="w-full h-2 sm:h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500 touch-manipulation"
                   />
                 </div>
 
@@ -239,7 +239,7 @@ export default function TextEditor({
                   <div className="flex justify-between text-xs text-slate-400">
                     <span className="flex items-center space-x-1">
                       <MoveHorizontal className="w-3 h-3 text-orange-400" />
-                      <span>Horizontal Offset (X-Axis)</span>
+                      <span>Horizontal Offset (X)</span>
                     </span>
                     <span className="font-mono text-amber-400">{textSettings.customX ?? 50}%</span>
                   </div>
@@ -249,14 +249,14 @@ export default function TextEditor({
                     max="96"
                     value={textSettings.customX ?? 50}
                     onChange={(e) => updateSetting('customX', parseInt(e.target.value))}
-                    className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500"
+                    className="w-full h-2 sm:h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500 touch-manipulation"
                   />
                 </div>
               </div>
             </div>
 
             {/* Typography & Styling */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
               <div className="space-y-1">
                 <label className="text-xs text-slate-300">Font</label>
                 <select
@@ -275,7 +275,7 @@ export default function TextEditor({
               <div className="space-y-1">
                 <div className="flex justify-between text-xs text-slate-300">
                   <span>Font Size</span>
-                  <span className="font-mono text-amber-400">{textSettings.fontSize}px</span>
+                  <span className="font-mono text-amber-400 font-bold">{textSettings.fontSize}px</span>
                 </div>
                 <input
                   type="range"
@@ -283,7 +283,7 @@ export default function TextEditor({
                   max="64"
                   value={textSettings.fontSize}
                   onChange={(e) => updateSetting('fontSize', parseInt(e.target.value))}
-                  className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500"
+                  className="w-full h-2 sm:h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500 touch-manipulation"
                 />
               </div>
 
@@ -302,7 +302,7 @@ export default function TextEditor({
             </div>
 
             {/* Outline & Background */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-950/40 p-3 rounded-xl border border-slate-800">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-950/40 p-3 rounded-xl border border-slate-800">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2">
                   <input
@@ -313,7 +313,7 @@ export default function TextEditor({
                     className="rounded bg-slate-900 border-slate-700 text-orange-500 focus:ring-0 cursor-pointer"
                   />
                   <label htmlFor="outlineToggle" className="text-xs text-slate-300 cursor-pointer">
-                    Text Outline Shadow
+                    Text Shadow Outline
                   </label>
                 </div>
                 {textSettings.outline && (
@@ -354,29 +354,29 @@ export default function TextEditor({
       </div>
 
       {/* ── SECTION 2: EXTRA CUSTOM TEXT OVERLAYS & POSITIONS ── */}
-      <div className="pt-4 border-t border-slate-800 space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <MessageSquare className="w-5 h-5 text-emerald-400" />
-            <div>
-              <h4 className="text-sm font-semibold text-white">Extra Custom Text Overlays</h4>
-              <p className="text-xs text-slate-400">Add call-to-actions, social handles, or subtitles at any position</p>
+      <div className="pt-4 border-t border-slate-800 space-y-3 sm:space-y-4">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center space-x-2 min-w-0">
+            <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400 shrink-0" />
+            <div className="min-w-0">
+              <h4 className="text-xs sm:text-sm font-semibold text-white truncate">Extra Text Overlays</h4>
+              <p className="text-[11px] sm:text-xs text-slate-400 truncate">Social handles, CTA, banners</p>
             </div>
           </div>
 
           <button
             onClick={handleAddExtraText}
-            className="px-3 py-1.5 text-xs font-semibold text-white bg-emerald-500 hover:bg-emerald-600 rounded-xl flex items-center space-x-1.5 shadow-md shadow-emerald-500/20 transition-colors cursor-pointer"
+            className="px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-white bg-emerald-500 hover:bg-emerald-600 rounded-xl flex items-center space-x-1.5 shadow-md shadow-emerald-500/20 transition-colors cursor-pointer shrink-0 touch-manipulation"
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>Add Extra Text</span>
+            <span>Add Text</span>
           </button>
         </div>
 
         {extraTexts.length === 0 ? (
           <div
             onClick={handleAddExtraText}
-            className="border-2 border-dashed border-slate-800 hover:border-slate-700 bg-slate-950/40 p-5 rounded-xl text-center cursor-pointer transition-colors"
+            className="border-2 border-dashed border-slate-800 hover:border-slate-700 bg-slate-950/40 p-4 sm:p-5 rounded-xl text-center cursor-pointer transition-colors touch-manipulation"
           >
             <Sparkles className="w-5 h-5 text-slate-500 mx-auto mb-1.5" />
             <p className="text-xs font-medium text-slate-300">No extra text added yet</p>
@@ -387,22 +387,22 @@ export default function TextEditor({
             {extraTexts.map((item, index) => (
               <div
                 key={item.id}
-                className="bg-slate-950/90 border border-slate-800 rounded-xl p-3.5 space-y-3 shadow"
+                className="bg-slate-950/90 border border-slate-800 rounded-xl p-3 sm:p-3.5 space-y-3 shadow"
               >
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <span className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold text-[10px] flex items-center justify-center font-mono">
+                  <div className="flex items-center space-x-2 min-w-0">
+                    <span className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold text-[10px] flex items-center justify-center font-mono shrink-0">
                       #{index + 1}
                     </span>
-                    <span className="text-xs font-bold text-white truncate max-w-[180px]">
+                    <span className="text-xs font-bold text-white truncate max-w-[150px] sm:max-w-xs">
                       {item.text || 'Custom Text'}
                     </span>
                   </div>
 
-                  <div className="flex items-center space-x-1.5">
+                  <div className="flex items-center space-x-1.5 shrink-0">
                     <button
                       onClick={() => updateExtraText(item.id, 'enabled', !item.enabled)}
-                      className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${
+                      className={`p-1.5 rounded-lg border transition-colors cursor-pointer touch-manipulation ${
                         item.enabled
                           ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
                           : 'bg-slate-900 border-slate-800 text-slate-500'
@@ -414,7 +414,7 @@ export default function TextEditor({
 
                     <button
                       onClick={() => handleDeleteExtraText(item.id)}
-                      className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
+                      className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer touch-manipulation"
                       title="Delete extra text"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -437,7 +437,7 @@ export default function TextEditor({
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
                       <div className="space-y-1">
                         <div className="flex justify-between text-[11px] text-slate-400">
-                          <span>Vertical Position (Y)</span>
+                          <span>Vertical Height (Y)</span>
                           <span className="font-mono text-amber-400">{item.customY ?? 88}%</span>
                         </div>
                         <input
@@ -446,13 +446,13 @@ export default function TextEditor({
                           max="96"
                           value={item.customY ?? 88}
                           onChange={(e) => updateExtraText(item.id, 'customY', parseInt(e.target.value))}
-                          className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                          className="w-full h-2 sm:h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500 touch-manipulation"
                         />
                       </div>
 
                       <div className="space-y-1">
                         <div className="flex justify-between text-[11px] text-slate-400">
-                          <span>Horizontal Position (X)</span>
+                          <span>Horizontal Offset (X)</span>
                           <span className="font-mono text-amber-400">{item.customX ?? 50}%</span>
                         </div>
                         <input
@@ -461,7 +461,7 @@ export default function TextEditor({
                           max="96"
                           value={item.customX ?? 50}
                           onChange={(e) => updateExtraText(item.id, 'customX', parseInt(e.target.value))}
-                          className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                          className="w-full h-2 sm:h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500 touch-manipulation"
                         />
                       </div>
                     </div>
@@ -479,7 +479,7 @@ export default function TextEditor({
                           max="48"
                           value={item.fontSize || 22}
                           onChange={(e) => updateExtraText(item.id, 'fontSize', parseInt(e.target.value))}
-                          className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500"
+                          className="w-full h-2 sm:h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500 touch-manipulation"
                         />
                       </div>
 

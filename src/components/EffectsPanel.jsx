@@ -34,29 +34,29 @@ export default function EffectsPanel({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 sm:space-y-6">
       {/* Visual Style Presets */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <label className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center space-x-1.5">
-            <Wand2 className="w-3.5 h-3.5 text-orange-400" />
-            <span>Visual Color Style Presets</span>
+      <div className="space-y-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <label className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center space-x-1.5 min-w-0">
+            <Wand2 className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+            <span className="truncate">Visual Color Presets</span>
           </label>
           <button
             onClick={onReset}
-            className="text-xs text-slate-400 hover:text-white flex items-center space-x-1 cursor-pointer"
+            className="text-xs text-slate-400 hover:text-white flex items-center space-x-1 cursor-pointer shrink-0 touch-manipulation"
           >
             <RotateCcw className="w-3 h-3" />
-            <span>Reset All</span>
+            <span>Reset</span>
           </button>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 sm:gap-2">
           {presets.map((p) => (
             <button
               key={p.id}
               onClick={() => applyPreset(p)}
-              className={`px-3 py-2 text-xs rounded-xl border text-left transition-all cursor-pointer ${
+              className={`px-3 py-2 text-xs rounded-xl border text-left transition-all cursor-pointer touch-manipulation ${
                 effectsSettings.preset === p.id
                   ? 'bg-orange-500/10 border-orange-500 text-white font-medium shadow-sm'
                   : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200'
@@ -69,13 +69,13 @@ export default function EffectsPanel({
       </div>
 
       {/* Basic Fine-Tuning Sliders */}
-      <div className="space-y-4 bg-slate-950/60 p-4 rounded-xl border border-slate-800">
+      <div className="space-y-3.5 sm:space-y-4 bg-slate-950/60 p-3.5 sm:p-4 rounded-xl border border-slate-800">
         <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center space-x-1.5">
           <Sliders className="w-3.5 h-3.5 text-orange-400" />
-          <span>Color & Lighting Adjustments</span>
+          <span>Color &amp; Lighting Adjustments</span>
         </span>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
           {/* Brightness */}
           <div className="space-y-1">
             <div className="flex justify-between text-xs text-slate-400">
@@ -88,7 +88,7 @@ export default function EffectsPanel({
               max="150"
               value={effectsSettings.brightness}
               onChange={(e) => updateField('brightness', parseInt(e.target.value))}
-              className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500"
+              className="w-full h-2 sm:h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500 touch-manipulation"
             />
           </div>
 
@@ -104,7 +104,7 @@ export default function EffectsPanel({
               max="180"
               value={effectsSettings.contrast}
               onChange={(e) => updateField('contrast', parseInt(e.target.value))}
-              className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500"
+              className="w-full h-2 sm:h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500 touch-manipulation"
             />
           </div>
 
@@ -120,19 +120,19 @@ export default function EffectsPanel({
               max="200"
               value={effectsSettings.saturation}
               onChange={(e) => updateField('saturation', parseInt(e.target.value))}
-              className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500"
+              className="w-full h-2 sm:h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500 touch-manipulation"
             />
           </div>
         </div>
       </div>
 
       {/* Fade In & Out Transitions */}
-      <div className="space-y-3 bg-slate-950/60 p-4 rounded-xl border border-slate-800">
+      <div className="space-y-3 bg-slate-950/60 p-3.5 sm:p-4 rounded-xl border border-slate-800">
         <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">
           Fade In / Fade Out Transitions
         </label>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
           <div className="flex items-center justify-between bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
             <div className="flex items-center space-x-2">
               <input
@@ -140,9 +140,9 @@ export default function EffectsPanel({
                 id="fadeIn"
                 checked={effectsSettings.fadeIn}
                 onChange={(e) => updateField('fadeIn', e.target.checked)}
-                className="rounded bg-slate-950 border-slate-700 text-orange-500"
+                className="rounded bg-slate-950 border-slate-700 text-orange-500 cursor-pointer"
               />
-              <label htmlFor="fadeIn" className="text-xs text-slate-300">
+              <label htmlFor="fadeIn" className="text-xs text-slate-300 cursor-pointer">
                 Fade In (Black)
               </label>
             </div>
@@ -166,9 +166,9 @@ export default function EffectsPanel({
                 id="fadeOut"
                 checked={effectsSettings.fadeOut}
                 onChange={(e) => updateField('fadeOut', e.target.checked)}
-                className="rounded bg-slate-950 border-slate-700 text-orange-500"
+                className="rounded bg-slate-950 border-slate-700 text-orange-500 cursor-pointer"
               />
-              <label htmlFor="fadeOut" className="text-xs text-slate-300">
+              <label htmlFor="fadeOut" className="text-xs text-slate-300 cursor-pointer">
                 Fade Out (Black)
               </label>
             </div>

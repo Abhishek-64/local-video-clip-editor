@@ -31,31 +31,31 @@ export default function ProcessingQueue({
     switch (status) {
       case 'completed':
         return (
-          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">
             <CheckCircle2 className="w-3 h-3 mr-1 text-emerald-400" /> Completed
           </span>
         );
       case 'processing':
         return (
-          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-orange-500/10 text-orange-400 border border-orange-500/20 animate-pulse">
-            <RefreshCw className="w-3 h-3 mr-1 text-orange-400 animate-spin" /> Processing {progress || 0}%
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-orange-500/10 text-orange-400 border border-orange-500/20 animate-pulse shrink-0">
+            <RefreshCw className="w-3 h-3 mr-1 text-orange-400 animate-spin" /> {progress || 0}%
           </span>
         );
       case 'waiting':
         return (
-          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-800 text-slate-400">
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-slate-800 text-slate-400 shrink-0">
             <Clock className="w-3 h-3 mr-1" /> Waiting
           </span>
         );
       case 'failed':
         return (
-          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20">
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20 shrink-0">
             <AlertCircle className="w-3 h-3 mr-1" /> Failed
           </span>
         );
       case 'cancelled':
         return (
-          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-800 text-slate-500">
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-slate-800 text-slate-500 shrink-0">
             <XCircle className="w-3 h-3 mr-1" /> Cancelled
           </span>
         );
@@ -65,12 +65,12 @@ export default function ProcessingQueue({
   };
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
+    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 sm:p-5 shadow-lg space-y-4">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
+      <div className="flex flex-wrap items-center justify-between gap-2.5 pb-3 border-b border-slate-800">
         <div>
-          <h3 className="font-semibold text-sm text-white">Batch Processing Queue</h3>
-          <p className="text-xs text-slate-400">
+          <h3 className="font-semibold text-xs sm:text-sm text-white">Batch Processing Queue</h3>
+          <p className="text-[11px] sm:text-xs text-slate-400">
             Choose how many parts you want to generate and download
           </p>
         </div>
@@ -78,7 +78,7 @@ export default function ProcessingQueue({
         {queue.length > 0 && (
           <button
             onClick={onClearQueue}
-            className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors cursor-pointer"
+            className="px-2.5 sm:px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors cursor-pointer touch-manipulation"
           >
             Clear Queue
           </button>
@@ -86,60 +86,60 @@ export default function ProcessingQueue({
       </div>
 
       {/* Part Selection & Generation Controls */}
-      <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 sm:p-4 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2.5">
           <div className="flex items-center space-x-2">
             <Hash className="w-4 h-4 text-orange-400" />
             <span className="text-xs font-semibold text-slate-200">How many parts to generate?</span>
           </div>
 
           {/* Preset Mode Tabs */}
-          <div className="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-800">
+          <div className="grid grid-cols-3 sm:inline-flex w-full sm:w-auto rounded-lg bg-slate-900 p-0.5 border border-slate-800">
             <button
               onClick={() => setGenerateOption('all')}
-              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer ${
+              className={`px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer text-center touch-manipulation ${
                 generateOption === 'all'
                   ? 'bg-orange-500 text-white font-semibold shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              All Parts ({totalPossibleParts})
+              All ({totalPossibleParts})
             </button>
 
             <button
               onClick={() => setGenerateOption('first-n')}
-              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer ${
+              className={`px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer text-center touch-manipulation ${
                 generateOption === 'first-n'
                   ? 'bg-orange-500 text-white font-semibold shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              First N Parts
+              First N
             </button>
 
             <button
               onClick={() => setGenerateOption('range')}
-              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer ${
+              className={`px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer text-center touch-manipulation ${
                 generateOption === 'range'
                   ? 'bg-orange-500 text-white font-semibold shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              Custom Range
+              Range
             </button>
           </div>
         </div>
 
         {/* Dynamic Controls based on selected option */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-1 border-t border-slate-900">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-2 border-t border-slate-900">
           {generateOption === 'all' && (
             <span className="text-xs text-slate-400">
-              Will generate &amp; prepare all <strong className="text-amber-400 font-mono">{totalPossibleParts}</strong> clips for download.
+              Will generate all <strong className="text-amber-400 font-mono">{totalPossibleParts}</strong> clips for download.
             </span>
           )}
 
           {generateOption === 'first-n' && (
-            <div className="flex items-center space-x-3">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs text-slate-300">Generate first:</span>
               <div className="flex items-center space-x-1.5">
                 <input
@@ -154,14 +154,14 @@ export default function ProcessingQueue({
               </div>
 
               {/* Quick count chips */}
-              <div className="flex items-center space-x-1 pl-2">
+              <div className="flex items-center space-x-1">
                 {[1, 2, 3, 5].filter((n) => n <= totalPossibleParts).map((n) => (
                   <button
                     key={n}
                     onClick={() => setFirstNCount(n)}
-                    className={`px-2 py-0.5 text-[11px] rounded border cursor-pointer ${
+                    className={`px-2 py-0.5 text-[11px] rounded border cursor-pointer touch-manipulation ${
                       firstNCount === n
-                        ? 'bg-orange-500/20 border-orange-500 text-orange-300'
+                        ? 'bg-orange-500/20 border-orange-500 text-orange-300 font-bold'
                         : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
                     }`}
                   >
@@ -173,26 +173,26 @@ export default function ProcessingQueue({
           )}
 
           {generateOption === 'range' && (
-            <div className="flex items-center space-x-2 text-xs text-slate-300">
-              <span>From Part:</span>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300">
+              <span>From:</span>
               <input
                 type="number"
                 min="1"
                 max={totalPossibleParts}
                 value={rangeStart}
                 onChange={(e) => setRangeStart(Math.max(1, Math.min(totalPossibleParts, parseInt(e.target.value) || 1)))}
-                className="w-14 bg-slate-900 border border-slate-700 text-white font-mono text-xs px-2 py-1 rounded-lg text-center font-bold focus:border-orange-500 focus:outline-none"
+                className="w-12 bg-slate-900 border border-slate-700 text-white font-mono text-xs px-2 py-1 rounded-lg text-center font-bold focus:border-orange-500 focus:outline-none"
               />
-              <span>to Part:</span>
+              <span>to:</span>
               <input
                 type="number"
                 min={rangeStart}
                 max={totalPossibleParts}
                 value={rangeEnd}
                 onChange={(e) => setRangeEnd(Math.max(rangeStart, Math.min(totalPossibleParts, parseInt(e.target.value) || rangeStart)))}
-                className="w-14 bg-slate-900 border border-slate-700 text-white font-mono text-xs px-2 py-1 rounded-lg text-center font-bold focus:border-orange-500 focus:outline-none"
+                className="w-12 bg-slate-900 border border-slate-700 text-white font-mono text-xs px-2 py-1 rounded-lg text-center font-bold focus:border-orange-500 focus:outline-none"
               />
-              <span className="text-slate-400">({Math.max(0, rangeEnd - rangeStart + 1)} parts selected)</span>
+              <span className="text-slate-400">({Math.max(0, rangeEnd - rangeStart + 1)} parts)</span>
             </div>
           )}
 
@@ -200,9 +200,9 @@ export default function ProcessingQueue({
           <button
             onClick={handleTriggerGenerate}
             disabled={isProcessing}
-            className="ml-auto px-5 py-2.5 text-xs font-bold uppercase tracking-wider text-white bg-gradient-to-r from-orange-500 via-amber-500 to-orange-500 hover:from-orange-600 hover:to-amber-600 rounded-xl shadow-lg shadow-orange-500/20 transition-all cursor-pointer flex items-center space-x-2 disabled:opacity-50"
+            className="w-full sm:w-auto sm:ml-auto px-5 py-3 sm:py-2.5 text-xs font-bold uppercase tracking-wider text-white bg-gradient-to-r from-orange-500 via-amber-500 to-orange-500 hover:from-orange-600 hover:to-amber-600 active:scale-98 rounded-xl shadow-lg shadow-orange-500/20 transition-all cursor-pointer flex items-center justify-center space-x-2 disabled:opacity-50 touch-manipulation"
           >
-            <PlayCircle className="w-4 h-4" />
+            <PlayCircle className="w-4 h-4 shrink-0" />
             <span>
               {generateOption === 'all'
                 ? `Generate All (${totalPossibleParts} Clips)`
@@ -217,10 +217,10 @@ export default function ProcessingQueue({
       {/* Queue List Table */}
       {queue.length === 0 ? (
         <div className="text-center py-6 bg-slate-950/40 rounded-xl border border-slate-800/80">
-          <Clock className="w-7 h-7 text-slate-600 mx-auto mb-2" />
+          <Clock className="w-6 h-6 sm:w-7 sm:h-7 text-slate-600 mx-auto mb-1.5" />
           <p className="text-xs font-medium text-slate-400">No clips currently running</p>
           <p className="text-[11px] text-slate-500 mt-0.5">
-            Click the orange button above to start generating your clips
+            Click the orange button above to start generating clips
           </p>
         </div>
       ) : (
@@ -228,23 +228,23 @@ export default function ProcessingQueue({
           {queue.map((job) => (
             <div
               key={job.id}
-              className="bg-slate-950 border border-slate-800/90 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3 hover:border-slate-700 transition-colors"
+              className="bg-slate-950 border border-slate-800/90 rounded-xl p-3 sm:p-3.5 flex flex-wrap items-center justify-between gap-2.5 hover:border-slate-700 transition-colors"
             >
               {/* Job Details */}
               <div className="min-w-0 flex-1">
-                <div className="flex items-center space-x-2">
-                  <span className="font-bold text-xs text-white truncate max-w-xs sm:max-w-md">
+                <div className="flex items-center space-x-2 flex-wrap gap-1">
+                  <span className="font-bold text-xs text-white truncate max-w-[150px] sm:max-w-md">
                     {job.name || `Part ${String(job.partNumber).padStart(2, '0')}`}
                   </span>
                   {getStatusBadge(job.status, job.progress)}
                 </div>
 
-                <div className="flex items-center space-x-2 text-xs text-slate-400 mt-1 font-mono">
+                <div className="flex items-center space-x-1.5 sm:space-x-2 text-[11px] sm:text-xs text-slate-400 mt-1 font-mono flex-wrap">
                   <span>
                     {formatTime(job.startTime)} &rarr; {formatTime(job.endTime)}
                   </span>
                   <span>&bull;</span>
-                  <span>Duration: {formatTime(job.endTime - job.startTime)}</span>
+                  <span>{formatTime(job.endTime - job.startTime)}</span>
                   <span>&bull;</span>
                   <span className="uppercase text-slate-500">{job.format || 'MP4'}</span>
                 </div>
@@ -261,18 +261,18 @@ export default function ProcessingQueue({
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center space-x-2 flex-shrink-0">
+              <div className="flex items-center space-x-2 shrink-0">
                 {job.status === 'completed' ? (
                   <>
                     <button
                       onClick={() => onPreviewClip(job)}
-                      className="px-2.5 py-1 text-xs font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors cursor-pointer"
+                      className="px-2.5 py-1 text-xs font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors cursor-pointer touch-manipulation"
                     >
                       Preview
                     </button>
                     <button
                       onClick={() => onDownloadClip(job)}
-                      className="px-3 py-1 text-xs font-semibold text-emerald-300 bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-500/40 rounded-lg flex items-center space-x-1.5 transition-colors cursor-pointer"
+                      className="px-2.5 sm:px-3 py-1 text-xs font-semibold text-emerald-300 bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-500/40 rounded-lg flex items-center space-x-1 transition-colors cursor-pointer touch-manipulation"
                     >
                       <Download className="w-3.5 h-3.5" />
                       <span>Download</span>
@@ -281,7 +281,7 @@ export default function ProcessingQueue({
                 ) : job.status === 'processing' || job.status === 'waiting' ? (
                   <button
                     onClick={() => onCancelJob(job.id)}
-                    className="p-1 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
+                    className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer touch-manipulation"
                     title="Cancel Job"
                   >
                     <StopCircle className="w-4 h-4" />

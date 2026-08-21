@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Crop, Image as ImageIcon, Type, Sparkles, Volume2, SlidersHorizontal, CheckCheck } from 'lucide-react';
+import { Crop, Image as ImageIcon, Type, Sparkles, Volume2, SlidersHorizontal, CheckCheck, Youtube, Star } from 'lucide-react';
 import CropEditor from './CropEditor';
 import BackgroundEditor from './BackgroundEditor';
 import TextEditor from './TextEditor';
@@ -7,6 +7,8 @@ import LogoEditor from './LogoEditor';
 import EffectsPanel from './EffectsPanel';
 import AudioPanel from './AudioPanel';
 import ExportPanel from './ExportPanel';
+import YouTubePanel from './YouTubePanel';
+import BrandingPanel from './BrandingPanel';
 
 export default function EditorTabs({
   cropSettings,
@@ -29,7 +31,26 @@ export default function EditorTabs({
   detectedAudio,
   detectedFps,
   detectedQuality,
-  onApplyToAll
+  onApplyToAll,
+  // YouTube props
+  ytAccount,
+  isConnected,
+  isLoadingAccount,
+  accountError,
+  connectYouTube,
+  disconnectYouTubeAccount,
+  refreshAccount,
+  ytSettings,
+  updateYtSettings,
+  persistSettings,
+  isSavingSettings,
+  apiAvailable,
+  // Branding props
+  brandingPresets,
+  addBrandingPreset,
+  editBrandingPreset,
+  removeBrandingPreset,
+  isLoadingPresets
 }) {
   const [activeTab, setActiveTab] = useState('crop');
 
@@ -40,7 +61,9 @@ export default function EditorTabs({
     { id: 'logo', label: 'Logo', icon: ImageIcon },
     { id: 'effects', label: 'Effects', icon: Sparkles },
     { id: 'audio', label: 'Audio & Voice', icon: Volume2 },
-    { id: 'export', label: 'Export & Quality', icon: SlidersHorizontal }
+    { id: 'export', label: 'Export & Quality', icon: SlidersHorizontal },
+    { id: 'youtube', label: 'YouTube', icon: Youtube },
+    { id: 'branding', label: 'Branding', icon: Star }
   ];
 
   return (
@@ -57,12 +80,24 @@ export default function EditorTabs({
                 onClick={() => setActiveTab(t.id)}
                 className={`flex items-center space-x-1.5 sm:space-x-2 px-3 sm:px-3.5 py-2 sm:py-2.5 text-xs font-semibold rounded-t-xl transition-all border-t border-x cursor-pointer touch-manipulation whitespace-nowrap ${
                   isActive
-                    ? 'bg-slate-900 border-slate-800 text-orange-400 border-b-2 border-b-orange-500 shadow-sm'
+                    ? t.id === 'youtube'
+                      ? 'bg-slate-900 border-slate-800 text-red-400 border-b-2 border-b-red-500 shadow-sm'
+                      : t.id === 'branding'
+                      ? 'bg-slate-900 border-slate-800 text-amber-400 border-b-2 border-b-amber-500 shadow-sm'
+                      : 'bg-slate-900 border-slate-800 text-orange-400 border-b-2 border-b-orange-500 shadow-sm'
                     : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/40'
                 }`}
               >
-                <Icon className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-orange-400' : 'text-slate-400'}`} />
+                <Icon className={`w-3.5 h-3.5 shrink-0 ${
+                  isActive
+                    ? t.id === 'youtube' ? 'text-red-400' : t.id === 'branding' ? 'text-amber-400' : 'text-orange-400'
+                    : 'text-slate-400'
+                }`} />
                 <span>{t.label}</span>
+                {/* Connected indicator dot */}
+                {t.id === 'youtube' && isConnected && (
+                  <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full shrink-0" />
+                )}
               </button>
             );
           })}
@@ -138,6 +173,38 @@ export default function EditorTabs({
             sourceResolution={sourceResolution}
             detectedQuality={detectedQuality}
             detectedFps={detectedFps}
+          />
+        )}
+
+        {activeTab === 'youtube' && (
+          <YouTubePanel
+            ytAccount={ytAccount}
+            isConnected={isConnected}
+            isLoadingAccount={isLoadingAccount}
+            accountError={accountError}
+            connectYouTube={connectYouTube}
+            disconnectYouTubeAccount={disconnectYouTubeAccount}
+            refreshAccount={refreshAccount}
+            ytSettings={ytSettings}
+            updateYtSettings={updateYtSettings}
+            persistSettings={persistSettings}
+            isSavingSettings={isSavingSettings}
+            apiAvailable={apiAvailable}
+          />
+        )}
+
+        {activeTab === 'branding' && (
+          <BrandingPanel
+            brandingPresets={brandingPresets}
+            addBrandingPreset={addBrandingPreset}
+            editBrandingPreset={editBrandingPreset}
+            removeBrandingPreset={removeBrandingPreset}
+            isLoadingPresets={isLoadingPresets}
+            onApplyLogo={(logoOverrides) => onLogoChange(prev => ({ ...prev, ...logoOverrides }))}
+            onApplyText={(textOverrides) => onTextChange(prev => ({ ...prev, ...textOverrides }))}
+            currentLogoSettings={logoSettings}
+            currentTextSettings={textSettings}
+            apiAvailable={apiAvailable}
           />
         )}
       </div>

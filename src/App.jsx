@@ -6,8 +6,11 @@ import Timeline from './components/Timeline';
 import EditorTabs from './components/EditorTabs';
 import ProcessingQueue from './components/ProcessingQueue';
 import GeneratedClips from './components/GeneratedClips';
+import YouTubeUploadHistory from './components/YouTubeUploadHistory';
 import { generateClipFilename } from './utils/filename';
 import { useProcessingQueue } from './hooks/useProcessingQueue';
+import { useYouTube } from './hooks/useYouTube';
+import { useUploadQueue } from './hooks/useUploadQueue';
 import { Check, Info, X, Film, Palette, Layers, Sparkles } from 'lucide-react';
 
 export default function App() {
@@ -128,7 +131,7 @@ export default function App() {
     concurrency: 1
   });
 
-  // Processing Queue Hook
+  // ── Processing Queue Hook (existing — unchanged) ──────────────────────────────
   const {
     queue,
     completedClips,
@@ -143,7 +146,47 @@ export default function App() {
     downloadAllZip
   } = useProcessingQueue();
 
-  // Handle Video Loading and Auto-Detection
+  // ── YouTube Hook (new — optional, degrades gracefully when unconfigured) ──────
+  const {
+    ytAccount,
+    isConnected,
+    isLoadingAccount,
+    accountError,
+    connectYouTube,
+    disconnectYouTubeAccount,
+    refreshAccount,
+    ytSettings,
+    isLoadingSettings,
+    isSavingSettings,
+    updateYtSettings,
+    persistSettings,
+    brandingPresets,
+    isLoadingPresets,
+    addBrandingPreset,
+    editBrandingPreset,
+    removeBrandingPreset,
+    renderTemplate,
+    apiAvailable
+  } = useYouTube();
+
+  // ── Upload Queue Hook (new — optional pipeline, extends existing queue) ────────
+  const {
+    uploadJobs,
+    uploadHistory,
+    isLoadingHistory,
+    uploadClip,
+    cancelUpload,
+    retryUpload,
+    refreshHistory
+  } = useUploadQueue({
+    completedClips,
+    isConnected,
+    ytSettings,
+    renderTemplate,
+    movieName: textSettings.movieName
+  });
+
+  // ── Handle Video Loading and Auto-Detection ───────────────────────────────────
   const handleVideoSelect = (data) => {
     setVideoData(data);
     setStartTime(0);
@@ -177,7 +220,7 @@ export default function App() {
     ? Math.ceil(selectedDuration / clipDuration)
     : 1;
 
-  // Batch Generation Trigger
+  // ── Batch Generation Trigger ─────────────────────────────────────────────────
   const handleGenerateQueue = ({ mode, count, start, end }) => {
     if (!videoData) return;
 
@@ -303,6 +346,25 @@ export default function App() {
       fadeOutDuration: 0.5
     });
     showToast('Effects reset to normal.', 'info');
+  };
+
+  // ── Handle YouTube upload callbacks ──────────────────────────────────────────
+  const handleUploadClip = (clip) => {
+    if (!isConnected) {
+      showToast('Connect YouTube first to upload clips.', 'error');
+      return;
+    }
+    uploadClip(clip);
+    showToast(`Starting YouTube upload for Part ${clip.partNumber || ''}...`, 'info');
+  };
+
+  const handleRetryUpload = (clip) => {
+    if (!clip.blob) {
+      showToast('Clip blob is no longer available. Please re-export to retry.', 'error');
+      return;
+    }
+    retryUpload(clip);
+    showToast('Retrying YouTube upload...', 'info');
   };
 
   return (
@@ -451,6 +513,25 @@ export default function App() {
                   detectedFps={videoData.detectedFps}
                   detectedQuality={videoData.detectedQuality}
                   onApplyToAll={handleApplyToAll}
+                  // YouTube props
+                  ytAccount={ytAccount}
+                  isConnected={isConnected}
+                  isLoadingAccount={isLoadingAccount}
+                  accountError={accountError}
+                  connectYouTube={connectYouTube}
+                  disconnectYouTubeAccount={disconnectYouTubeAccount}
+                  refreshAccount={refreshAccount}
+                  ytSettings={ytSettings}
+                  updateYtSettings={updateYtSettings}
+                  persistSettings={persistSettings}
+                  isSavingSettings={isSavingSettings}
+                  apiAvailable={apiAvailable}
+                  // Branding props
+                  brandingPresets={brandingPresets}
+                  addBrandingPreset={addBrandingPreset}
+                  editBrandingPreset={editBrandingPreset}
+                  removeBrandingPreset={removeBrandingPreset}
+                  isLoadingPresets={isLoadingPresets}
                 />
               </div>
             </div>
@@ -466,6 +547,12 @@ export default function App() {
                 onDownloadClip={downloadClip}
                 isProcessing={isProcessing}
                 totalPossibleParts={totalPossibleParts}
+                // YouTube upload integration
+                uploadJobs={uploadJobs}
+                onUploadClip={handleUploadClip}
+                onCancelUpload={cancelUpload}
+                onRetryUpload={handleRetryUpload}
+                isConnected={isConnected}
               />
 
               <GeneratedClips
@@ -475,6 +562,21 @@ export default function App() {
                 isZipping={isZipping}
                 zipProgress={zipProgress}
                 movieName={textSettings.movieName}
+                // YouTube upload integration
+                uploadJobs={uploadJobs}
+                onUploadClip={handleUploadClip}
+                onRetryUpload={handleRetryUpload}
+                isConnected={isConnected}
+              />
+
+              {/* YouTube Upload History (only shown when there are history records) */}
+              <YouTubeUploadHistory
+                uploadHistory={uploadHistory}
+                uploadJobs={uploadJobs}
+                isLoadingHistory={isLoadingHistory}
+                onRetry={handleRetryUpload}
+                onRefresh={refreshHistory}
+                completedClips={completedClips}
               />
             </div>
           </>

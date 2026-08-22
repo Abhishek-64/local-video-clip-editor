@@ -1,3 +1,4 @@
+
 name = "local-video-clip-editor-worker"
 main = "src/index.js"
 compatibility_date = "2024-09-23"
@@ -6,14 +7,19 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "videoclip-db"
-database_id = "85d645e3-0c48-4609-87ba-24bf0e30ebb8"
+database_id = ""
 migrations_dir = "migrations"
 
 [vars]
-GOOGLE_CLIENT_ID = "YOUR_GOOGLE_CLIENT_ID"
-APP_URL = "YOUR_WORKER_URL"
-FRONTEND_URL = "YOUR_FRONTEND_URL"
+GOOGLE_CLIENT_ID = ""
+APP_URL = "https://commission-promotes-prizes-implied.trycloudflare.com"
+FRONTEND_URL = "http://localhost:3000"
 
 [dev]
 port = 8787
 local_protocol = "http"
+
+[triggers]
+crons = ["0 3 * * *"]
+
+

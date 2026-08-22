@@ -22,7 +22,8 @@ import {
   createBrandingPreset,
   updateBrandingPreset,
   deleteBrandingPreset,
-  isApiConfigured
+  isApiConfigured,
+  setClientUserId
 } from '../services/apiService';
 
 // Default YouTube settings (applied when no D1 record exists yet)
@@ -40,7 +41,7 @@ const DEFAULT_YT_SETTINGS = {
   schedule_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 };
 
-export function useYouTube() {
+export function useYouTube({ isAuthenticated = false } = {}) {
   const apiAvailable = isApiConfigured();
 
   // Connection state
@@ -58,18 +59,28 @@ export function useYouTube() {
   const [brandingPresets, setBrandingPresets] = useState([]);
   const [isLoadingPresets, setIsLoadingPresets] = useState(false);
 
-  const hasMounted = useRef(false);
+  const clearYouTubeState = useCallback(() => {
+    setYtAccount(null);
+    setIsConnected(false);
+    setAccountError(null);
+    setBrandingPresets([]);
+    setYtSettings(DEFAULT_YT_SETTINGS);
+  }, []);
 
-  // ── Fetch account + settings + presets on mount ──────────────────────────────
+  // ── Fetch account + settings + presets on mount / auth change ────────────────
 
   const fetchAccountStatus = useCallback(async () => {
-    if (!apiAvailable) return;
+    if (!apiAvailable || !isAuthenticated) {
+      setIsConnected(false);
+      setYtAccount(null);
+      return;
+    }
     setIsLoadingAccount(true);
     setAccountError(null);
     try {
       const data = await getYouTubeAccount();
-      setIsConnected(data.connected);
-      setYtAccount(data.account);
+      setIsConnected(Boolean(data?.connected));
+      setYtAccount(data?.account || null);
     } catch (err) {
       setAccountError(err.message);
       setIsConnected(false);
@@ -77,10 +88,10 @@ export function useYouTube() {
     } finally {
       setIsLoadingAccount(false);
     }
-  }, [apiAvailable]);
+  }, [apiAvailable, isAuthenticated]);
 
   const fetchSettings = useCallback(async () => {
-    if (!apiAvailable) return;
+    if (!apiAvailable || !isAuthenticated) return;
     setIsLoadingSettings(true);
     try {
       const data = await getSettings();
@@ -91,15 +102,14 @@ export function useYouTube() {
         yt_tags: Array.isArray(data.yt_tags) ? data.yt_tags : DEFAULT_YT_SETTINGS.yt_tags
       });
     } catch (err) {
-      // Non-fatal — use defaults
       console.warn('Could not load YouTube settings:', err.message);
     } finally {
       setIsLoadingSettings(false);
     }
-  }, [apiAvailable]);
+  }, [apiAvailable, isAuthenticated]);
 
   const fetchBrandingPresets = useCallback(async () => {
-    if (!apiAvailable) return;
+    if (!apiAvailable || !isAuthenticated) return;
     setIsLoadingPresets(true);
     try {
       const presets = await getBrandingPresets();
@@ -109,45 +119,97 @@ export function useYouTube() {
     } finally {
       setIsLoadingPresets(false);
     }
-  }, [apiAvailable]);
+  }, [apiAvailable, isAuthenticated]);
 
   useEffect(() => {
-    if (hasMounted.current) return;
-    hasMounted.current = true;
-
-    if (!apiAvailable) return;
+    if (!isAuthenticated) {
+      clearYouTubeState();
+      return;
+    }
 
     fetchAccountStatus();
     fetchSettings();
     fetchBrandingPresets();
 
-    // Check for OAuth callback params in URL
+    // Check for OAuth callback params in URL (if opened via direct redirect)
     const params = new URLSearchParams(window.location.search);
     if (params.get('yt_connected') === '1') {
       fetchAccountStatus();
+      fetchSettings();
+      fetchBrandingPresets();
       // Clean URL without reloading
-      window.history.replaceState({}, '', window.location.pathname);
+      window.history.replaceState({}, '', window.location.pathname + window.location.hash);
     }
     if (params.get('yt_error')) {
       setAccountError(decodeURIComponent(params.get('yt_error')));
-      window.history.replaceState({}, '', window.location.pathname);
+      window.history.replaceState({}, '', window.location.pathname + window.location.hash);
     }
-  }, [apiAvailable, fetchAccountStatus, fetchSettings, fetchBrandingPresets]);
+  }, [isAuthenticated, fetchAccountStatus, fetchSettings, fetchBrandingPresets, clearYouTubeState]);
 
   // ── Connect / Disconnect ─────────────────────────────────────────────────────
 
   /**
-   * Initiates YouTube OAuth by navigating to the Worker's connect URL.
-   * The user is redirected to Google, then back to the frontend with ?yt_connected=1
+   * Initiates YouTube OAuth in a popup window to prevent main page reload.
+   * Preserves all in-memory editor states (video, clips, subtitles, etc.).
    */
   const connectYouTube = useCallback(() => {
-    const url = getYouTubeConnectUrl();
+    const currentFrontend = window.location.origin;
+    const url = getYouTubeConnectUrl({ popup: true, frontendUrl: currentFrontend });
     if (!url) {
       setAccountError('API URL is not configured. Set VITE_API_URL in your .env file.');
       return;
     }
-    window.location.href = url;
-  }, []);
+
+    const width = 580;
+    const height = 680;
+    const left = Math.max(0, (window.screen.width - width) / 2);
+    const top = Math.max(0, (window.screen.height - height) / 2);
+
+    const popup = window.open(
+      url,
+      'youtube_oauth_popup',
+      `width=${width},height=${height},top=${top},left=${left},status=no,menubar=no,toolbar=no`
+    );
+
+    if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+      // If browser blocked popup, fallback to redirect
+      window.location.href = url;
+      return;
+    }
+
+    try {
+      popup.focus();
+    } catch {}
+
+    const handleAuthMessage = (event) => {
+      if (event.data?.type === 'YOUTUBE_AUTH_SUCCESS') {
+        window.removeEventListener('message', handleAuthMessage);
+        if (event.data.userId) {
+          setClientUserId(event.data.userId);
+        }
+        fetchAccountStatus();
+        fetchSettings();
+        fetchBrandingPresets();
+      } else if (event.data?.type === 'YOUTUBE_AUTH_ERROR') {
+        window.removeEventListener('message', handleAuthMessage);
+        setAccountError(event.data.error || 'Failed to connect YouTube account');
+      }
+    };
+
+    window.addEventListener('message', handleAuthMessage);
+
+    // Watch for popup close
+    const checkClosed = setInterval(() => {
+      if (popup.closed) {
+        clearInterval(checkClosed);
+        window.removeEventListener('message', handleAuthMessage);
+        // Refresh status once popup is closed
+        fetchAccountStatus();
+        fetchSettings();
+        fetchBrandingPresets();
+      }
+    }, 1000);
+  }, [fetchAccountStatus, fetchSettings, fetchBrandingPresets]);
 
   const disconnectYouTubeAccount = useCallback(async () => {
     if (!apiAvailable) return;
@@ -225,6 +287,7 @@ export function useYouTube() {
     accountError,
     connectYouTube,
     disconnectYouTubeAccount,
+    clearYouTubeState,
     refreshAccount: fetchAccountStatus,
 
     // Settings

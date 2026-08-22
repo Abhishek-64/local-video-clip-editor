@@ -20,11 +20,11 @@ const SCOPES = [
 
 /**
  * Build the Google OAuth authorization URL.
- * The `state` parameter encodes the userId so we can match the callback.
+ * The `state` parameter encodes userId, frontendUrl, and isPopup so we can match the callback.
  */
-export function buildAuthUrl(env, userId) {
+export function buildAuthUrl(env, userId, frontendUrl = null, isPopup = false) {
   const redirectUri = `${env.APP_URL}/api/youtube/callback`;
-  const state = btoa(JSON.stringify({ userId, ts: Date.now() }));
+  const state = btoa(JSON.stringify({ userId, frontendUrl, isPopup, ts: Date.now() }));
 
   const params = new URLSearchParams({
     client_id: env.GOOGLE_CLIENT_ID,

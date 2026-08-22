@@ -45,6 +45,8 @@ export default function EditorTabs({
   persistSettings,
   isSavingSettings,
   apiAvailable,
+  isAuthenticated = false,
+  onOpenAuth,
   // Branding props
   brandingPresets,
   addBrandingPreset,
@@ -190,6 +192,8 @@ export default function EditorTabs({
             persistSettings={persistSettings}
             isSavingSettings={isSavingSettings}
             apiAvailable={apiAvailable}
+            isAuthenticated={isAuthenticated}
+            onOpenAuth={onOpenAuth}
           />
         )}
 

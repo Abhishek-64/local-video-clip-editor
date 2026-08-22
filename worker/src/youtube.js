@@ -21,7 +21,7 @@ const YT_UPLOAD_BASE = 'https://www.googleapis.com/upload/youtube/v3';
  * @param {object} videoInfo - { size, mimeType }
  * @returns {{ uploadUrl: string, videoId?: string }}
  */
-export async function createResumableUploadSession(accessToken, metadata, videoInfo) {
+export async function createResumableUploadSession(accessToken, metadata, videoInfo, origin) {
   const snippet = {
     title: metadata.title || 'Untitled Video',
     description: metadata.description || '',
@@ -50,14 +50,20 @@ export async function createResumableUploadSession(accessToken, metadata, videoI
     part: 'snippet,status'
   });
 
+  const headers = {
+    'Authorization': `Bearer ${accessToken}`,
+    'Content-Type': 'application/json; charset=UTF-8',
+    'X-Upload-Content-Type': videoInfo.mimeType || 'video/mp4',
+    'X-Upload-Content-Length': String(videoInfo.size || 0)
+  };
+
+  if (origin) {
+    headers['Origin'] = origin;
+  }
+
   const res = await fetch(`${YT_UPLOAD_BASE}/videos?${params.toString()}`, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${accessToken}`,
-      'Content-Type': 'application/json; charset=UTF-8',
-      'X-Upload-Content-Type': videoInfo.mimeType || 'video/mp4',
-      'X-Upload-Content-Length': String(videoInfo.size || 0)
-    },
+    headers,
     body
   });
 

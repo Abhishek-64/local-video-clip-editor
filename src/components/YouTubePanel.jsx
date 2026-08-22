@@ -7,7 +7,7 @@
 import React, { useState } from 'react';
 import {
   Youtube, CheckCircle2, XCircle, Link, Unlink, Settings2,
-  Clock, Calendar, Tag, Globe, Eye, EyeOff, Zap, Info, RefreshCw
+  Clock, Calendar, Tag, Globe, Eye, EyeOff, Zap, Info, RefreshCw, Sparkles, Lock
 } from 'lucide-react';
 
 const YT_CATEGORIES = [
@@ -46,7 +46,9 @@ export default function YouTubePanel({
   updateYtSettings,
   persistSettings,
   isSavingSettings,
-  apiAvailable
+  apiAvailable,
+  isAuthenticated = false,
+  onOpenAuth
 }) {
   const [tagInput, setTagInput] = useState('');
   const [saveStatus, setSaveStatus] = useState(null); // 'saving' | 'saved' | 'error'
@@ -99,6 +101,46 @@ export default function YouTubePanel({
             deployed Cloudflare Worker to enable YouTube uploads, scheduling, and branding presets.
           </p>
           <p className="text-[11px] text-slate-500">All existing local editing features work without this.</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Unauthenticated State: Must sign in first ────────────────────────────────
+  if (!isAuthenticated) {
+    return (
+      <div className="space-y-5">
+        <div className="bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 border border-slate-800 rounded-2xl p-6 text-center space-y-4 shadow-xl">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-orange-500/20 via-red-500/20 to-rose-500/20 border border-red-500/30 flex items-center justify-center mx-auto shadow-inner">
+            <Lock className="w-6 h-6 text-orange-400" />
+          </div>
+          <div>
+            <h4 className="text-sm font-bold text-white tracking-tight">Sign In Required to Connect YouTube</h4>
+            <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto leading-relaxed">
+              Please sign in or create an account first. Connecting your YouTube account to your verified login ensures your OAuth tokens and scheduling presets remain secure and synced across devices.
+            </p>
+          </div>
+
+          <div className="pt-1">
+            <button
+              onClick={() => onOpenAuth && onOpenAuth('login')}
+              className="px-5 py-2.5 bg-gradient-to-r from-orange-500 via-rose-500 to-amber-500 hover:from-orange-400 hover:to-rose-400 active:scale-98 text-white text-xs font-bold rounded-xl shadow-lg shadow-orange-500/20 transition-all cursor-pointer inline-flex items-center space-x-2 touch-manipulation"
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>Sign In / Create Account</span>
+            </button>
+          </div>
+
+          <div className="pt-4 border-t border-slate-800/80 grid grid-cols-2 gap-2 text-left max-w-sm mx-auto">
+            <div className="p-2.5 bg-slate-950/40 rounded-xl border border-slate-800/60">
+              <span className="text-[11px] font-semibold text-slate-200 block mb-0.5">Direct Shorts Uploads</span>
+              <span className="text-[10px] text-slate-400 block leading-tight">Publish generated clips directly to your channel.</span>
+            </div>
+            <div className="p-2.5 bg-slate-950/40 rounded-xl border border-slate-800/60">
+              <span className="text-[11px] font-semibold text-slate-200 block mb-0.5">Automated Scheduling</span>
+              <span className="text-[10px] text-slate-400 block leading-tight">Space out multiple parts across days automatically.</span>
+            </div>
+          </div>
         </div>
       </div>
     );

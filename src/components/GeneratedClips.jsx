@@ -1,7 +1,11 @@
 import React, { useState } from 'react';
-import { Film, Download, Archive, CheckCircle2, Eye, X, CheckSquare, Square, Filter, Youtube, ExternalLink, Upload, RotateCcw, Calendar } from 'lucide-react';
+import {
+  Film, Download, Archive, CheckCircle2, Eye, X, CheckSquare, Square, Filter,
+  Youtube, ExternalLink, Upload, RotateCcw, Calendar, Clock, Sparkles
+} from 'lucide-react';
 import { formatTime } from '../utils/time';
 import { downloadClipsAsZip } from '../services/zipService';
+import YouTubeScheduleModal from './YouTubeScheduleModal';
 
 export default function GeneratedClips({
   completedClips,
@@ -10,16 +14,20 @@ export default function GeneratedClips({
   isZipping,
   zipProgress,
   movieName = 'Movie',
-  // YouTube upload integration (optional — all existing features work without these)
+  // YouTube upload integration
   uploadJobs = {},
   onUploadClip,
   onRetryUpload,
-  isConnected = false
+  isConnected = false,
+  ytSettings = {}
 }) {
   const [activePreviewClip, setActivePreviewClip] = useState(null);
   const [selectedClipIds, setSelectedClipIds] = useState(new Set());
   const [isZippingSelected, setIsZippingSelected] = useState(false);
   const [zipSelectedProgress, setZipSelectedProgress] = useState(0);
+
+  // YouTube Schedule Modal State
+  const [scheduleModalClip, setScheduleModalClip] = useState(null);
 
   if (completedClips.length === 0) {
     return null;
@@ -135,7 +143,7 @@ export default function GeneratedClips({
               Generated Clips ({completedClips.length})
             </h3>
             <p className="text-[11px] sm:text-xs text-slate-400">
-              Download individual clips or download all as a ZIP archive
+              Download clips or manually schedule &amp; upload to YouTube
             </p>
           </div>
         </div>
@@ -263,35 +271,38 @@ export default function GeneratedClips({
               </div>
 
               <div
-                className="flex items-center space-x-2 pt-2 border-t border-slate-900 flex-wrap gap-1"
+                className="flex items-center space-x-1.5 pt-2 border-t border-slate-900 flex-wrap gap-1"
                 onClick={(e) => e.stopPropagation()}
               >
                 {clip.outputUrl && (
                   <button
                     onClick={() => setActivePreviewClip(clip)}
-                    className="flex-1 py-1.5 text-xs font-medium text-slate-300 hover:text-white bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg flex items-center justify-center space-x-1.5 transition-colors cursor-pointer touch-manipulation"
+                    className="flex-1 py-1.5 text-xs font-medium text-slate-300 hover:text-white bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg flex items-center justify-center space-x-1 transition-colors cursor-pointer touch-manipulation"
+                    title="Preview clip"
                   >
                     <Eye className="w-3.5 h-3.5" />
-                    <span>Preview</span>
+                    <span>View</span>
                   </button>
                 )}
 
                 <button
                   onClick={() => onDownloadClip(clip)}
-                  className="flex-1 py-1.5 text-xs font-semibold text-emerald-300 bg-emerald-950/50 hover:bg-emerald-900/70 border border-emerald-500/30 rounded-lg flex items-center justify-center space-x-1.5 transition-colors cursor-pointer touch-manipulation"
+                  className="flex-1 py-1.5 text-xs font-semibold text-emerald-300 bg-emerald-950/50 hover:bg-emerald-900/70 border border-emerald-500/30 rounded-lg flex items-center justify-center space-x-1 transition-colors cursor-pointer touch-manipulation"
+                  title="Download MP4"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  <span>Download</span>
+                  <span>Save</span>
                 </button>
 
-                {/* Upload to YouTube */}
+                {/* Schedule & Upload to YouTube */}
                 {canUpload && (
                   <button
-                    onClick={() => onUploadClip(clip)}
-                    className="flex-1 py-1.5 text-xs font-semibold text-red-300 bg-red-950/50 hover:bg-red-900/70 border border-red-500/30 rounded-lg flex items-center justify-center space-x-1.5 transition-colors cursor-pointer touch-manipulation"
+                    onClick={() => setScheduleModalClip(clip)}
+                    className="flex-1 py-1.5 text-xs font-semibold text-white bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 border border-red-500/40 rounded-lg flex items-center justify-center space-x-1 transition-all cursor-pointer touch-manipulation shadow-sm shadow-red-500/20"
+                    title="Set manual schedule date/time and upload to YouTube"
                   >
-                    <Youtube className="w-3.5 h-3.5" />
-                    <span>Upload</span>
+                    <Calendar className="w-3.5 h-3.5" />
+                    <span>Schedule</span>
                   </button>
                 )}
 
@@ -311,7 +322,7 @@ export default function GeneratedClips({
         })}
       </div>
 
-      {/* Modal Preview */}
+      {/* Modal Video Preview */}
       {activePreviewClip && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full p-3.5 sm:p-4 space-y-3 shadow-2xl max-h-[92vh] flex flex-col">
@@ -348,6 +359,20 @@ export default function GeneratedClips({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Individual Clip YouTube Schedule & Metadata Modal */}
+      {scheduleModalClip && (
+        <YouTubeScheduleModal
+          isOpen={Boolean(scheduleModalClip)}
+          onClose={() => setScheduleModalClip(null)}
+          clip={scheduleModalClip}
+          ytSettings={ytSettings}
+          movieName={movieName}
+          onConfirmUpload={(clipToUpload, overrides) => {
+            onUploadClip(clipToUpload, overrides);
+          }}
+        />
       )}
     </div>
   );

@@ -7,10 +7,13 @@ import EditorTabs from './components/EditorTabs';
 import ProcessingQueue from './components/ProcessingQueue';
 import GeneratedClips from './components/GeneratedClips';
 import YouTubeUploadHistory from './components/YouTubeUploadHistory';
+import AuthModal from './components/AuthModal';
+import StorageSettingsModal from './components/StorageSettingsModal';
 import { generateClipFilename } from './utils/filename';
 import { useProcessingQueue } from './hooks/useProcessingQueue';
 import { useYouTube } from './hooks/useYouTube';
 import { useUploadQueue } from './hooks/useUploadQueue';
+import { useAuth } from './hooks/useAuth';
 import { Check, Info, X, Film, Palette, Layers, Sparkles } from 'lucide-react';
 
 export default function App() {
@@ -29,6 +32,9 @@ export default function App() {
 
   // Preview Modal for Completed Clip
   const [previewClipModal, setPreviewClipModal] = useState(null);
+
+  // Storage & Database Data Management Modal State
+  const [isStorageModalOpen, setIsStorageModalOpen] = useState(false);
 
   // Toast Notification State
   const [toastMessage, setToastMessage] = useState(null);
@@ -146,7 +152,30 @@ export default function App() {
     downloadAllZip
   } = useProcessingQueue();
 
-  // ── YouTube Hook (new — optional, degrades gracefully when unconfigured) ──────
+  // ── Authentication Hook (User Signup, Login, Profile) ────────────────────────
+  const {
+    user,
+    isAuthenticated: isUserLoggedIn,
+    authError,
+    setAuthError,
+    isAuthModalOpen,
+    authModalTab,
+    openAuthModal,
+    closeAuthModal,
+    handleSignup,
+    handleLogin,
+    handleLogout
+  } = useAuth({
+    onAuthSuccess: (res) => {
+      if (res?.user) {
+        showToast(`Welcome, ${res.user.name || res.user.email}! Account synced.`, 'success');
+      } else {
+        showToast('Logged out successfully.', 'info');
+      }
+    }
+  });
+
+  // ── YouTube Hook (scoped to authenticated user only) ─────────────────────────
   const {
     ytAccount,
     isConnected,
@@ -154,6 +183,7 @@ export default function App() {
     accountError,
     connectYouTube,
     disconnectYouTubeAccount,
+    clearYouTubeState,
     refreshAccount,
     ytSettings,
     isLoadingSettings,
@@ -167,7 +197,7 @@ export default function App() {
     removeBrandingPreset,
     renderTemplate,
     apiAvailable
-  } = useYouTube();
+  } = useYouTube({ isAuthenticated: isUserLoggedIn });
 
   // ── Upload Queue Hook (new — optional pipeline, extends existing queue) ────────
   const {
@@ -264,18 +294,22 @@ export default function App() {
 
     const newJobs = partsToGenerate.map((part, idx) => {
       const partNum = part.partNumber || (idx + 1);
-      const filename = generateClipFilename({
-        movieName: textSettings.movieName || 'Clip',
-        partNumber: partNum,
-        template: textSettings.template || '{movie} - Part {part}',
-        zeroPad: textSettings.zeroPad,
-        extension: exportSettings.format || 'mp4'
-      });
+      const customName = part.title ? `${textSettings.movieName || 'Clip'} - ${part.title} (Part ${partNum})` : null;
+      const filename = customName
+        ? `${customName.replace(/[\\/:*?"<>|]/g, '_')}.${exportSettings.format || 'mp4'}`
+        : generateClipFilename({
+            movieName: textSettings.movieName || 'Clip',
+            partNumber: partNum,
+            template: textSettings.template || '{movie} - Part {part}',
+            zeroPad: textSettings.zeroPad,
+            extension: exportSettings.format || 'mp4'
+          });
 
       return {
         id: `job-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 6)}`,
         name: filename,
         partNumber: partNum,
+        partTitle: part.title || '',
         startTime: part.startTime,
         endTime: part.endTime,
         duration: part.endTime - part.startTime,
@@ -349,13 +383,23 @@ export default function App() {
   };
 
   // ── Handle YouTube upload callbacks ──────────────────────────────────────────
-  const handleUploadClip = (clip) => {
+  const handleUploadClip = (clip, overrides = {}) => {
     if (!isConnected) {
       showToast('Connect YouTube first to upload clips.', 'error');
       return;
     }
-    uploadClip(clip);
-    showToast(`Starting YouTube upload for Part ${clip.partNumber || ''}...`, 'info');
+    uploadClip(clip, overrides);
+    if (overrides?.scheduledAt) {
+      const formatted = new Date(overrides.scheduledAt).toLocaleString([], {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+      showToast(`Part ${clip.partNumber || ''} scheduled for ${formatted}! Starting upload...`, 'success');
+    } else {
+      showToast(`Starting YouTube upload for Part ${clip.partNumber || ''}...`, 'info');
+    }
   };
 
   const handleRetryUpload = (clip) => {
@@ -400,7 +444,19 @@ export default function App() {
       )}
 
       {/* Main Top Header */}
-      <Header />
+      <Header
+        hasVideo={Boolean(videoData)}
+        onReset={() => {
+          setVideoData(null);
+          setCurrentTime(0);
+        }}
+        user={user}
+        isAuthenticated={isUserLoggedIn}
+        onOpenAuth={openAuthModal}
+        onLogout={handleLogout}
+        onOpenStorage={() => setIsStorageModalOpen(true)}
+        ytAccount={ytAccount}
+      />
 
       {/* Main Application Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6">
@@ -532,6 +588,8 @@ export default function App() {
                   editBrandingPreset={editBrandingPreset}
                   removeBrandingPreset={removeBrandingPreset}
                   isLoadingPresets={isLoadingPresets}
+                  isAuthenticated={isUserLoggedIn}
+                  onOpenAuth={openAuthModal}
                 />
               </div>
             </div>
@@ -567,6 +625,7 @@ export default function App() {
                 onUploadClip={handleUploadClip}
                 onRetryUpload={handleRetryUpload}
                 isConnected={isConnected}
+                ytSettings={ytSettings}
               />
 
               {/* YouTube Upload History (only shown when there are history records) */}
@@ -615,6 +674,39 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* User Login & Signup Modal */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={closeAuthModal}
+        initialTab={authModalTab}
+        onLogin={handleLogin}
+        onSignup={handleSignup}
+        error={authError}
+        onErrorClear={() => setAuthError(null)}
+      />
+
+      {/* Database Storage & Privacy Management Modal */}
+      <StorageSettingsModal
+        isOpen={isStorageModalOpen}
+        onClose={() => setIsStorageModalOpen(false)}
+        isAuthenticated={isUserLoggedIn}
+        showToast={showToast}
+        onDataCleared={(scope) => {
+          if (scope === 'history' || scope === 'all') {
+            refreshHistory();
+          }
+          if (scope === 'presets' || scope === 'all') {
+            fetchBrandingPresets();
+          }
+          if (scope === 'youtube' || scope === 'all') {
+            refreshAccount();
+          }
+          if (scope === 'settings' || scope === 'all') {
+            refreshAccount();
+          }
+        }}
+      />
     </div>
   );
 }

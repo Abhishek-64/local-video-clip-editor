@@ -15,9 +15,75 @@ export async function getOrCreateUser(db, userId) {
   return { id: userId };
 }
 
+export async function getUserById(db, userId) {
+  return db.prepare('SELECT id, email, name, created_at, last_seen, updated_at FROM users WHERE id = ?').bind(userId).first();
+}
+
+export async function getUserByEmail(db, email) {
+  if (!email) return null;
+  return db.prepare('SELECT * FROM users WHERE LOWER(email) = LOWER(?)').bind(email.trim()).first();
+}
+
+export async function createUserWithPassword(db, { id, email, passwordHash, salt, name }) {
+  const userId = id || crypto.randomUUID();
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanName = name ? name.trim() : cleanEmail.split('@')[0];
+
+  await db
+    .prepare(`
+      INSERT INTO users (id, email, password_hash, salt, name, created_at, last_seen, updated_at)
+      VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'))
+      ON CONFLICT(id) DO UPDATE SET
+        email         = excluded.email,
+        password_hash = excluded.password_hash,
+        salt          = excluded.salt,
+        name          = excluded.name,
+        updated_at    = datetime('now')
+    `)
+    .bind(userId, cleanEmail, passwordHash, salt, cleanName)
+    .run();
+
+  return { id: userId, email: cleanEmail, name: cleanName };
+}
+
+export async function createSession(db, userId, token, expiresAt) {
+  const sessionId = crypto.randomUUID();
+  await db
+    .prepare(`
+      INSERT INTO sessions (id, user_id, token, created_at, expires_at)
+      VALUES (?, ?, ?, datetime('now'), ?)
+    `)
+    .bind(sessionId, userId, token, expiresAt)
+    .run();
+
+  return { id: sessionId, userId, token, expiresAt };
+}
+
+export async function getSession(db, token) {
+  if (!token) return null;
+  const now = Date.now();
+  const session = await db
+    .prepare('SELECT * FROM sessions WHERE token = ? AND expires_at > ?')
+    .bind(token, now)
+    .first();
+
+  return session;
+}
+
+export async function deleteSession(db, token) {
+  if (!token) return;
+  await db.prepare('DELETE FROM sessions WHERE token = ?').bind(token).run();
+}
+
+export async function deleteSessionsForUser(db, userId) {
+  if (!userId) return;
+  await db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(userId).run();
+}
+
 // ─── YouTube Account Helpers ──────────────────────────────────────────────────
 
 export async function getYouTubeAccount(db, userId) {
+  if (!userId) return null;
   return db
     .prepare('SELECT * FROM youtube_accounts WHERE user_id = ? ORDER BY created_at DESC LIMIT 1')
     .bind(userId)
@@ -279,4 +345,119 @@ export async function getUploadJob(db, userId, id) {
     .prepare('SELECT * FROM upload_jobs WHERE id = ? AND user_id = ?')
     .bind(id, userId)
     .first();
+}
+
+// ─── Automatic Time-Based Database Cleanup ────────────────────────────────────
+
+/**
+ * Automatically clean up stale and expired records to prevent database overflow.
+ * Runs in background without requiring user prompt.
+ */
+export async function runAutoCleanup(db) {
+  const now = Date.now();
+  const results = {};
+
+  try {
+    // 1. Delete expired authentication sessions
+    const sessionRes = await db
+      .prepare('DELETE FROM sessions WHERE expires_at < ?')
+      .bind(now)
+      .run();
+    results.expiredSessions = sessionRes?.meta?.changes ?? 0;
+  } catch (err) {
+    results.expiredSessionsError = err.message;
+  }
+
+  try {
+    // 2. Delete completed/failed/cancelled uploads older than 30 days (keep pending & scheduled)
+    const uploadsRes = await db
+      .prepare(`
+        DELETE FROM upload_jobs
+        WHERE created_at < datetime('now', '-30 days')
+          AND status IN ('uploaded', 'published', 'failed', 'cancelled')
+      `)
+      .run();
+    results.oldUploads = uploadsRes?.meta?.changes ?? 0;
+  } catch (err) {
+    results.oldUploadsError = err.message;
+  }
+
+  try {
+    // 3. Delete stale anonymous guest users (no email, not seen in 7 days)
+    const staleGuestsRes = await db
+      .prepare(`
+        DELETE FROM users
+        WHERE email IS NULL
+          AND last_seen < datetime('now', '-7 days')
+      `)
+      .run();
+    results.staleGuests = staleGuestsRes?.meta?.changes ?? 0;
+  } catch (err) {
+    results.staleGuestsError = err.message;
+  }
+
+  results.timestamp = new Date().toISOString();
+  return results;
+}
+
+// ─── User-Approved Storage & Data Management ──────────────────────────────────
+
+/**
+ * Get data stats for a specific user.
+ */
+export async function getUserStorageStats(db, userId) {
+  if (!userId) {
+    return { uploadJobsCount: 0, brandingPresetsCount: 0, hasYouTube: false, hasSettings: false };
+  }
+
+  const [uploadsRes, presetsRes, ytRes, settingsRes] = await Promise.all([
+    db.prepare('SELECT COUNT(*) as count FROM upload_jobs WHERE user_id = ?').bind(userId).first(),
+    db.prepare('SELECT COUNT(*) as count FROM branding_presets WHERE user_id = ?').bind(userId).first(),
+    db.prepare('SELECT id, channel_title FROM youtube_accounts WHERE user_id = ?').bind(userId).first(),
+    db.prepare('SELECT id FROM project_settings WHERE user_id = ?').bind(userId).first()
+  ]);
+
+  return {
+    uploadJobsCount: uploadsRes?.count ?? 0,
+    brandingPresetsCount: presetsRes?.count ?? 0,
+    hasYouTube: Boolean(ytRes),
+    youtubeChannel: ytRes?.channel_title || null,
+    hasSettings: Boolean(settingsRes)
+  };
+}
+
+/**
+ * Clear specific scopes of user data upon explicit user approval.
+ */
+export async function clearUserData(db, userId, scope = 'all') {
+  if (!userId) return { success: false, error: 'User ID required' };
+
+  const cleared = {};
+
+  if (scope === 'history' || scope === 'all') {
+    const res = await db.prepare('DELETE FROM upload_jobs WHERE user_id = ?').bind(userId).run();
+    cleared.history = res?.meta?.changes ?? 0;
+  }
+
+  if (scope === 'presets' || scope === 'all') {
+    const res = await db.prepare('DELETE FROM branding_presets WHERE user_id = ?').bind(userId).run();
+    cleared.presets = res?.meta?.changes ?? 0;
+  }
+
+  if (scope === 'settings' || scope === 'all') {
+    const res = await db.prepare('DELETE FROM project_settings WHERE user_id = ?').bind(userId).run();
+    cleared.settings = res?.meta?.changes ?? 0;
+  }
+
+  if (scope === 'youtube' || scope === 'all') {
+    const res = await db.prepare('DELETE FROM youtube_accounts WHERE user_id = ?').bind(userId).run();
+    cleared.youtube = res?.meta?.changes ?? 0;
+  }
+
+  if (scope === 'all') {
+    // Delete user sessions
+    await db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(userId).run();
+  }
+
+  return { success: true, scope, cleared };
 }

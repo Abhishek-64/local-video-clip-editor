@@ -122,18 +122,22 @@ export function useUploadQueue({
     const controller = new AbortController();
     abortControllersRef.current.set(jobId, controller);
 
-    const title = renderTemplate(ytSettings.yt_title_template, {
+    const title = clip.titleOverride || (renderTemplate ? renderTemplate(ytSettings.yt_title_template, {
       movieName,
       partNumber: partNumber || 1,
       zeroPad: true
-    });
-    const description = renderTemplate(ytSettings.yt_description_template, {
-      movieName,
-      partNumber: partNumber || 1,
-      zeroPad: true
-    });
+    }) : clip.name || `Part ${partNumber || 1}`);
 
-    const scheduledAt = clip.scheduledAt || null; // from job-level override
+    const description = clip.descriptionOverride || (renderTemplate ? renderTemplate(ytSettings.yt_description_template, {
+      movieName,
+      partNumber: partNumber || 1,
+      zeroPad: true
+    }) : '');
+
+    const tags = clip.tagsOverride || ytSettings.yt_tags || [];
+    const visibility = clip.visibilityOverride || ytSettings.yt_visibility || 'private';
+    const scheduledAt = clip.scheduledAt || null;
+    const madeForKids = clip.madeForKids != null ? clip.madeForKids : (ytSettings.yt_made_for_kids || false);
 
     try {
       // Step 1: Create D1 record and get YouTube resumable upload URL
@@ -143,10 +147,10 @@ export function useUploadQueue({
         movieName,
         title,
         description,
-        tags: ytSettings.yt_tags || [],
-        visibility: ytSettings.yt_visibility || 'private',
+        tags,
+        visibility,
         category: ytSettings.yt_category || '22',
-        madeForKids: ytSettings.yt_made_for_kids || false,
+        madeForKids,
         notifySubscribers: ytSettings.yt_notify_subscribers !== false,
         scheduledAt,
         fileSize: blob.size,
@@ -170,7 +174,7 @@ export function useUploadQueue({
         youtube_video_id: videoId,
         title,
         description,
-        tags: ytSettings.yt_tags,
+        tags,
         scheduled_at: scheduledAt || null
       });
 

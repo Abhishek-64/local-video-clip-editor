@@ -10,6 +10,52 @@
 
 const API_URL = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
 
+const STORAGE_KEY_USER_ID = 'video_clip_editor_user_id';
+const STORAGE_KEY_AUTH_TOKEN = 'video_clip_editor_auth_token';
+
+/**
+ * Get or initialize persistent client userId stored in localStorage.
+ */
+export function getClientUserId() {
+  let uid = localStorage.getItem(STORAGE_KEY_USER_ID);
+  if (!uid) {
+    uid = crypto.randomUUID();
+    localStorage.setItem(STORAGE_KEY_USER_ID, uid);
+  }
+  return uid;
+}
+
+/**
+ * Update the stored client userId.
+ */
+export function setClientUserId(uid) {
+  if (uid && typeof uid === 'string') {
+    localStorage.setItem(STORAGE_KEY_USER_ID, uid);
+  }
+}
+
+/**
+ * Get the stored JWT / session auth token.
+ */
+export function getAuthToken() {
+  return localStorage.getItem(STORAGE_KEY_AUTH_TOKEN) || null;
+}
+
+/**
+ * Set or remove the stored auth token.
+ */
+export function setAuthToken(token) {
+  if (token) {
+    localStorage.setItem(STORAGE_KEY_AUTH_TOKEN, token);
+  } else {
+    localStorage.removeItem(STORAGE_KEY_AUTH_TOKEN);
+  }
+}
+
+export function clearAuthToken() {
+  localStorage.removeItem(STORAGE_KEY_AUTH_TOKEN);
+}
+
 /**
  * Generic fetch wrapper with error handling.
  */
@@ -18,13 +64,23 @@ async function apiFetch(path, options = {}) {
     throw new Error('VITE_API_URL is not configured. Add it to your .env file.');
   }
 
+  const userId = getClientUserId();
+  const token = getAuthToken();
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'X-User-Id': userId,
+    ...(options.headers || {})
+  };
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
     credentials: 'include', // Include session cookie
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.headers || {})
-    }
+    headers
   });
 
   if (!res.ok) {
@@ -50,6 +106,53 @@ async function apiFetch(path, options = {}) {
   return res.json();
 }
 
+// ─── Authentication ──────────────────────────────────────────────────────────
+
+/**
+ * Register a new account.
+ * @param {{ email: string, password: string, name?: string }} payload
+ */
+export async function signup(payload) {
+  const data = await apiFetch('/api/auth/signup', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+  if (data.token) setAuthToken(data.token);
+  if (data.user?.id) setClientUserId(data.user.id);
+  return data;
+}
+
+/**
+ * Log in to an existing account.
+ * @param {{ email: string, password: string }} payload
+ */
+export async function login(payload) {
+  const data = await apiFetch('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+  if (data.token) setAuthToken(data.token);
+  if (data.user?.id) setClientUserId(data.user.id);
+  return data;
+}
+
+/**
+ * Get the current user profile and auth status.
+ */
+export async function getMe() {
+  return apiFetch('/api/auth/me');
+}
+
+/**
+ * Log out and clear session tokens.
+ */
+export async function logout() {
+  try {
+    await apiFetch('/api/auth/logout', { method: 'POST' });
+  } catch {}
+  clearAuthToken();
+}
+
 // ─── Health ───────────────────────────────────────────────────────────────────
 
 export async function checkHealth() {
@@ -70,9 +173,14 @@ export async function getYouTubeAccount() {
  * Build the URL that initiates the YouTube OAuth flow.
  * The user is redirected to this URL — it goes through the Worker → Google.
  */
-export function getYouTubeConnectUrl() {
+export function getYouTubeConnectUrl(options = {}) {
   if (!API_URL) return null;
-  return `${API_URL}/api/youtube/connect`;
+  const params = new URLSearchParams();
+  if (options.popup) params.set('popup', '1');
+  if (options.frontendUrl) params.set('frontendUrl', options.frontendUrl);
+  params.set('userId', getClientUserId());
+  const qs = params.toString();
+  return `${API_URL}/api/youtube/connect${qs ? `?${qs}` : ''}`;
 }
 
 /**
@@ -214,7 +322,7 @@ export async function uploadBlobToYouTube(uploadUrl, blob, { onProgress, signal 
       }
     };
 
-    xhr.onerror = () => reject(new Error('Network error during YouTube upload'));
+    xhr.onerror = () => reject(new Error('Network or CORS error during YouTube upload. Please check browser network logs and worker configuration.'));
     xhr.onabort = () => reject(new Error('YouTube upload was cancelled'));
 
     if (signal) {
@@ -240,3 +348,33 @@ export function isApiConfigured() {
 export function buildYouTubeUrl(videoId) {
   return `https://www.youtube.com/watch?v=${videoId}`;
 }
+
+// ─── Storage & Database Data Management ───────────────────────────────────────
+
+/**
+ * Get user storage stats and cleanup policy.
+ */
+export async function getUserStorageStats() {
+  return apiFetch('/api/user/storage');
+}
+
+/**
+ * Clear user data upon explicit user confirmation/approval.
+ * @param {'history' | 'presets' | 'settings' | 'youtube' | 'all'} scope
+ */
+export async function clearUserData(scope = 'history') {
+  return apiFetch('/api/user/storage/clear', {
+    method: 'POST',
+    body: JSON.stringify({ scope })
+  });
+}
+
+/**
+ * Trigger background database maintenance.
+ */
+export async function triggerAdminCleanup() {
+  return apiFetch('/api/admin/cleanup', {
+    method: 'POST'
+  });
+}
+

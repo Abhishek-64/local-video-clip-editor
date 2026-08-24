@@ -67,12 +67,14 @@ const app = new Hono();
 // CORS — allow frontend origin dynamically for local dev + configured FRONTEND_URL
 app.use('*', cors({
   origin: (origin, c) => {
-    if (!origin) return 'http://localhost:3000';
+    if (!origin) return '*';
     const configuredFrontend = (c.env?.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, '');
     
-    // Allow configured origin, localhost, 127.0.0.1, and local private network origins (192.168.*, 10.*, 172.16-31.*)
+    // Allow configured origin, localhost, 127.0.0.1, workers.dev, pages.dev, and local private networks
     const isAllowed =
       origin === configuredFrontend || 
+      origin.endsWith('.workers.dev') ||
+      origin.endsWith('.pages.dev') ||
       origin.startsWith('http://localhost:') || 
       origin.startsWith('https://localhost:') || 
       origin.startsWith('http://127.0.0.1:') || 
@@ -84,10 +86,17 @@ app.use('*', cors({
 
     return isAllowed ? origin : configuredFrontend;
   },
-  allowHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'X-User-Id', 'x-user-id'],
+  allowHeaders: ['Content-Type', 'content-type', 'Authorization', 'authorization', 'X-Requested-With', 'x-requested-with', 'Accept', 'accept', 'Origin', 'origin', 'X-User-Id', 'x-user-id', '*'],
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  exposeHeaders: ['Content-Length', 'Set-Cookie'],
+  maxAge: 86400,
   credentials: true
 }));
+
+// Explicit OPTIONS preflight responder
+app.options('*', (c) => {
+  return c.text('', 204);
+});
 
 // ─── Session Middleware ───────────────────────────────────────────────────────
 
@@ -684,11 +693,16 @@ app.put('/api/uploads/:id', withUser, async (c) => {
   for (const key of allowed) {
     if (body[key] !== undefined) update[key] = body[key];
   }
+  if (body.scheduledAt !== undefined && update.scheduled_at === undefined) {
+    update.scheduled_at = body.scheduledAt;
+  }
 
   await updateUploadJob(c.env.DB, userId, id, update);
 
+  const targetScheduledAt = body.scheduledAt || body.scheduled_at || update.scheduled_at;
+
   // If we have a video ID and scheduling is requested, apply it via YouTube API
-  if (body.youtube_video_id && body.scheduledAt) {
+  if (body.youtube_video_id && targetScheduledAt) {
     try {
       const account = await getYouTubeAccount(c.env.DB, userId);
       if (account) {
@@ -698,9 +712,9 @@ app.put('/api/uploads/:id', withUser, async (c) => {
           description: body.description,
           tags: body.tags,
           visibility: 'private',
-          scheduledAt: body.scheduledAt
+          scheduledAt: targetScheduledAt
         });
-        await updateUploadJob(c.env.DB, userId, id, { status: 'scheduled' });
+        await updateUploadJob(c.env.DB, userId, id, { status: 'scheduled', scheduled_at: targetScheduledAt });
       }
     } catch (err) {
       console.error('Schedule error:', err);

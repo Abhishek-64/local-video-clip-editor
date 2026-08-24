@@ -10,6 +10,7 @@ import YouTubeUploadHistory from './components/YouTubeUploadHistory';
 import AuthModal from './components/AuthModal';
 import StorageSettingsModal from './components/StorageSettingsModal';
 import { generateClipFilename } from './utils/filename';
+import { calculateSingleScheduleTime, formatScheduledDateTime, getDefaultScheduleStartTime, toDateTimeLocalString } from './utils/scheduler';
 import { useProcessingQueue } from './hooks/useProcessingQueue';
 import { useYouTube } from './hooks/useYouTube';
 import { useUploadQueue } from './hooks/useUploadQueue';
@@ -29,6 +30,12 @@ export default function App() {
   const [endTime, setEndTime] = useState(0);
   const [clipDuration, setClipDuration] = useState(60);
   const [customParts, setCustomParts] = useState([]);
+  const [skipDeletedCuts, setSkipDeletedCuts] = useState(true);
+
+  // YouTube pipeline publish start time
+  const [pipelineStartTime, setPipelineStartTime] = useState(() =>
+    toDateTimeLocalString(getDefaultScheduleStartTime())
+  );
 
   // Preview Modal for Completed Clip
   const [previewClipModal, setPreviewClipModal] = useState(null);
@@ -137,6 +144,27 @@ export default function App() {
     concurrency: 1
   });
 
+  // Automatic Captions Settings State
+  const [captionSettings, setCaptionSettings] = useState({
+    enabled: false,
+    language: 'auto',
+    style: 'bold-shorts',
+    font: 'Inter, sans-serif',
+    fontSize: 32,
+    color: '#ffffff',
+    highlightColor: '#facc15',
+    outline: true,
+    outlineColor: '#000000',
+    outlineThickness: 4,
+    bgEnabled: false,
+    bgColor: 'rgba(0, 0, 0, 0.75)',
+    position: 'bottom-center',
+    customX: 50,
+    customY: 80,
+    uppercase: true,
+    captions: []
+  });
+
   // ── Processing Queue Hook (existing — unchanged) ──────────────────────────────
   const {
     queue,
@@ -190,11 +218,6 @@ export default function App() {
     isSavingSettings,
     updateYtSettings,
     persistSettings,
-    brandingPresets,
-    isLoadingPresets,
-    addBrandingPreset,
-    editBrandingPreset,
-    removeBrandingPreset,
     renderTemplate,
     apiAvailable
   } = useYouTube({ isAuthenticated: isUserLoggedIn });
@@ -242,27 +265,112 @@ export default function App() {
     showToast(`Loaded "${data.file.name}" (${Math.round(data.duration)}s) successfully!`, 'success');
   };
 
-  // Derive total calculated parts
+  // ── Split & Cut Actions for Player & Hotkeys ──────────────────────────────
+  const handleSplitAtPlayhead = () => {
+    if (!videoData) return;
+    const playhead = Math.round((currentTime || 0) * 10) / 10;
+    const currentList = customParts && customParts.length > 0
+      ? [...customParts]
+      : [{ id: 'part-1', partNumber: 1, title: 'Full Video', startTime: 0, endTime: videoData.duration, duration: videoData.duration, isDeleted: false }];
+
+    const targetIdx = currentList.findIndex(p => playhead > p.startTime + 0.1 && playhead < p.endTime - 0.1);
+    if (targetIdx !== -1) {
+      const original = currentList[targetIdx];
+      const first = { ...original, endTime: playhead, duration: Math.max(0, Math.round((playhead - original.startTime) * 10) / 10) };
+      const second = {
+        id: `part-split-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        partNumber: targetIdx + 2,
+        title: original.title ? `${original.title} (Pt 2)` : '',
+        startTime: playhead,
+        endTime: original.endTime,
+        duration: Math.max(0, Math.round((original.endTime - playhead) * 10) / 10),
+        isDeleted: Boolean(original.isDeleted)
+      };
+      const next = [...currentList];
+      next[targetIdx] = first;
+      next.splice(targetIdx + 1, 0, second);
+
+      let counter = 1;
+      const renumbered = next.map((p) => {
+        if (p.isDeleted) return p;
+        const u = { ...p, partNumber: counter };
+        counter++;
+        return u;
+      });
+      setCustomParts(renumbered);
+      showToast(`Split video at ${playhead.toFixed(1)}s`, 'info');
+    }
+  };
+
+  const handleToggleCutAtPlayhead = () => {
+    if (!customParts || customParts.length === 0) return;
+    const targetIdx = customParts.findIndex(p => currentTime >= p.startTime && currentTime <= p.endTime);
+    if (targetIdx !== -1) {
+      const updated = customParts.map((p, idx) => idx === targetIdx ? { ...p, isDeleted: !p.isDeleted } : p);
+      let counter = 1;
+      const renumbered = updated.map((p) => {
+        if (p.isDeleted) return p;
+        const u = { ...p, partNumber: counter };
+        counter++;
+        return u;
+      });
+      setCustomParts(renumbered);
+      const isNowCut = updated[targetIdx].isDeleted;
+      showToast(`${isNowCut ? 'Cut (Excluded)' : 'Restored'} Part ${targetIdx + 1}`, 'info');
+    }
+  };
+
+  // ── Global Keyboard Shortcut for Split (Key S) ───────────────────────────────
+  React.useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) {
+        return;
+      }
+      if (!videoData) return;
+
+      if (e.key === 's' || e.key === 'S') {
+        e.preventDefault();
+        handleSplitAtPlayhead();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [videoData, currentTime, customParts]);
+
+  // Derive total calculated active kept parts
   const selectedDuration = Math.max(0, endTime - startTime);
   const totalPossibleParts = customParts && customParts.length > 0
-    ? customParts.length
+    ? Math.max(1, customParts.filter(p => !p.isDeleted).length)
     : clipDuration > 0 && selectedDuration > 0
     ? Math.ceil(selectedDuration / clipDuration)
     : 1;
 
   // ── Batch Generation Trigger ─────────────────────────────────────────────────
-  const handleGenerateQueue = ({ mode, count, start, end }) => {
+  const handleGenerateQueue = ({
+    mode,
+    count,
+    start,
+    end,
+    autoSchedule = false,
+    scheduleStartTime = null,
+    scheduleInterval = '1hour',
+    customPartsList = null
+  }) => {
     if (!videoData) return;
 
     let partsToGenerate = [];
 
-    if (customParts && customParts.length > 0) {
+    // Filter out deleted cut sections unless explicitly provided
+    const sourceParts = customPartsList || (customParts && customParts.length > 0 ? customParts.filter(p => !p.isDeleted) : []);
+
+    if (sourceParts.length > 0) {
       if (mode === 'all') {
-        partsToGenerate = [...customParts];
+        partsToGenerate = [...sourceParts];
       } else if (mode === 'first-n') {
-        partsToGenerate = customParts.slice(0, count);
+        partsToGenerate = sourceParts.slice(0, count);
       } else if (mode === 'range') {
-        partsToGenerate = customParts.slice(Math.max(0, start - 1), end);
+        partsToGenerate = sourceParts.slice(Math.max(0, start - 1), end);
       }
     } else {
       // Fallback math calculation if customParts isn't set
@@ -288,12 +396,15 @@ export default function App() {
     }
 
     if (partsToGenerate.length === 0) {
-      showToast('No parts selected for generation.', 'error');
+      showToast('No active parts selected for generation.', 'error');
       return;
     }
 
+    const baseStartPart = Math.max(1, parseInt(textSettings.startPart) || 1);
+
     const newJobs = partsToGenerate.map((part, idx) => {
-      const partNum = part.partNumber || (idx + 1);
+      // Clean sequential part number starting from baseStartPart (e.g. 1 + 0 = Part 1)
+      const partNum = baseStartPart + idx;
       const customName = part.title ? `${textSettings.movieName || 'Clip'} - ${part.title} (Part ${partNum})` : null;
       const filename = customName
         ? `${customName.replace(/[\\/:*?"<>|]/g, '_')}.${exportSettings.format || 'mp4'}`
@@ -305,11 +416,15 @@ export default function App() {
             extension: exportSettings.format || 'mp4'
           });
 
+      const scheduledAt = autoSchedule
+        ? calculateSingleScheduleTime(scheduleStartTime, scheduleInterval || '1hour', idx)
+        : null;
+
       return {
         id: `job-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 6)}`,
         name: filename,
         partNumber: partNum,
-        partTitle: part.title || '',
+        partTitle: part.title || `Part ${partNum}`,
         startTime: part.startTime,
         endTime: part.endTime,
         duration: part.endTime - part.startTime,
@@ -319,18 +434,217 @@ export default function App() {
         textSettings: {
           ...textSettings,
           currentPart: partNum,
-          totalParts: totalPossibleParts
+          totalParts: partsToGenerate.length
         },
         logoSettings,
         effectsSettings,
         audioSettings,
-        exportSettings
+        exportSettings,
+        captionSettings,
+        scheduledAt,
+        autoUpload: Boolean(autoSchedule)
       };
     });
 
     addJobs(newJobs);
 
-    showToast(`Added ${newJobs.length} clips to processing queue!`, 'success');
+    if (autoSchedule) {
+      showToast(`Added ${newJobs.length} clips to queue! Auto-scheduled with ${scheduleInterval} interval.`, 'success');
+    } else {
+      showToast(`Added ${newJobs.length} clips to processing queue!`, 'success');
+    }
+  };
+
+  // ── Action: Export Merged Cleaned Video (Without Deleted Sections) ───────────
+  const handleExportMergedCleaned = () => {
+    if (!videoData) return;
+    const keptList = (customParts && customParts.length > 0
+      ? customParts.filter((p) => !p.isDeleted)
+      : [{ startTime, endTime, duration: endTime - startTime }]
+    ).filter(p => (p.endTime - p.startTime) > 0.05);
+
+    if (keptList.length === 0) {
+      showToast('No active kept segments to export. Please keep at least one segment.', 'error');
+      return;
+    }
+
+    const totalKeptDur = keptList.reduce((acc, p) => acc + Math.max(0, (p.endTime || 0) - (p.startTime || 0)), 0);
+    const cleanedFilename = `${(textSettings.movieName || 'Cleaned_Video').replace(/[\\/:*?"<>|]/g, '_')}_Edited_Cleaned.${exportSettings.format || 'mp4'}`;
+
+    const mergedJob = {
+      id: `job-merged-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      name: cleanedFilename,
+      partNumber: 1,
+      partTitle: 'Cleaned Video (Cut Sections Removed)',
+      startTime: keptList[0].startTime,
+      endTime: keptList[keptList.length - 1].endTime,
+      duration: totalKeptDur,
+      segments: keptList.map(p => ({ startTime: p.startTime, endTime: p.endTime })),
+      videoData,
+      cropSettings,
+      bgSettings,
+      textSettings: {
+        ...textSettings,
+        currentPart: 1,
+        totalParts: 1
+      },
+      logoSettings,
+      effectsSettings,
+      audioSettings,
+      exportSettings,
+      captionSettings
+    };
+
+    addJob(mergedJob);
+    showToast(`Added Cleaned Merged Video (${Math.round(totalKeptDur)}s) to processing queue!`, 'success');
+  };
+
+  // ── Action: Export Selective Merged Video (e.g. Merge P2 + P4 only) ─────────
+  const handleExportSelectedMerge = (selectedPartsList) => {
+    if (!videoData) return;
+    const partsToMerge = (selectedPartsList && selectedPartsList.length > 0
+      ? selectedPartsList.filter(p => !p.isDeleted)
+      : (customParts && customParts.length > 0
+          ? customParts.filter(p => !p.isDeleted)
+          : [{ startTime, endTime, duration: endTime - startTime }]
+        )
+    ).filter(p => (p.endTime - p.startTime) > 0.05);
+
+    if (partsToMerge.length === 0) {
+      showToast('Please select at least one segment to merge.', 'error');
+      return;
+    }
+
+    const totalDur = partsToMerge.reduce((acc, p) => acc + Math.max(0, (p.endTime || 0) - (p.startTime || 0)), 0);
+    const partNumbersLabel = partsToMerge.map(p => `P${p.partNumber || 1}`).join('_');
+    const cleanedFilename = `${(textSettings.movieName || 'Merged_Video').replace(/[\\/:*?"<>|]/g, '_')}_Merged_${partNumbersLabel}.${exportSettings.format || 'mp4'}`;
+
+    const mergedJob = {
+      id: `job-merged-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      name: cleanedFilename,
+      partNumber: 1,
+      partTitle: `Merged (${partsToMerge.map(p => `Part ${p.partNumber || 1}`).join(' + ')})`,
+      startTime: partsToMerge[0].startTime,
+      endTime: partsToMerge[partsToMerge.length - 1].endTime,
+      duration: totalDur,
+      segments: partsToMerge.map(p => ({ startTime: p.startTime, endTime: p.endTime })),
+      videoData,
+      cropSettings,
+      bgSettings,
+      textSettings: {
+        ...textSettings,
+        currentPart: 1,
+        totalParts: 1
+      },
+      logoSettings,
+      effectsSettings,
+      audioSettings,
+      exportSettings,
+      captionSettings
+    };
+
+    addJob(mergedJob);
+    showToast(`Added Merged Video (${partsToMerge.map(p => `P${p.partNumber || 1}`).join(' + ')}, ${Math.round(totalDur)}s) to queue!`, 'success');
+  };
+
+  // ── Action: Send Only Kept or Selected Clips to Processing Queue ─────────────
+  const handleGenerateBatchKept = (selectedPartsList = null) => {
+    if (!videoData) return;
+    const list = selectedPartsList || (customParts || []).filter((p) => !p.isDeleted);
+    if (list.length === 0) {
+      showToast('No active kept segments to generate clips for.', 'error');
+      return;
+    }
+    handleGenerateQueue({ mode: 'all', customPartsList: list });
+  };
+
+  // ── Action: Export Single Part Directly ──────────────────────────────────────
+  const handleExportSinglePart = (part) => {
+    if (!videoData || !part) return;
+    const keptIdx = (customParts || []).filter(p => !p.isDeleted).findIndex(p => p.id === part.id);
+    const baseStartPart = Math.max(1, parseInt(textSettings.startPart) || 1);
+    const partNum = keptIdx >= 0 ? baseStartPart + keptIdx : (part.partNumber || 1);
+
+    const customName = part.title ? `${textSettings.movieName || 'Clip'} - ${part.title} (Part ${partNum})` : null;
+    const filename = customName
+      ? `${customName.replace(/[\\/:*?"<>|]/g, '_')}.${exportSettings.format || 'mp4'}`
+      : generateClipFilename({
+          movieName: textSettings.movieName || 'Clip',
+          partNumber: partNum,
+          template: textSettings.template || '{movie} - Part {part}',
+          zeroPad: textSettings.zeroPad,
+          extension: exportSettings.format || 'mp4'
+        });
+
+    const singleJob = {
+      id: `job-single-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      name: filename,
+      partNumber: partNum,
+      partTitle: part.title || `Part ${partNum}`,
+      startTime: part.startTime,
+      endTime: part.endTime,
+      duration: Math.max(0, part.endTime - part.startTime),
+      videoData,
+      cropSettings,
+      bgSettings,
+      textSettings: {
+        ...textSettings,
+        currentPart: partNum,
+        totalParts: (customParts || []).filter(p => !p.isDeleted).length || 1
+      },
+      logoSettings,
+      effectsSettings,
+      audioSettings,
+      exportSettings,
+      captionSettings
+    };
+
+    addJob(singleJob);
+    showToast(`Added Part ${partNum} (${Math.round(singleJob.duration)}s) to processing queue!`, 'success');
+  };
+
+  // ── Action: Create Clip from Detected Best Moment ────────────────────────────
+  const handleCreateMomentClip = (moment) => {
+    if (!videoData || !moment) return;
+    const momentDuration = Math.round((moment.endTime - moment.startTime) * 10) / 10;
+    const filename = `${(textSettings.movieName || 'Best_Moment').replace(/[\\/:*?"<>|]/g, '_')}_Moment_${moment.rank || 1}_Score${moment.highlightScore || 90}.${exportSettings.format || 'mp4'}`;
+
+    const autoSchedule = isConnected && ytSettings?.auto_upload;
+    let scheduledAt = null;
+
+    if (autoSchedule) {
+      const scheduleInterval = ytSettings?.schedule_interval || '1hour';
+      const scheduleStartTime = pipelineStartTime ? new Date(pipelineStartTime) : getDefaultScheduleStartTime();
+      scheduledAt = calculateSingleScheduleTime(scheduleStartTime, scheduleInterval, queue.length);
+    }
+
+    const momentJob = {
+      id: `job-moment-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      name: filename,
+      partNumber: moment.rank || 1,
+      partTitle: `${moment.title || `Best Moment #${moment.rank || 1}`} (${moment.highlightScore ? `Score: ${moment.highlightScore}` : `${momentDuration}s`})`,
+      startTime: moment.startTime,
+      endTime: moment.endTime,
+      duration: momentDuration,
+      videoData,
+      cropSettings,
+      bgSettings,
+      textSettings: {
+        ...textSettings,
+        currentPart: moment.rank || 1,
+        totalParts: 1
+      },
+      logoSettings,
+      effectsSettings,
+      audioSettings,
+      exportSettings,
+      captionSettings,
+      scheduledAt,
+      autoUpload: Boolean(autoSchedule)
+    };
+
+    addJob(momentJob);
+    showToast(`Added ${moment.title || `Best Moment #${moment.rank || 1}`} (Score: ${moment.highlightScore}, ${momentDuration}s) to processing queue!`, 'success');
   };
 
   const handleApplyToAll = () => {
@@ -524,8 +838,14 @@ export default function App() {
                   onTextChange={setTextSettings}
                   logoSettings={logoSettings}
                   onLogoChange={setLogoSettings}
+                  captionSettings={captionSettings}
+                  onCaptionSettingsChange={setCaptionSettings}
                   effectsSettings={effectsSettings}
                   audioSettings={audioSettings}
+                  customParts={customParts}
+                  skipDeletedCuts={skipDeletedCuts}
+                  onSplitAtPlayhead={handleSplitAtPlayhead}
+                  onToggleCutAtPlayhead={handleToggleCutAtPlayhead}
                 />
 
                 {/* Timeline Range Scrubber & Manual Parts Time Table */}
@@ -548,6 +868,7 @@ export default function App() {
               {/* Right Column: Multi-tab Editing Panel */}
               <div className={`lg:col-span-5 space-y-4 sm:space-y-6 ${mobileView === 'style' ? 'block' : 'hidden lg:block'}`}>
                 <EditorTabs
+                  videoData={videoData}
                   cropSettings={cropSettings}
                   onCropChange={setCropSettings}
                   onCropReset={handleCropReset}
@@ -557,6 +878,13 @@ export default function App() {
                   onTextChange={setTextSettings}
                   logoSettings={logoSettings}
                   onLogoChange={setLogoSettings}
+                  captionSettings={captionSettings}
+                  onCaptionSettingsChange={setCaptionSettings}
+                  onSetTimelineRange={(st, et) => {
+                    setStartTime(st);
+                    setEndTime(et);
+                  }}
+                  onCreateMomentClip={handleCreateMomentClip}
                   effectsSettings={effectsSettings}
                   onEffectsChange={setEffectsSettings}
                   onEffectsReset={handleEffectsReset}
@@ -569,6 +897,19 @@ export default function App() {
                   detectedFps={videoData.detectedFps}
                   detectedQuality={videoData.detectedQuality}
                   onApplyToAll={handleApplyToAll}
+                  // Split & Delete props
+                  customParts={customParts}
+                  onCustomPartsChange={setCustomParts}
+                  currentTime={currentTime}
+                  duration={videoData.duration}
+                  onCurrentTimeChange={setCurrentTime}
+                  skipDeletedCuts={skipDeletedCuts}
+                  onToggleSkipDeletedCuts={() => setSkipDeletedCuts((prev) => !prev)}
+                  onExportMergedCleaned={handleExportMergedCleaned}
+                  onExportSelectedMerge={handleExportSelectedMerge}
+                  onGenerateBatchKept={handleGenerateBatchKept}
+                  onExportSinglePart={handleExportSinglePart}
+                  movieName={textSettings.movieName}
                   // YouTube props
                   ytAccount={ytAccount}
                   isConnected={isConnected}
@@ -582,14 +923,10 @@ export default function App() {
                   persistSettings={persistSettings}
                   isSavingSettings={isSavingSettings}
                   apiAvailable={apiAvailable}
-                  // Branding props
-                  brandingPresets={brandingPresets}
-                  addBrandingPreset={addBrandingPreset}
-                  editBrandingPreset={editBrandingPreset}
-                  removeBrandingPreset={removeBrandingPreset}
-                  isLoadingPresets={isLoadingPresets}
                   isAuthenticated={isUserLoggedIn}
                   onOpenAuth={openAuthModal}
+                  pipelineStartTime={pipelineStartTime}
+                  setPipelineStartTime={setPipelineStartTime}
                 />
               </div>
             </div>
@@ -605,12 +942,18 @@ export default function App() {
                 onDownloadClip={downloadClip}
                 isProcessing={isProcessing}
                 totalPossibleParts={totalPossibleParts}
+                pipelineStartTime={pipelineStartTime}
                 // YouTube upload integration
                 uploadJobs={uploadJobs}
                 onUploadClip={handleUploadClip}
                 onCancelUpload={cancelUpload}
                 onRetryUpload={handleRetryUpload}
                 isConnected={isConnected}
+                ytAccount={ytAccount}
+                ytSettings={ytSettings}
+                isAuthenticated={isUserLoggedIn}
+                onOpenAuth={openAuthModal}
+                connectYouTube={connectYouTube}
               />
 
               <GeneratedClips

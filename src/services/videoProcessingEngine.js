@@ -1,5 +1,6 @@
 import { calculateCropDimensions } from '../utils/crop';
 import { detectFaceInFrame, FaceTrackerSmoother } from './faceDetectionService';
+import { renderCaptionOverlay } from './captionOverlayRenderer';
 
 /**
  * Determine supported MediaRecorder MIME types with universal hardware compatibility
@@ -571,14 +572,17 @@ export async function processVideoClipLegacy({
         }
       }, Math.max(3000, (expectedDurationSec + 2.5) * 1000));
 
-      // 13. Secondary Heartbeat Timer to check completion every 100ms
+      // 13. Secondary Heartbeat Timer to check completion every 150ms
       heartbeatTimer = setInterval(() => {
         if (isFinished || !videoEl) return;
         const cur = videoEl.currentTime;
-        if (cur >= endTime - 0.05 || videoEl.ended || (videoEl.paused && cur > startTime + 0.2)) {
+        if (cur >= endTime - 0.05 || videoEl.ended) {
           finishRecording();
+        } else if (videoEl.paused && !isFinished && !signal?.aborted) {
+          // Attempt resume if mobile browser paused playback when backgrounded
+          videoEl.play().catch(() => {});
         }
-      }, 100);
+      }, 150);
 
       // 14. High-Performance Frame Render Loop
       const renderLoop = async () => {
@@ -715,6 +719,11 @@ export async function processVideoClipLegacy({
         // 18. Render Text Overlays & Part Numbering
         if (text.enabled || (text.extraTexts && text.extraTexts.length > 0)) {
           renderTextOverlay(ctx, canvas.width, canvas.height, text, partNumber);
+        }
+
+        // 18.5 Render Captions Overlay
+        if (settings.captions?.enabled) {
+          renderCaptionOverlay(ctx, canvas.width, canvas.height, settings.captions, videoEl.currentTime);
         }
 
         // 19. Render Logo Overlay

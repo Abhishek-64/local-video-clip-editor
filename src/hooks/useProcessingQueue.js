@@ -14,6 +14,50 @@ export function useProcessingQueue() {
   const abortControllersRef = useRef(new Map());
   const activeWorkersRef = useRef(0);
   const isDestroyedRef = useRef(false);
+  const wakeLockRef = useRef(null);
+
+  // Screen WakeLock Management: prevents mobile browser from dimming/sleeping during export
+  const acquireWakeLock = async () => {
+    try {
+      if (typeof navigator !== 'undefined' && 'wakeLock' in navigator && !wakeLockRef.current) {
+        wakeLockRef.current = await navigator.wakeLock.request('screen');
+        wakeLockRef.current.addEventListener('release', () => {
+          wakeLockRef.current = null;
+        });
+      }
+    } catch (e) {
+      console.warn('Screen WakeLock not available or denied:', e);
+    }
+  };
+
+  const releaseWakeLock = async () => {
+    try {
+      if (wakeLockRef.current) {
+        await wakeLockRef.current.release();
+        wakeLockRef.current = null;
+      }
+    } catch (e) {}
+  };
+
+  // Sync WakeLock with processing state
+  useEffect(() => {
+    if (isProcessing) {
+      acquireWakeLock();
+    } else {
+      releaseWakeLock();
+    }
+  }, [isProcessing]);
+
+  // Re-acquire WakeLock on visibilitychange if user returns to tab
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && isProcessing) {
+        acquireWakeLock();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [isProcessing]);
 
   // Keep refs in sync with state
   useEffect(() => {
@@ -29,6 +73,7 @@ export function useProcessingQueue() {
     isDestroyedRef.current = false;
     return () => {
       isDestroyedRef.current = true;
+      releaseWakeLock();
       abortControllersRef.current.forEach((c) => {
         try {
           c.abort();
@@ -106,13 +151,15 @@ export function useProcessingQueue() {
         logo: job.logoSettings || {},
         effects: job.effectsSettings || {},
         audio: job.audioSettings || {},
-        export: job.exportSettings || {}
+        export: job.exportSettings || {},
+        captions: job.captionSettings || {}
       };
 
       const result = await processVideoClip({
         videoSource,
         startTime: job.startTime,
         endTime: job.endTime,
+        segments: job.segments,
         partNumber: job.partNumber || 1,
         settings,
         onProgress: (pct) => {

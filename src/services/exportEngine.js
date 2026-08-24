@@ -10,6 +10,7 @@ import { WebGLEffectsPipeline } from './webglEffectsPipeline';
 import { mixAudioTracksOffline } from './audioEngine';
 import { calculateCropDimensions } from '../utils/crop';
 import { renderTextOverlay } from './videoProcessingEngine';
+import { renderCaptionOverlay } from './captionOverlayRenderer';
 import { detectFaceInFrame, FaceTrackerSmoother } from './faceDetectionService';
 
 /**
@@ -41,12 +42,68 @@ function parseTargetFps(fpsSetting) {
 }
 
 /**
+ * Resilient frame seek with already-seeked fast path and mobile background safety timeout.
+ * Prevents export from hanging if the browser tab is backgrounded or screen locked.
+ */
+function seekVideoToTime(videoEl, targetTime, signal) {
+  if (signal?.aborted) {
+    return Promise.reject(new Error('Export cancelled by user'));
+  }
+
+  // Fast path: if video is already at the target timestamp and not actively seeking, resolve immediately
+  if (Math.abs(videoEl.currentTime - targetTime) < 0.005 && !videoEl.seeking) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    let resolved = false;
+    let timer = null;
+
+    const cleanup = () => {
+      if (resolved) return;
+      resolved = true;
+      if (timer) clearTimeout(timer);
+      videoEl.removeEventListener('seeked', onSeeked);
+      videoEl.removeEventListener('error', onError);
+    };
+
+    const onSeeked = () => {
+      cleanup();
+      resolve();
+    };
+
+    const onError = () => {
+      cleanup();
+      resolve(); // Gracefully proceed without hanging the entire export pipeline
+    };
+
+    videoEl.addEventListener('seeked', onSeeked, { once: true });
+    videoEl.addEventListener('error', onError, { once: true });
+
+    try {
+      videoEl.currentTime = targetTime;
+    } catch (e) {
+      cleanup();
+      resolve();
+      return;
+    }
+
+    // Safety timeout: if mobile browser delays or drops seeked event while backgrounded, force advance
+    timer = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, 350);
+  });
+}
+
+/**
  * Master Video Clip Exporter
  */
 export async function exportVideoClip({
   videoSource,
   startTime,
   endTime,
+  segments,
   partNumber = 1,
   settings = {},
   onProgress = () => {},
@@ -67,6 +124,7 @@ export async function exportVideoClip({
         videoSource,
         startTime,
         endTime,
+        segments,
         partNumber,
         settings,
         onProgress,
@@ -85,6 +143,7 @@ export async function exportVideoClip({
     videoSource,
     startTime,
     endTime,
+    segments,
     partNumber,
     settings,
     onProgress,
@@ -99,6 +158,7 @@ async function runWebCodecsExportPipeline({
   videoSource,
   startTime,
   endTime,
+  segments,
   partNumber,
   settings,
   onProgress,
@@ -114,10 +174,47 @@ async function runWebCodecsExportPipeline({
     export: exportConfig = {}
   } = settings;
 
-  const clipDuration = Math.max(0.2, endTime - startTime);
+  const activeSegments = (segments && segments.length > 0)
+    ? segments.filter(s => (s.endTime - s.startTime) > 0.05)
+    : [{ startTime: startTime || 0, endTime: endTime || 0 }];
+
+  const clipDuration = Math.max(0.2, activeSegments.reduce(
+    (sum, seg) => sum + Math.max(0, seg.endTime - seg.startTime),
+    0
+  ));
+
   const targetFps = parseTargetFps(exportConfig.fps);
   const totalFrames = Math.max(1, Math.round(clipDuration * targetFps));
   const playbackSpeed = audio.speed || 1.0;
+
+  // Precalculate cumulative time intervals for multi-segment video lookup
+  const segmentIntervals = [];
+  let cumTime = 0;
+  for (const seg of activeSegments) {
+    const segDur = Math.max(0, seg.endTime - seg.startTime);
+    segmentIntervals.push({
+      segStart: seg.startTime,
+      segEnd: seg.endTime,
+      segDur,
+      cumStart: cumTime,
+      cumEnd: cumTime + segDur
+    });
+    cumTime += segDur;
+  }
+
+  const mapFrameToSourceTime = (outSec) => {
+    const scaledOutSec = outSec * playbackSpeed;
+    for (const interval of segmentIntervals) {
+      if (scaledOutSec >= interval.cumStart && scaledOutSec < interval.cumEnd) {
+        const offsetInSeg = scaledOutSec - interval.cumStart;
+        return Math.min(interval.segEnd, interval.segStart + offsetInSeg);
+      }
+    }
+    if (segmentIntervals.length > 0) {
+      return segmentIntervals[segmentIntervals.length - 1].segEnd;
+    }
+    return startTime || 0;
+  };
 
   // 1. Setup Source Video Element
   let temporaryObjectUrl = null;
@@ -205,6 +302,7 @@ async function runWebCodecsExportPipeline({
     videoSource: srcUrl,
     startTime,
     endTime,
+    segments: activeSegments,
     audioSettings: audio
   });
 
@@ -283,17 +381,10 @@ async function runWebCodecsExportPipeline({
     }
 
     const frameClipTime = frameIdx * frameIntervalSec;
-    const sourceVideoTime = startTime + frameClipTime * playbackSpeed;
+    const sourceVideoTime = mapFrameToSourceTime(frameClipTime);
 
-    // Seek source video to exact deterministic timestamp
-    videoEl.currentTime = Math.min(endTime, sourceVideoTime);
-    await new Promise((res) => {
-      const onSeeked = () => {
-        videoEl.removeEventListener('seeked', onSeeked);
-        res();
-      };
-      videoEl.addEventListener('seeked', onSeeked);
-    });
+    // Seek source video to exact deterministic timestamp with resilient mobile timeout
+    await seekVideoToTime(videoEl, sourceVideoTime, signal);
 
     // Face detection (run periodically every 15 frames if enabled)
     if (crop.faceTracking && frameIdx - lastFaceDetectFrame >= 15) {
@@ -382,6 +473,11 @@ async function runWebCodecsExportPipeline({
     // Text Overlay
     if (text.enabled || (text.extraTexts && text.extraTexts.length > 0)) {
       renderTextOverlay(ctx2d, canvasWidth, canvasHeight, text, partNumber);
+    }
+
+    // Captions Overlay
+    if (settings.captions?.enabled) {
+      renderCaptionOverlay(ctx2d, canvasWidth, canvasHeight, settings.captions, sourceVideoTime);
     }
 
     // Logo Watermark

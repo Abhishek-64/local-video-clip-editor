@@ -40,20 +40,32 @@ export async function fetchAndDecodeAudio(audioSource, audioCtx) {
  *
  * @param {Object} params
  * @param {string|File|Blob} params.videoSource
- * @param {number} params.startTime - start in seconds
- * @param {number} params.endTime - end in seconds
+ * @param {number} [params.startTime] - start in seconds (for single segment)
+ * @param {number} [params.endTime] - end in seconds (for single segment)
+ * @param {Array<{startTime: number, endTime: number}>} [params.segments] - array of kept segments
  * @param {Object} params.audioSettings
  * @returns {Promise<AudioBuffer|null>}
  */
 export async function mixAudioTracksOffline({
   videoSource,
-  startTime,
-  endTime,
+  startTime = 0,
+  endTime = 0,
+  segments = null,
   audioSettings = {}
 }) {
-  const clipDuration = Math.max(0.1, endTime - startTime);
+  // Normalize segments list
+  const activeSegments = segments && segments.length > 0
+    ? segments.filter(s => (s.endTime - s.startTime) > 0.05)
+    : [{ startTime, endTime }];
+
+  const clipDuration = activeSegments.reduce(
+    (sum, seg) => sum + Math.max(0, seg.endTime - seg.startTime),
+    0
+  );
+  
+  const finalDuration = Math.max(0.1, clipDuration);
   const sampleRate = 48000;
-  const totalSamples = Math.round(clipDuration * sampleRate);
+  const totalSamples = Math.round(finalDuration * sampleRate);
 
   const {
     speed = 1.0,
@@ -129,17 +141,50 @@ export async function mixAudioTracksOffline({
       }
     }
 
+    // Precalculate cumulative time intervals for multi-segment audio lookup
+    const segmentIntervals = [];
+    let cumTime = 0;
+    for (const seg of activeSegments) {
+      const segDur = Math.max(0, seg.endTime - seg.startTime);
+      segmentIntervals.push({
+        segStart: seg.startTime,
+        segEnd: seg.endTime,
+        segDur,
+        cumStart: cumTime,
+        cumEnd: cumTime + segDur
+      });
+      cumTime += segDur;
+    }
+
+    // Helper to map output elapsed time to source video timestamp
+    const mapOutTimeToSourceTime = (outSec) => {
+      const scaledOutSec = outSec * (speed || 1.0);
+      for (const interval of segmentIntervals) {
+        if (scaledOutSec >= interval.cumStart && scaledOutSec < interval.cumEnd) {
+          const offsetInSeg = scaledOutSec - interval.cumStart;
+          return interval.segStart + offsetInSeg;
+        }
+      }
+      // If at or beyond the end, clamp to last segment
+      if (segmentIntervals.length > 0) {
+        const last = segmentIntervals[segmentIntervals.length - 1];
+        return last.segEnd;
+      }
+      return startTime;
+    };
+
     // 5. Mix Original Video Audio
     if (sourceAudioBuffer && !muteOriginal) {
       const baseGain = (volume / 100);
       const srcL = sourceAudioBuffer.getChannelData(0);
       const srcR = sourceAudioBuffer.numberOfChannels > 1 ? sourceAudioBuffer.getChannelData(1) : srcL;
       const srcSampleRate = sourceAudioBuffer.sampleRate;
-      const startSample = Math.round(startTime * srcSampleRate);
 
       for (let i = 0; i < totalSamples; i++) {
-        // Adjust for playback speed
-        const srcIdx = startSample + Math.round(i * (srcSampleRate / sampleRate) * (speed || 1.0));
+        const outSec = i / sampleRate;
+        const sourceTime = mapOutTimeToSourceTime(outSec);
+        const srcIdx = Math.round(sourceTime * srcSampleRate);
+
         if (srcIdx >= 0 && srcIdx < srcL.length) {
           const duck = autoDucking && voiceoverBuffer ? duckingProfile[i] : 1.0;
           outputLeft[i] += srcL[srcIdx] * baseGain * duck;

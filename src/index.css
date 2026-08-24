@@ -23,6 +23,7 @@
   .touch-manipulation {
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
+    -webkit-overflow-scrolling: touch;
   }
 }
 

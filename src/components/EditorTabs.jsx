@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Crop, Image as ImageIcon, Type, Sparkles, Volume2, SlidersHorizontal, CheckCheck, Youtube, Star } from 'lucide-react';
+import { Crop, Image as ImageIcon, Type, Sparkles, Volume2, SlidersHorizontal, CheckCheck, Youtube, Scissors, MessageSquareQuote, Flame } from 'lucide-react';
 import CropEditor from './CropEditor';
 import BackgroundEditor from './BackgroundEditor';
 import TextEditor from './TextEditor';
@@ -8,9 +8,12 @@ import EffectsPanel from './EffectsPanel';
 import AudioPanel from './AudioPanel';
 import ExportPanel from './ExportPanel';
 import YouTubePanel from './YouTubePanel';
-import BrandingPanel from './BrandingPanel';
+import SplitCutEditor from './SplitCutEditor';
+import AutomaticCaptionsPanel from './AutomaticCaptionsPanel';
+import BestMomentDetector from './BestMomentDetector';
 
 export default function EditorTabs({
+  videoData,
   cropSettings,
   onCropChange,
   onCropReset,
@@ -32,6 +35,25 @@ export default function EditorTabs({
   detectedFps,
   detectedQuality,
   onApplyToAll,
+  // Split & Cut Section props
+  customParts = [],
+  onCustomPartsChange,
+  currentTime = 0,
+  duration = 0,
+  onCurrentTimeChange,
+  skipDeletedCuts = true,
+  onToggleSkipDeletedCuts,
+  onExportMergedCleaned,
+  onExportSelectedMerge,
+  onGenerateBatchKept,
+  onExportSinglePart,
+  movieName,
+  // Captions props
+  captionSettings = {},
+  onCaptionSettingsChange,
+  // Best Moments props
+  onSetTimelineRange,
+  onCreateMomentClip,
   // YouTube props
   ytAccount,
   isConnected,
@@ -47,25 +69,25 @@ export default function EditorTabs({
   apiAvailable,
   isAuthenticated = false,
   onOpenAuth,
-  // Branding props
-  brandingPresets,
-  addBrandingPreset,
-  editBrandingPreset,
-  removeBrandingPreset,
-  isLoadingPresets
+  pipelineStartTime,
+  setPipelineStartTime
 }) {
-  const [activeTab, setActiveTab] = useState('crop');
+  const [activeTab, setActiveTab] = useState('split-cut');
+
+  const cutSectionsCount = (customParts || []).filter(p => p.isDeleted).length;
 
   const tabs = [
-    { id: 'crop', label: 'Crop & Format', icon: Crop },
-    { id: 'backdrop', label: 'Backdrop & Blur', icon: ImageIcon },
-    { id: 'text', label: 'Text & Parts', icon: Type },
+    { id: 'split-cut', label: 'Split & Cut', icon: Scissors, badge: cutSectionsCount > 0 ? `${cutSectionsCount} cut` : null },
+    { id: 'best-moments', label: 'Best Moments', icon: Flame, badge: 'AI' },
+    { id: 'captions', label: 'Captions', icon: MessageSquareQuote, badge: captionSettings?.enabled && captionSettings?.captions?.length > 0 ? `${captionSettings.captions.length}` : null },
+    { id: 'crop', label: 'Crop & Ratio', icon: Crop },
+    { id: 'backdrop', label: 'Backdrop', icon: ImageIcon },
+    { id: 'text', label: 'Text & Part #', icon: Type },
     { id: 'logo', label: 'Logo', icon: ImageIcon },
     { id: 'effects', label: 'Effects', icon: Sparkles },
-    { id: 'audio', label: 'Audio & Voice', icon: Volume2 },
-    { id: 'export', label: 'Export & Quality', icon: SlidersHorizontal },
-    { id: 'youtube', label: 'YouTube', icon: Youtube },
-    { id: 'branding', label: 'Branding', icon: Star }
+    { id: 'audio', label: 'Audio', icon: Volume2 },
+    { id: 'export', label: 'Export', icon: SlidersHorizontal },
+    { id: 'youtube', label: 'YouTube', icon: Youtube }
   ];
 
   return (
@@ -80,22 +102,25 @@ export default function EditorTabs({
               <button
                 key={t.id}
                 onClick={() => setActiveTab(t.id)}
-                className={`flex items-center space-x-1.5 sm:space-x-2 px-3 sm:px-3.5 py-2 sm:py-2.5 text-xs font-semibold rounded-t-xl transition-all border-t border-x cursor-pointer touch-manipulation whitespace-nowrap ${
+                className={`flex items-center space-x-1.5 px-3 py-2 text-xs font-semibold rounded-t-xl transition-all border-t border-x cursor-pointer touch-manipulation whitespace-nowrap ${
                   isActive
                     ? t.id === 'youtube'
                       ? 'bg-slate-900 border-slate-800 text-red-400 border-b-2 border-b-red-500 shadow-sm'
-                      : t.id === 'branding'
-                      ? 'bg-slate-900 border-slate-800 text-amber-400 border-b-2 border-b-amber-500 shadow-sm'
                       : 'bg-slate-900 border-slate-800 text-orange-400 border-b-2 border-b-orange-500 shadow-sm'
                     : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/40'
                 }`}
               >
                 <Icon className={`w-3.5 h-3.5 shrink-0 ${
                   isActive
-                    ? t.id === 'youtube' ? 'text-red-400' : t.id === 'branding' ? 'text-amber-400' : 'text-orange-400'
+                    ? t.id === 'youtube' ? 'text-red-400' : 'text-orange-400'
                     : 'text-slate-400'
                 }`} />
                 <span>{t.label}</span>
+                {t.badge && (
+                  <span className="px-1.5 py-0.2 bg-rose-500/20 border border-rose-500/40 text-rose-300 text-[9px] rounded-full font-bold">
+                    {t.badge}
+                  </span>
+                )}
                 {/* Connected indicator dot */}
                 {t.id === 'youtube' && isConnected && (
                   <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full shrink-0" />
@@ -119,6 +144,47 @@ export default function EditorTabs({
 
       {/* Active Tab Panel Body */}
       <div className="p-3.5 sm:p-5">
+        {activeTab === 'split-cut' && (
+          <SplitCutEditor
+            duration={duration}
+            currentTime={currentTime}
+            onCurrentTimeChange={onCurrentTimeChange}
+            customParts={customParts}
+            onCustomPartsChange={onCustomPartsChange}
+            skipDeletedCuts={skipDeletedCuts}
+            onToggleSkipDeletedCuts={onToggleSkipDeletedCuts}
+            onExportMergedCleaned={onExportMergedCleaned}
+            onExportSelectedMerge={onExportSelectedMerge}
+            onGenerateBatchKept={onGenerateBatchKept}
+            onExportSinglePart={onExportSinglePart}
+            movieName={movieName}
+          />
+        )}
+
+        {activeTab === 'best-moments' && (
+          <BestMomentDetector
+            videoData={videoData}
+            duration={duration}
+            currentTime={currentTime}
+            onCurrentTimeChange={onCurrentTimeChange}
+            onSetTimelineRange={onSetTimelineRange}
+            onCreateMomentClip={onCreateMomentClip}
+            captionSettings={captionSettings}
+            textSettings={textSettings}
+          />
+        )}
+
+        {activeTab === 'captions' && (
+          <AutomaticCaptionsPanel
+            videoData={videoData}
+            captionSettings={captionSettings}
+            onCaptionSettingsChange={onCaptionSettingsChange}
+            currentTime={currentTime}
+            onCurrentTimeChange={onCurrentTimeChange}
+            duration={duration}
+          />
+        )}
+
         {activeTab === 'crop' && (
           <CropEditor
             cropSettings={cropSettings}
@@ -194,21 +260,9 @@ export default function EditorTabs({
             apiAvailable={apiAvailable}
             isAuthenticated={isAuthenticated}
             onOpenAuth={onOpenAuth}
-          />
-        )}
-
-        {activeTab === 'branding' && (
-          <BrandingPanel
-            brandingPresets={brandingPresets}
-            addBrandingPreset={addBrandingPreset}
-            editBrandingPreset={editBrandingPreset}
-            removeBrandingPreset={removeBrandingPreset}
-            isLoadingPresets={isLoadingPresets}
-            onApplyLogo={(logoOverrides) => onLogoChange(prev => ({ ...prev, ...logoOverrides }))}
-            onApplyText={(textOverrides) => onTextChange(prev => ({ ...prev, ...textOverrides }))}
-            currentLogoSettings={logoSettings}
-            currentTextSettings={textSettings}
-            apiAvailable={apiAvailable}
+            pipelineStartTime={pipelineStartTime}
+            setPipelineStartTime={setPipelineStartTime}
+            customParts={customParts}
           />
         )}
       </div>

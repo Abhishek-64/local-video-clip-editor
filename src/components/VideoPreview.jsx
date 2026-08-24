@@ -11,7 +11,8 @@ import {
   Move,
   Smartphone,
   LayoutGrid,
-  GripVertical
+  GripVertical,
+  Scissors
 } from 'lucide-react';
 import { formatTime } from '../utils/time';
 
@@ -26,8 +27,14 @@ export default function VideoPreview({
   onTextChange,
   logoSettings,
   onLogoChange,
+  captionSettings = {},
+  onCaptionSettingsChange,
   effectsSettings,
-  audioSettings
+  audioSettings,
+  customParts = [],
+  skipDeletedCuts = true,
+  onSplitAtPlayhead,
+  onToggleCutAtPlayhead
 }) {
   const videoRef = useRef(null);
   const bgCanvasRef = useRef(null);
@@ -40,6 +47,8 @@ export default function VideoPreview({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [previewMode, setPreviewMode] = useState('vertical');
   const [showCropGuide, setShowCropGuide] = useState(true);
+  const [skippedNotice, setSkippedNotice] = useState(false);
+  const skipTimeoutRef = useRef(null);
 
   // Drag & Resize state for Crop Box
   const dragCropRef = useRef({
@@ -56,11 +65,13 @@ export default function VideoPreview({
   const dragTextRef = useRef({ active: false, startX: 0, startY: 0, startYPct: 10, startXPct: 50, parentWidth: 0, parentHeight: 0 });
   const dragExtraTextRef = useRef({ active: false, extraId: null, startX: 0, startY: 0, startYPct: 88, startXPct: 50, parentWidth: 0, parentHeight: 0 });
   const dragLogoRef = useRef({ active: false, startX: 0, startY: 0, startYPct: 6, startXPct: 94, parentWidth: 0, parentHeight: 0 });
+  const dragCaptionRef = useRef({ active: false, startX: 0, startY: 0, startYPct: 80, startXPct: 50, parentWidth: 0, parentHeight: 0 });
 
   const [isDraggingCrop, setIsDraggingCrop] = useState(false);
   const [isDraggingText, setIsDraggingText] = useState(false);
   const [draggingExtraId, setDraggingExtraId] = useState(null);
   const [isDraggingLogo, setIsDraggingLogo] = useState(false);
+  const [isDraggingCaption, setIsDraggingCaption] = useState(false);
 
   const isVerticalCrop = cropSettings?.mode === '9:16';
   const isCustomCrop = cropSettings?.mode === 'custom';
@@ -112,9 +123,32 @@ export default function VideoPreview({
   };
 
   const handleTimeUpdateInternal = () => {
-    if (videoRef.current) {
-      onTimeUpdate(videoRef.current.currentTime);
+    if (!videoRef.current) return;
+    const cur = videoRef.current.currentTime;
+
+    // Real-time skipping of deleted cut sections
+    if (skipDeletedCuts && customParts && customParts.length > 0) {
+      const activeCut = customParts.find((p) => p.isDeleted && cur >= p.startTime && cur < p.endTime);
+      if (activeCut) {
+        // Find next kept segment
+        const nextKept = customParts.find((p) => !p.isDeleted && p.startTime >= activeCut.endTime);
+        if (nextKept) {
+          videoRef.current.currentTime = nextKept.startTime;
+          onTimeUpdate(nextKept.startTime);
+          setSkippedNotice(true);
+          clearTimeout(skipTimeoutRef.current);
+          skipTimeoutRef.current = setTimeout(() => setSkippedNotice(false), 1400);
+          return;
+        } else {
+          // Reached end of kept content
+          videoRef.current.pause();
+          setIsPlaying(false);
+          return;
+        }
+      }
     }
+
+    onTimeUpdate(cur);
   };
 
   const handleSeek = (e) => {
@@ -328,6 +362,45 @@ export default function VideoPreview({
     };
   };
 
+  // ── Drag-to-Reposition Captions ────────────────────────────────────────────
+  const handleCaptionMouseDown = (e) => {
+    if (!onCaptionSettingsChange || !captionSettings?.enabled) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const parentRect = (phoneViewportRef.current || containerRef.current)?.getBoundingClientRect();
+    if (!parentRect) return;
+
+    setIsDraggingCaption(true);
+    dragCaptionRef.current = {
+      active: true,
+      startX: e.clientX,
+      startY: e.clientY,
+      parentWidth: parentRect.width,
+      parentHeight: parentRect.height,
+      currentYPct: captionSettings.customY ?? 80,
+      currentXPct: captionSettings.customX ?? 50
+    };
+  };
+
+  const handleCaptionTouchStart = (e) => {
+    if (!onCaptionSettingsChange || !captionSettings?.enabled) return;
+    const touch = e.touches[0];
+    const parentRect = (phoneViewportRef.current || containerRef.current)?.getBoundingClientRect();
+    if (!parentRect) return;
+
+    setIsDraggingCaption(true);
+    dragCaptionRef.current = {
+      active: true,
+      startX: touch.clientX,
+      startY: touch.clientY,
+      parentWidth: parentRect.width,
+      parentHeight: parentRect.height,
+      currentYPct: captionSettings.customY ?? 80,
+      currentXPct: captionSettings.customX ?? 50
+    };
+  };
+
   useEffect(() => {
     const handleMouseMove = (e) => {
       // 1. Crop box drag / resize
@@ -425,10 +498,30 @@ export default function VideoPreview({
           customX: Math.round(newXPct)
         });
       }
+
+      // 5. Caption overlay drag
+      if (dragCaptionRef.current.active && onCaptionSettingsChange) {
+        const dy = e.clientY - dragCaptionRef.current.startY;
+        const dx = e.clientX - dragCaptionRef.current.startX;
+
+        const deltaYPct = (dy / dragCaptionRef.current.parentHeight) * 100;
+        const deltaXPct = (dx / dragCaptionRef.current.parentWidth) * 100;
+
+        const newYPct = Math.max(5, Math.min(95, dragCaptionRef.current.currentYPct + deltaYPct));
+        const newXPct = Math.max(5, Math.min(95, dragCaptionRef.current.currentXPct + deltaXPct));
+
+        onCaptionSettingsChange({
+          ...captionSettings,
+          customY: Math.round(newYPct),
+          customX: Math.round(newXPct),
+          position: 'custom'
+        });
+      }
     };
 
     const handleTouchMove = (e) => {
       const touch = e.touches[0];
+      if (!touch) return;
 
       // 1. Crop box drag / resize on touch
       if (dragCropRef.current.active && onCropChange) {
@@ -522,6 +615,24 @@ export default function VideoPreview({
           customX: Math.round(newXPct)
         });
       }
+
+      if (dragCaptionRef.current.active && onCaptionSettingsChange) {
+        const dy = touch.clientY - dragCaptionRef.current.startY;
+        const dx = touch.clientX - dragCaptionRef.current.startX;
+
+        const deltaYPct = (dy / dragCaptionRef.current.parentHeight) * 100;
+        const deltaXPct = (dx / dragCaptionRef.current.parentWidth) * 100;
+
+        const newYPct = Math.max(5, Math.min(95, dragCaptionRef.current.currentYPct + deltaYPct));
+        const newXPct = Math.max(5, Math.min(95, dragCaptionRef.current.currentXPct + deltaXPct));
+
+        onCaptionSettingsChange({
+          ...captionSettings,
+          customY: Math.round(newYPct),
+          customX: Math.round(newXPct),
+          position: 'custom'
+        });
+      }
     };
 
     const handleEnd = () => {
@@ -529,10 +640,12 @@ export default function VideoPreview({
       dragTextRef.current.active = false;
       dragExtraTextRef.current.active = false;
       dragLogoRef.current.active = false;
+      dragCaptionRef.current.active = false;
       setIsDraggingCrop(false);
       setIsDraggingText(false);
       setDraggingExtraId(null);
       setIsDraggingLogo(false);
+      setIsDraggingCaption(false);
     };
 
     window.addEventListener('mousemove', handleMouseMove);
@@ -546,14 +659,26 @@ export default function VideoPreview({
       window.removeEventListener('touchmove', handleTouchMove);
       window.removeEventListener('touchend', handleEnd);
     };
-  }, [onCropChange, cropSettings, onTextChange, textSettings, onLogoChange, logoSettings]);
+  }, [onCropChange, cropSettings, onTextChange, textSettings, onLogoChange, logoSettings, onCaptionSettingsChange, captionSettings]);
 
-  // Compute text string from template
+  // Compute text string from template with dynamic playhead part detection
   const getRenderedText = () => {
     if (!textSettings) return '';
+    const baseStartPart = Math.max(1, parseInt(textSettings.startPart) || 1);
+
+    let activePartNumber = baseStartPart;
+    if (customParts && customParts.length > 0) {
+      const kept = customParts.filter(p => !p.isDeleted);
+      const activeIdx = kept.findIndex(p => currentTime >= p.startTime - 0.05 && currentTime <= p.endTime + 0.05);
+      if (activeIdx !== -1) {
+        activePartNumber = baseStartPart + activeIdx;
+      }
+    }
+
     const formattedPart = textSettings.zeroPad
-      ? String(textSettings.startPart || 1).padStart(2, '0')
-      : String(textSettings.startPart || 1);
+      ? String(activePartNumber).padStart(2, '0')
+      : String(activePartNumber);
+
     return (textSettings.template || '{movie} - Part {part}')
       .replace(/{movie}/g, textSettings.movieName || 'My Movie')
       .replace(/{part}/g, formattedPart);
@@ -720,6 +845,113 @@ export default function VideoPreview({
     return style;
   };
 
+  // Compute Caption overlay position style
+  const getCaptionOverlayStyle = () => {
+    if (!captionSettings) return {};
+    const previewFontSize = previewMode === 'vertical'
+      ? Math.max(12, Math.round((captionSettings.fontSize || 32) * (236 / 540)))
+      : Math.round((captionSettings.fontSize || 32) * 0.75);
+
+    const style = {
+      position: 'absolute',
+      fontFamily: captionSettings.font || 'Inter, sans-serif',
+      fontSize: `${previewFontSize}px`,
+      color: captionSettings.color || '#ffffff',
+      fontWeight: 900,
+      lineHeight: 1.25,
+      zIndex: 44,
+      maxWidth: '88%',
+      textAlign: 'center',
+      userSelect: 'none',
+      touchAction: 'none',
+      cursor: 'move',
+      transform: 'translate(-50%, -50%)'
+    };
+
+    if (typeof captionSettings.customX === 'number') {
+      style.left = `${captionSettings.customX}%`;
+    } else {
+      style.left = '50%';
+    }
+
+    if (typeof captionSettings.customY === 'number') {
+      style.top = `${captionSettings.customY}%`;
+    } else if (captionSettings.position === 'top-center') {
+      style.top = '16%';
+    } else if (captionSettings.position === 'center') {
+      style.top = '50%';
+    } else {
+      style.top = '80%';
+    }
+
+    if (captionSettings.bgEnabled) {
+      style.backgroundColor = captionSettings.bgColor || 'rgba(0, 0, 0, 0.75)';
+      style.padding = '4px 10px';
+      style.borderRadius = '8px';
+    }
+
+    if (captionSettings.outline !== false) {
+      const thickness = Math.max(2, Math.round((captionSettings.outlineThickness || 4) * 0.65));
+      const color = captionSettings.outlineColor || '#000000';
+      style.textShadow = `
+        -${thickness}px -${thickness}px 0 ${color},
+         ${thickness}px -${thickness}px 0 ${color},
+        -${thickness}px  ${thickness}px 0 ${color},
+         ${thickness}px  ${thickness}px 0 ${color},
+         0px  ${thickness}px 0 ${color},
+         0px -${thickness}px 0 ${color},
+         ${thickness}px 0px 0 ${color},
+        -${thickness}px 0px 0 ${color}
+      `;
+    }
+
+    return style;
+  };
+
+  // Find active caption segment for the current playhead
+  const activeCaption = (captionSettings?.enabled && captionSettings?.captions?.length > 0)
+    ? captionSettings.captions.find(c => currentTime >= c.startTime - 0.05 && currentTime <= c.endTime + 0.05)
+    : null;
+
+  // Render active words with word-level highlight animation
+  const getRenderedCaptionWords = () => {
+    if (!activeCaption) return null;
+    const wordsList = activeCaption.words && activeCaption.words.length > 0
+      ? activeCaption.words
+      : (activeCaption.text || '').split(/\s+/).map((w, idx, arr) => {
+          const dur = (activeCaption.endTime - activeCaption.startTime) / arr.length;
+          return {
+            word: w,
+            startTime: activeCaption.startTime + idx * dur,
+            endTime: activeCaption.startTime + (idx + 1) * dur
+          };
+        });
+
+    const isHighlightMode = captionSettings.style === 'highlight-word';
+    const isBoldShorts = captionSettings.style === 'bold-shorts';
+    const isUpper = isBoldShorts || isHighlightMode || captionSettings.uppercase !== false;
+
+    return wordsList.map((wObj, idx) => {
+      const isWordActive = isHighlightMode && currentTime >= wObj.startTime - 0.05 && currentTime <= wObj.endTime + 0.05;
+      const wordText = isUpper ? wObj.word.toUpperCase() : wObj.word;
+
+      return (
+        <span
+          key={idx}
+          style={{
+            color: isWordActive ? (captionSettings.highlightColor || '#facc15') : (captionSettings.color || '#ffffff'),
+            display: 'inline-block',
+            margin: '0 2.5px',
+            transform: isWordActive ? 'scale(1.08)' : 'scale(1)',
+            transition: 'transform 0.1s ease, color 0.1s ease'
+          }}
+        >
+          {wordText}
+        </span>
+      );
+    });
+  };
+
   const getCropBoxDimensions = () => {
     if (cropSettings?.mode === 'custom') {
       return {
@@ -813,6 +1045,14 @@ export default function VideoPreview({
 
       {/* Main Viewport */}
       <div className="relative flex-1 flex items-center justify-center overflow-hidden bg-slate-950 p-2 sm:p-4 min-h-[260px] sm:min-h-[380px]">
+        {/* Skipped Cut Notice Badge */}
+        {skippedNotice && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-rose-600/90 border border-rose-400 text-white font-semibold text-xs px-3.5 py-1.5 rounded-full shadow-2xl backdrop-blur-md flex items-center space-x-1.5 pointer-events-none animate-bounce">
+            <Scissors className="w-3.5 h-3.5 text-white" />
+            <span>Skipped Cut Section</span>
+          </div>
+        )}
+
         {videoData?.url ? (
           previewMode === 'vertical' && isVerticalCrop && !isCustomCrop ? (
             /* ── VERTICAL 9:16 PHONE VIEWPORT ── */
@@ -974,6 +1214,30 @@ export default function VideoPreview({
                 </div>
               )}
 
+              {/* ── DRAGGABLE CAPTION OVERLAY ── */}
+              {captionSettings?.enabled && activeCaption && (
+                <div
+                  style={getCaptionOverlayStyle()}
+                  onMouseDown={handleCaptionMouseDown}
+                  onTouchStart={handleCaptionTouchStart}
+                  className={`group/caption transition-shadow touch-manipulation cursor-move ${
+                    isDraggingCaption
+                      ? 'ring-2 ring-amber-400 ring-offset-2 ring-offset-black/50 shadow-2xl'
+                      : 'hover:ring-1 hover:ring-amber-400/60'
+                  }`}
+                  title="Click and drag anywhere on screen to reposition captions"
+                >
+                  <div className="flex flex-wrap items-center justify-center">
+                    {getRenderedCaptionWords()}
+                  </div>
+
+                  <div className="absolute -top-5 left-1/2 -translate-x-1/2 opacity-0 group-hover/caption:opacity-100 transition-opacity bg-black/80 text-amber-300 text-[9px] px-2 py-0.5 rounded-full border border-amber-500/40 pointer-events-none flex items-center space-x-1 font-mono whitespace-nowrap shadow-lg">
+                    <GripVertical className="w-2.5 h-2.5" />
+                    <span>Drag captions</span>
+                  </div>
+                </div>
+              )}
+
               {/* Phone Status bar */}
               <div className="absolute top-2 inset-x-0 flex justify-between px-3 sm:px-4 text-[9px] font-mono text-white/50 pointer-events-none z-30 drop-shadow">
                 <span>9:16 SHORTS / REELS</span>
@@ -1120,6 +1384,20 @@ export default function VideoPreview({
                   <img src={logoSettings.url} alt="Logo" className="w-full h-auto object-contain pointer-events-none" />
                 </div>
               )}
+
+              {/* Captions in Framing view */}
+              {captionSettings?.enabled && activeCaption && (
+                <div
+                  style={getCaptionOverlayStyle()}
+                  onMouseDown={handleCaptionMouseDown}
+                  onTouchStart={handleCaptionTouchStart}
+                  className="hover:ring-1 hover:ring-amber-400/60 rounded touch-manipulation cursor-move"
+                >
+                  <div className="flex flex-wrap items-center justify-center">
+                    {getRenderedCaptionWords()}
+                  </div>
+                </div>
+              )}
             </div>
           )
         ) : (
@@ -1202,7 +1480,31 @@ export default function VideoPreview({
               </div>
             </div>
 
-            <div className="flex items-center space-x-1 sm:space-x-2">
+            <div className="flex items-center space-x-1.5 sm:space-x-2">
+              {/* Quick Split at Playhead on Player */}
+              {onSplitAtPlayhead && (
+                <button
+                  onClick={onSplitAtPlayhead}
+                  className="px-2 sm:px-2.5 py-1 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 rounded-lg text-[11px] sm:text-xs font-semibold flex items-center space-x-1 transition-all cursor-pointer touch-manipulation active:scale-95"
+                  title="Split video at current time"
+                >
+                  <Scissors className="w-3 h-3 text-amber-400" />
+                  <span className="hidden xs:inline">Split</span>
+                </button>
+              )}
+
+              {/* Quick Cut/Keep Toggle on Player */}
+              {onToggleCutAtPlayhead && (
+                <button
+                  onClick={onToggleCutAtPlayhead}
+                  className="px-2 sm:px-2.5 py-1 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 rounded-lg text-[11px] sm:text-xs font-semibold flex items-center space-x-1 transition-all cursor-pointer touch-manipulation active:scale-95"
+                  title="Toggle Cut/Keep under playhead"
+                >
+                  <span className="hidden xs:inline">Cut/Keep</span>
+                  <span className="xs:hidden">Cut</span>
+                </button>
+              )}
+
               <button
                 onClick={toggleFullscreen}
                 className="p-1.5 sm:p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer touch-manipulation"

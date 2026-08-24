@@ -1,6 +1,17 @@
 import React, { useState } from 'react';
-import { PlayCircle, Download, CheckCircle2, Clock, XCircle, AlertCircle, Trash2, StopCircle, RefreshCw, Hash, Sliders, Youtube, ExternalLink, Upload, Calendar, RotateCcw } from 'lucide-react';
+import {
+  PlayCircle, Download, CheckCircle2, Clock, XCircle, AlertCircle, Trash2,
+  StopCircle, RefreshCw, Hash, Sliders, Youtube, ExternalLink, Upload,
+  Calendar, RotateCcw, Sparkles, Send, Check, ChevronDown, ChevronUp, Edit3,
+  Globe, Lock, ShieldCheck, Zap
+} from 'lucide-react';
 import { formatTime } from '../utils/time';
+import {
+  formatScheduledDateTime,
+  formatRelativeOffset,
+  toDateTimeLocalString,
+  formatIntervalLabel
+} from '../utils/scheduler';
 
 export default function ProcessingQueue({
   queue,
@@ -11,12 +22,18 @@ export default function ProcessingQueue({
   onDownloadClip,
   isProcessing,
   totalPossibleParts = 1,
-  // YouTube upload state (optional — only present when YouTube is configured)
+  pipelineStartTime,
+  // YouTube upload state
   uploadJobs = {},
   onUploadClip,
   onCancelUpload,
   onRetryUpload,
-  isConnected = false
+  isConnected = false,
+  ytAccount = null,
+  ytSettings = {},
+  isAuthenticated = false,
+  onOpenAuth,
+  connectYouTube
 }) {
   // Option: 'all' | 'first-n' | 'range'
   const [generateOption, setGenerateOption] = useState('all');
@@ -24,82 +41,107 @@ export default function ProcessingQueue({
   const [rangeStart, setRangeStart] = useState(1);
   const [rangeEnd, setRangeEnd] = useState(Math.min(3, totalPossibleParts));
 
+  // Modal for editing an individual clip's scheduled publish time
+  const [editingJob, setEditingJob] = useState(null);
+  const [editScheduledTime, setEditScheduledTime] = useState('');
+
+  const isAutoUploadActive = isConnected && ytSettings?.yt_default_upload === 'auto';
+  const scheduleInterval = ytSettings?.schedule_interval || '1hour';
+
   const handleTriggerGenerate = () => {
     onGenerateQueue({
       mode: generateOption,
       count: firstNCount,
       start: rangeStart,
-      end: rangeEnd
+      end: rangeEnd,
+      autoSchedule: isAutoUploadActive,
+      scheduleStartTime: pipelineStartTime,
+      scheduleInterval: scheduleInterval
     });
   };
 
+  const openEditModal = (job, currentScheduledAt) => {
+    setEditingJob(job);
+    setEditScheduledTime(
+      currentScheduledAt
+        ? toDateTimeLocalString(new Date(currentScheduledAt))
+        : toDateTimeLocalString(new Date(Date.now() + 3600000))
+    );
+  };
+
+  const handleSaveIndividualSchedule = () => {
+    if (!editingJob) return;
+    const isoString = new Date(editScheduledTime).toISOString();
+    editingJob.scheduledAt = isoString;
+    if (uploadJobs[editingJob.id]) {
+      uploadJobs[editingJob.id].scheduledAt = isoString;
+    }
+    setEditingJob(null);
+  };
+
   const getStatusBadge = (status, progress, job) => {
-    // Check for live upload state override
     const uploadState = uploadJobs[job?.id];
 
     if (uploadState) {
       switch (uploadState.status) {
         case 'queued':
           return (
-            <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20 shrink-0">
-              <Upload className="w-3 h-3 mr-1" /> Upload Queued
+            <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-blue-500/15 text-blue-400 border border-blue-500/25 shrink-0">
+              <Upload className="w-3 h-3 mr-1 animate-pulse" /> Auto-Upload Queued
             </span>
           );
         case 'uploading':
           return (
-            <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20 animate-pulse shrink-0">
+            <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-blue-500/20 text-blue-300 border border-blue-500/30 animate-pulse shrink-0">
               <Upload className="w-3 h-3 mr-1 animate-bounce" /> Uploading {uploadState.progress || 0}%
             </span>
           );
         case 'uploaded':
           return (
-            <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-red-500/10 text-red-400 border border-red-500/20 shrink-0">
-              <Youtube className="w-3 h-3 mr-1" /> Uploaded
+            <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 shrink-0">
+              <CheckCircle2 className="w-3 h-3 mr-1" /> Uploaded to YouTube
             </span>
           );
         case 'scheduled':
           return (
-            <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20 shrink-0">
-              <Calendar className="w-3 h-3 mr-1" /> Scheduled
+            <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-purple-500/20 text-purple-300 border border-purple-500/30 shrink-0">
+              <Calendar className="w-3 h-3 mr-1 text-purple-400" /> Scheduled on YouTube
             </span>
           );
         case 'upload_failed':
           return (
-            <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20 shrink-0">
-              <AlertCircle className="w-3 h-3 mr-1" /> Upload Failed
+            <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-rose-500/15 text-rose-400 border border-rose-500/25 shrink-0">
+              <XCircle className="w-3 h-3 mr-1" /> Upload Failed
             </span>
           );
-        case 'upload_cancelled':
-          return (
-            <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-slate-800 text-slate-500 shrink-0">
-              <XCircle className="w-3 h-3 mr-1" /> Upload Cancelled
-            </span>
-          );
+        default:
+          break;
       }
     }
 
     switch (status) {
-      case 'completed':
-        return (
-          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">
-            <CheckCircle2 className="w-3 h-3 mr-1 text-emerald-400" /> Completed
-          </span>
-        );
       case 'processing':
         return (
-          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-orange-500/10 text-orange-400 border border-orange-500/20 animate-pulse shrink-0">
-            <RefreshCw className="w-3 h-3 mr-1 text-orange-400 animate-spin" /> {progress || 0}%
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30 animate-pulse shrink-0">
+            <RefreshCw className="w-3 h-3 mr-1 animate-spin" />
+            Rendering {progress != null ? `${progress}%` : ''}
           </span>
         );
       case 'waiting':
         return (
-          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-slate-800 text-slate-400 shrink-0">
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-slate-800 text-slate-400 border border-slate-700 shrink-0">
             <Clock className="w-3 h-3 mr-1" /> Waiting
+          </span>
+        );
+      case 'completed':
+        return (
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 shrink-0">
+            <CheckCircle2 className="w-3 h-3 mr-1" /> Ready
           </span>
         );
       case 'failed':
         return (
-          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20 shrink-0">
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-rose-500/15 text-rose-400 border border-rose-500/25 shrink-0">
             <AlertCircle className="w-3 h-3 mr-1" /> Failed
           </span>
         );
@@ -119,9 +161,22 @@ export default function ProcessingQueue({
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-2.5 pb-3 border-b border-slate-800">
         <div>
-          <h3 className="font-semibold text-xs sm:text-sm text-white">Batch Processing Queue</h3>
+          <h3 className="font-semibold text-xs sm:text-sm text-white flex items-center space-x-2">
+            <span>Batch Processing Queue</span>
+            {queue.length > 0 && (
+              <span className="px-2 py-0.5 text-[10px] bg-orange-500/20 text-orange-300 font-mono rounded-full font-bold border border-orange-500/30">
+                {queue.length} Active Job{queue.length > 1 ? 's' : ''}
+              </span>
+            )}
+            {isAutoUploadActive && (
+              <span className="px-2 py-0.5 text-[10px] bg-purple-500/20 text-purple-300 font-mono rounded-full font-bold border border-purple-500/30 flex items-center space-x-1">
+                <Zap className="w-3 h-3 text-purple-400" />
+                <span>YouTube {scheduleInterval} Pipeline</span>
+              </span>
+            )}
+          </h3>
           <p className="text-[11px] sm:text-xs text-slate-400">
-            Choose how many parts you want to generate and download
+            Automate video export and manage rendering queue
           </p>
         </div>
 
@@ -140,7 +195,7 @@ export default function ProcessingQueue({
         <div className="flex flex-wrap items-center justify-between gap-2.5">
           <div className="flex items-center space-x-2">
             <Hash className="w-4 h-4 text-orange-400" />
-            <span className="text-xs font-semibold text-slate-200">How many parts to generate?</span>
+            <span className="text-xs font-semibold text-slate-200">How many clips to generate?</span>
           </div>
 
           {/* Preset Mode Tabs */}
@@ -184,7 +239,8 @@ export default function ProcessingQueue({
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-2 border-t border-slate-900">
           {generateOption === 'all' && (
             <span className="text-xs text-slate-400">
-              Will generate all <strong className="text-amber-400 font-mono">{totalPossibleParts}</strong> clips for download.
+              Will generate all <strong className="text-amber-400 font-mono">{totalPossibleParts}</strong> active clips
+              {isAutoUploadActive ? ` with automated YouTube ${formatIntervalLabel(scheduleInterval)} schedule pipeline` : ''}.
             </span>
           )}
 
@@ -270,7 +326,7 @@ export default function ProcessingQueue({
           <Clock className="w-6 h-6 sm:w-7 sm:h-7 text-slate-600 mx-auto mb-1.5" />
           <p className="text-xs font-medium text-slate-400">No clips currently running</p>
           <p className="text-[11px] text-slate-500 mt-0.5">
-            Click the orange button above to start generating clips
+            Click the orange button above to queue and export clips
           </p>
         </div>
       ) : (
@@ -280,6 +336,7 @@ export default function ProcessingQueue({
             const isUploading = uploadState?.status === 'uploading' || uploadState?.status === 'queued';
             const uploadFailed = uploadState?.status === 'upload_failed';
             const uploaded = uploadState?.status === 'uploaded' || uploadState?.status === 'scheduled';
+            const scheduledAt = uploadState?.scheduledAt || job.scheduledAt;
 
             return (
               <div
@@ -293,121 +350,158 @@ export default function ProcessingQueue({
                       {job.name || `Part ${String(job.partNumber).padStart(2, '0')}`}
                     </span>
                     {getStatusBadge(job.status, job.progress, job)}
+
+                    {/* Scheduled Publish Time Badge */}
+                    {scheduledAt && (
+                      <span
+                        onClick={() => openEditModal(job, scheduledAt)}
+                        className="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-purple-500/15 text-purple-300 border border-purple-500/30 hover:bg-purple-500/25 transition-all cursor-pointer"
+                        title="Click to adjust scheduled release time"
+                      >
+                        <Calendar className="w-3 h-3 text-purple-400" />
+                        <span>Scheduled: {formatScheduledDateTime(scheduledAt)}</span>
+                        <Edit3 className="w-2.5 h-2.5 opacity-60 ml-0.5" />
+                      </span>
+                    )}
                   </div>
 
-                  <div className="flex items-center space-x-1.5 sm:space-x-2 text-[11px] sm:text-xs text-slate-400 mt-1 font-mono flex-wrap">
-                    <span>
-                      {formatTime(job.startTime)} &rarr; {formatTime(job.endTime)}
-                    </span>
+                  <div className="flex items-center space-x-2 text-[11px] text-slate-400 font-mono mt-1">
+                    <span>{formatTime(job.startTime)} &rarr; {formatTime(job.endTime)}</span>
                     <span>&bull;</span>
-                    <span>{formatTime(job.endTime - job.startTime)}</span>
-                    <span>&bull;</span>
-                    <span className="uppercase text-slate-500">{job.format || 'MP4'}</span>
+                    <span>{formatTime(job.duration)}</span>
                   </div>
 
-                  {/* Export Progress Bar */}
-                  {job.status === 'processing' && (
+                  {/* Progress Bar for Rendering or Uploading */}
+                  {(job.status === 'processing' || isUploading) && (
                     <div className="w-full bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
                       <div
-                        className="bg-gradient-to-r from-orange-500 to-amber-400 h-full rounded-full transition-all duration-300"
-                        style={{ width: `${job.progress || 0}%` }}
+                        className={`h-full transition-all duration-300 ${
+                          isUploading
+                            ? 'bg-gradient-to-r from-blue-500 to-indigo-400'
+                            : 'bg-gradient-to-r from-amber-500 to-orange-400'
+                        }`}
+                        style={{
+                          width: `${isUploading ? (uploadState.progress || 0) : (job.progress || 0)}%`
+                        }}
                       />
                     </div>
                   )}
 
-                  {/* Upload Progress Bar */}
-                  {isUploading && uploadState?.progress != null && (
-                    <div className="w-full bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
-                      <div
-                        className="bg-gradient-to-r from-red-500 to-orange-400 h-full rounded-full transition-all duration-300"
-                        style={{ width: `${uploadState.progress || 0}%` }}
-                      />
-                    </div>
-                  )}
-
-                  {/* Upload failure message */}
-                  {uploadFailed && uploadState?.error && (
-                    <p className="text-[10px] text-rose-400 mt-1 truncate max-w-xs">{uploadState.error}</p>
-                  )}
-
-                  {/* YouTube video link */}
-                  {uploaded && uploadState?.videoId && (
-                    <a
-                      href={`https://www.youtube.com/watch?v=${uploadState.videoId}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center space-x-1 text-[10px] text-red-400 hover:text-red-300 mt-1 transition-colors"
-                    >
-                      <ExternalLink className="w-2.5 h-2.5" />
-                      <span>Open on YouTube</span>
-                    </a>
+                  {uploadState?.error && (
+                    <p className="text-[11px] text-rose-400 mt-1">{uploadState.error}</p>
                   )}
                 </div>
 
-                {/* Action Buttons */}
-                <div className="flex items-center space-x-2 shrink-0 flex-wrap gap-1">
-                  {job.status === 'completed' ? (
+                {/* Actions */}
+                <div className="flex items-center space-x-1.5 shrink-0">
+                  {job.status === 'waiting' && (
+                    <button
+                      onClick={() => onCancelJob(job.id)}
+                      className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-slate-900 transition-colors cursor-pointer touch-manipulation"
+                      title="Cancel job"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+
+                  {job.status === 'processing' && (
+                    <button
+                      onClick={() => onCancelJob(job.id)}
+                      className="p-1.5 text-rose-400 hover:text-rose-300 rounded-lg hover:bg-rose-500/10 transition-colors cursor-pointer touch-manipulation"
+                      title="Stop processing"
+                    >
+                      <StopCircle className="w-4 h-4" />
+                    </button>
+                  )}
+
+                  {job.status === 'completed' && job.outputUrl && (
                     <>
                       <button
                         onClick={() => onPreviewClip(job)}
-                        className="px-2.5 py-1 text-xs font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors cursor-pointer touch-manipulation"
+                        className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium transition-colors cursor-pointer touch-manipulation"
                       >
                         Preview
                       </button>
                       <button
                         onClick={() => onDownloadClip(job)}
-                        className="px-2.5 sm:px-3 py-1 text-xs font-semibold text-emerald-300 bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-500/40 rounded-lg flex items-center space-x-1 transition-colors cursor-pointer touch-manipulation"
+                        className="p-1.5 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 rounded-lg transition-colors cursor-pointer touch-manipulation"
+                        title="Download MP4"
                       >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>Download</span>
+                        <Download className="w-4 h-4" />
                       </button>
-
-                      {/* Upload to YouTube button — only when connected and not already uploaded */}
-                      {isConnected && onUploadClip && !uploadState && job.blob && (
-                        <button
-                          onClick={() => onUploadClip(job)}
-                          className="px-2.5 py-1 text-xs font-semibold text-red-300 bg-red-950/60 hover:bg-red-900/80 border border-red-500/40 rounded-lg flex items-center space-x-1 transition-colors cursor-pointer touch-manipulation"
-                        >
-                          <Youtube className="w-3.5 h-3.5" />
-                          <span>Upload</span>
-                        </button>
-                      )}
-
-                      {/* Retry upload button */}
-                      {uploadFailed && onRetryUpload && (
-                        <button
-                          onClick={() => onRetryUpload(job)}
-                          className="px-2.5 py-1 text-xs font-semibold text-amber-300 bg-amber-950/60 hover:bg-amber-900/80 border border-amber-500/40 rounded-lg flex items-center space-x-1 transition-colors cursor-pointer touch-manipulation"
-                        >
-                          <RotateCcw className="w-3.5 h-3.5" />
-                          <span>Retry Upload</span>
-                        </button>
-                      )}
-
-                      {/* Cancel upload button */}
-                      {isUploading && onCancelUpload && (
-                        <button
-                          onClick={() => onCancelUpload(job.id)}
-                          className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer touch-manipulation"
-                          title="Cancel Upload"
-                        >
-                          <StopCircle className="w-4 h-4" />
-                        </button>
-                      )}
                     </>
-                  ) : job.status === 'processing' || job.status === 'waiting' ? (
+                  )}
+
+                  {/* YouTube Upload Action */}
+                  {job.status === 'completed' && isConnected && !uploadState && (
                     <button
-                      onClick={() => onCancelJob(job.id)}
-                      className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer touch-manipulation"
-                      title="Cancel Job"
+                      onClick={() => onUploadClip(job)}
+                      className="px-2.5 py-1 bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 text-red-300 rounded-lg text-xs font-semibold flex items-center space-x-1 transition-colors cursor-pointer touch-manipulation"
                     >
-                      <StopCircle className="w-4 h-4" />
+                      <Youtube className="w-3.5 h-3.5" />
+                      <span>Upload</span>
                     </button>
-                  ) : null}
+                  )}
+
+                  {uploadFailed && (
+                    <button
+                      onClick={() => onRetryUpload(job)}
+                      className="p-1.5 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer touch-manipulation"
+                      title="Retry YouTube upload"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Edit Individual Clip Schedule Modal */}
+      {editingJob && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-sm w-full p-4 space-y-3.5 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-bold text-white flex items-center space-x-1.5">
+                <Calendar className="w-4 h-4 text-purple-400" />
+                <span>Edit Scheduled Publish Time</span>
+              </h4>
+              <button
+                onClick={() => setEditingJob(null)}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-[11px] text-slate-400">
+              Set the exact date and time this clip should automatically publish on YouTube:
+            </p>
+
+            <input
+              type="datetime-local"
+              value={editScheduledTime}
+              onChange={(e) => setEditScheduledTime(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-700 text-white text-xs font-mono px-3 py-2 rounded-xl focus:border-purple-500 focus:outline-none"
+            />
+
+            <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-800">
+              <button
+                onClick={() => setEditingJob(null)}
+                className="px-3 py-1.5 text-xs text-slate-400 hover:text-white rounded-lg cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveIndividualSchedule}
+                className="px-3.5 py-1.5 text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white rounded-lg shadow-md cursor-pointer"
+              >
+                Save Schedule
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

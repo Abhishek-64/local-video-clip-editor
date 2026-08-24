@@ -36,7 +36,7 @@ const DEFAULT_YT_SETTINGS = {
   yt_made_for_kids: false,
   yt_notify_subscribers: true,
   yt_default_upload: 'manual', // 'manual' | 'auto'
-  schedule_interval: '1day',
+  schedule_interval: '1hour',
   schedule_base_time: '20:00',
   schedule_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 };

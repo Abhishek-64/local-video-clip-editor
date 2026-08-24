@@ -135,8 +135,8 @@ export function useUploadQueue({
     }) : '');
 
     const tags = clip.tagsOverride || ytSettings.yt_tags || [];
-    const visibility = clip.visibilityOverride || ytSettings.yt_visibility || 'private';
     const scheduledAt = clip.scheduledAt || null;
+    const visibility = scheduledAt ? 'private' : (clip.visibilityOverride || ytSettings.yt_visibility || 'private');
     const madeForKids = clip.madeForKids != null ? clip.madeForKids : (ytSettings.yt_made_for_kids || false);
 
     try {
@@ -157,12 +157,12 @@ export function useUploadQueue({
         mimeType: blob.type || 'video/mp4'
       });
 
-      updateLocalJob(jobId, { uploadUrl });
+      updateLocalJob(jobId, { uploadUrl, scheduledAt });
 
       // Step 2: Upload Blob directly to YouTube (no bytes go through Worker)
       const { videoId } = await uploadBlobToYouTube(uploadUrl, blob, {
         onProgress: (pct) => {
-          updateLocalJob(jobId, { progress: pct });
+          updateLocalJob(jobId, { progress: pct, scheduledAt });
         },
         signal: controller.signal
       });
@@ -182,6 +182,7 @@ export function useUploadQueue({
         status: finalStatus,
         progress: 100,
         videoId,
+        scheduledAt,
         youtubeUrl: buildYouTubeUrl(videoId),
         blobRef: null // release — upload complete
       });
@@ -205,7 +206,8 @@ export function useUploadQueue({
       updateLocalJob(jobId, {
         status: isCancelled ? 'upload_cancelled' : 'upload_failed',
         error: isCancelled ? 'Upload cancelled' : err.message,
-        progress: 0
+        progress: 0,
+        scheduledAt
       });
     } finally {
       activeUploadsRef.current.delete(jobId);
@@ -215,20 +217,23 @@ export function useUploadQueue({
     }
   }, [ytSettings, movieName, renderTemplate, updateLocalJob, refreshHistory, processNextUpload]);
 
-  // ── Watch for newly completed exports ─────────────────────────────────────────
+  // ── Watch for newly completed exports (Auto-Upload) ──────────────────────────
 
   useEffect(() => {
     if (!apiAvailable || !isConnected) return;
-    if (ytSettings.yt_default_upload !== 'auto') return; // Only auto-upload if configured
 
-    const newClips = completedClips.filter(
-      clip => !processedExportIdsRef.current.has(clip.id) && clip.blob
-    );
+    // Filter completed clips that haven't been queued for upload yet
+    const newClips = completedClips.filter(clip => {
+      if (processedExportIdsRef.current.has(clip.id) || !clip.blob) return false;
+      // Auto upload if clip has autoUpload enabled, scheduledAt set, or ytSettings.yt_default_upload === 'auto'
+      const shouldAutoUpload = clip.autoUpload === true || (clip.autoUpload !== false && (clip.scheduledAt || ytSettings.yt_default_upload === 'auto'));
+      return shouldAutoUpload;
+    });
 
     for (const clip of newClips) {
       processedExportIdsRef.current.add(clip.id);
 
-      // Initialize job state
+      // Initialize job state with scheduledAt
       setUploadJobs(prev => ({
         ...prev,
         [clip.id]: {
@@ -236,6 +241,7 @@ export function useUploadQueue({
           progress: 0,
           videoId: null,
           error: null,
+          scheduledAt: clip.scheduledAt || null,
           blobRef: clip.blob
         }
       }));
@@ -268,7 +274,13 @@ export function useUploadQueue({
 
     setUploadJobs(prev => ({
       ...prev,
-      [clip.id]: { status: 'queued', progress: 0, videoId: null, error: null }
+      [clip.id]: {
+        status: 'queued',
+        progress: 0,
+        videoId: null,
+        scheduledAt: enrichedClip.scheduledAt || null,
+        error: null
+      }
     }));
 
     uploadQueueRef.current.push(enrichedClip);

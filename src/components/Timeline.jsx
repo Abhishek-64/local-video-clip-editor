@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Scissors, Clock, Layers, Hash, Film, ListOrdered, Plus, Trash2,
   Play, RefreshCw, ChevronDown, ChevronUp, Copy, ArrowUp, ArrowDown,
-  Target, Edit3, Check, Sparkles
+  Target, Edit3, Check, Sparkles, Magnet, ShieldCheck, Zap, RotateCcw
 } from 'lucide-react';
-import { formatTime, parseTimeToSeconds } from '../utils/time';
+import { formatTime, parseTimeToSeconds, splitKeptParts } from '../utils/time';
 
 export default function Timeline({
   duration = 0,
@@ -20,63 +20,144 @@ export default function Timeline({
   customParts = [],
   onCustomPartsChange
 }) {
-  // 'duration' = set seconds per clip, 'count' = set number of parts, 'manual' = manual seconds for each part
+  // 'duration' = set seconds per clip, 'count' = set number of parts
   const [splitMode, setSplitMode] = useState('duration');
   const [numParts, setNumParts] = useState(5);
-  const [showManualEditor, setShowManualEditor] = useState(true);
+  const [showManualEditor, setShowManualEditor] = useState(false);
+
+  // Preserve Cuts toggle: When true, auto-split only splits KEPT content and preserves deleted/cut sections
+  const [preserveCuts, setPreserveCuts] = useState(true);
 
   // Active playing/previewing part ID
   const [activePreviewPartId, setActivePreviewPartId] = useState(null);
 
+  // Direct Drag-and-Drop State on the Timeline Track
+  const [dragState, setDragState] = useState(null);
+  const trackRef = useRef(null);
+
   const selectedDuration = Math.max(0, endTime - startTime);
 
-  // Derive default calculated parts
-  const generateDefaultPartsList = (mode, partsCount, segSec) => {
-    if (selectedDuration <= 0) return [];
+  // Derive active kept and cut counts
+  const keptParts = useMemo(() => (customParts || []).filter(p => !p.isDeleted), [customParts]);
+  const deletedParts = useMemo(() => (customParts || []).filter(p => p.isDeleted), [customParts]);
 
-    let total = 1;
-    let stepSec = segSec;
-
-    if (mode === 'count') {
-      total = Math.max(1, partsCount);
-      stepSec = selectedDuration / total;
-    } else {
-      total = Math.max(1, Math.ceil(selectedDuration / Math.max(5, segSec)));
-      stepSec = Math.max(5, segSec);
-    }
-
-    const list = [];
-    for (let i = 0; i < total; i++) {
-      const segStart = Math.round((startTime + i * stepSec) * 10) / 10;
-      const segEnd = Math.min(endTime, Math.round((segStart + stepSec) * 10) / 10);
-      list.push({
-        id: `part-${i + 1}-${Date.now() + i}`,
-        partNumber: i + 1,
-        title: '',
-        startTime: segStart,
-        endTime: segEnd,
-        duration: Math.max(0, Math.round((segEnd - segStart) * 10) / 10)
-      });
-    }
-    return list;
+  // Pointer Down handler for drag handles
+  const handlePointerDown = (e, type, index = 0) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    setDragState({ type, index, startX: clientX, isDragging: true });
   };
 
-  // Sync parts list when timeline range or split mode changes
+  // Helper for magnetic snap (within 0.3s)
+  const applyMagneticSnap = (targetTime, excludeIndex = -1) => {
+    if (!customParts || customParts.length === 0) return targetTime;
+    const SNAP_THRESHOLD = 0.35;
+    for (let i = 0; i < customParts.length; i++) {
+      if (i === excludeIndex) continue;
+      const p = customParts[i];
+      if (Math.abs(targetTime - p.startTime) <= SNAP_THRESHOLD) return p.startTime;
+      if (Math.abs(targetTime - p.endTime) <= SNAP_THRESHOLD) return p.endTime;
+    }
+    return targetTime;
+  };
+
+  // Drag Event Listener for Mouse & Mobile Touch
+  useEffect(() => {
+    if (!dragState?.isDragging) return;
+
+    const handlePointerMove = (e) => {
+      if (!trackRef.current || !duration) return;
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const rect = trackRef.current.getBoundingClientRect();
+      const pos = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      let targetTime = Math.round(pos * duration * 10) / 10;
+
+      if (dragState.type === 'start') {
+        targetTime = applyMagneticSnap(targetTime);
+        if (targetTime < endTime - 0.5) {
+          onStartChange(targetTime);
+        }
+      } else if (dragState.type === 'end') {
+        targetTime = applyMagneticSnap(targetTime);
+        if (targetTime > startTime + 0.5) {
+          onEndChange(targetTime);
+        }
+      } else if (dragState.type === 'split-boundary') {
+        const currentList = customParts && customParts.length > 0
+          ? [...customParts]
+          : generateSmartPartsList(splitMode, numParts, clipDuration, false);
+
+        const idx = dragState.index;
+        if (idx >= 0 && idx < currentList.length - 1) {
+          const leftPart = currentList[idx];
+          const rightPart = currentList[idx + 1];
+          const minTime = leftPart.startTime + 0.5;
+          const maxTime = rightPart.endTime - 0.5;
+          const clamped = Math.max(minTime, Math.min(maxTime, targetTime));
+
+          const updated = [...currentList];
+          updated[idx] = {
+            ...leftPart,
+            endTime: clamped,
+            duration: Math.max(0, Math.round((clamped - leftPart.startTime) * 10) / 10)
+          };
+          updated[idx + 1] = {
+            ...rightPart,
+            startTime: clamped,
+            duration: Math.max(0, Math.round((rightPart.endTime - clamped) * 10) / 10)
+          };
+          if (onCustomPartsChange) onCustomPartsChange(updated);
+        }
+      }
+    };
+
+    const handlePointerUp = () => {
+      setDragState(null);
+    };
+
+    window.addEventListener('mousemove', handlePointerMove);
+    window.addEventListener('mouseup', handlePointerUp);
+    window.addEventListener('touchmove', handlePointerMove, { passive: false });
+    window.addEventListener('touchend', handlePointerUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handlePointerMove);
+      window.removeEventListener('mouseup', handlePointerUp);
+      window.removeEventListener('touchmove', handlePointerMove);
+      window.removeEventListener('touchend', handlePointerUp);
+    };
+  }, [dragState, duration, startTime, endTime, customParts, splitMode, numParts, clipDuration]);
+
+  // ── Smart Auto-Split Algorithm (Preserves Deleted/Cut Content) ──────────────
+  const generateSmartPartsList = (mode, partsCount, segSec, shouldPreserve = preserveCuts) => {
+    if (selectedDuration <= 0) return [];
+    return splitKeptParts(
+      shouldPreserve ? customParts : [],
+      duration,
+      mode,
+      mode === 'count' ? partsCount : segSec,
+      { startTime, endTime }
+    );
+  };
+
+  // Sync parts list when timeline range changes or on initial mount
   useEffect(() => {
     if (onCustomPartsChange && (!customParts || customParts.length === 0)) {
-      const initialParts = generateDefaultPartsList(splitMode, numParts, clipDuration);
+      const initialParts = generateSmartPartsList(splitMode, numParts, clipDuration, false);
       onCustomPartsChange(initialParts);
     }
   }, [startTime, endTime]);
 
+  // ── Split Mode Change ───────────────────────────────────────────────────────
   const handleSplitModeChange = (mode) => {
     setSplitMode(mode);
-    const newParts = generateDefaultPartsList(mode, numParts, clipDuration);
+    const newParts = generateSmartPartsList(mode, numParts, clipDuration, preserveCuts);
     if (onCustomPartsChange) onCustomPartsChange(newParts);
 
     if (mode === 'count') {
       const computed = selectedDuration > 0 ? selectedDuration / Math.max(1, numParts) : clipDuration;
-      onClipDurationChange(Math.max(1, computed));
+      onClipDurationChange(Math.max(1, Math.round(computed)));
     }
   };
 
@@ -85,8 +166,8 @@ export default function Timeline({
     setNumParts(parts);
     if (splitMode === 'count') {
       const computed = selectedDuration > 0 ? selectedDuration / parts : clipDuration;
-      onClipDurationChange(Math.max(1, computed));
-      const newParts = generateDefaultPartsList('count', parts, computed);
+      onClipDurationChange(Math.max(1, Math.round(computed)));
+      const newParts = generateSmartPartsList('count', parts, computed, preserveCuts);
       if (onCustomPartsChange) onCustomPartsChange(newParts);
     }
   };
@@ -94,10 +175,11 @@ export default function Timeline({
   const setPresetDuration = (secs) => {
     setSplitMode('duration');
     onClipDurationChange(secs);
-    const newParts = generateDefaultPartsList('duration', numParts, secs);
+    const newParts = generateSmartPartsList('duration', numParts, secs, preserveCuts);
     if (onCustomPartsChange) onCustomPartsChange(newParts);
   };
 
+  // Full Video Reset (Clean single clip)
   const handleFullVideoConvert = () => {
     onStartChange(0);
     onEndChange(duration || 100);
@@ -112,13 +194,33 @@ export default function Timeline({
           title: 'Full Video',
           startTime: 0,
           endTime: duration || 100,
-          duration: duration || 100
+          duration: duration || 100,
+          isDeleted: false
         }
       ]);
     }
   };
 
-  // ── Manual Part Times Editing ───────────────────────────────────────────────
+  // 1-Click Fresh Clean Split (Resets cuts and evenly subdivides entire video)
+  const handleFreshFullSplit = () => {
+    const fresh = generateSmartPartsList(splitMode, numParts, clipDuration, false);
+    if (onCustomPartsChange) onCustomPartsChange(fresh);
+  };
+
+  // ── Renumber Active Kept Clips (1..N) ───────────────────────────────────────
+  const handleRenumberActiveClips = () => {
+    if (!customParts || customParts.length === 0) return;
+    let activeCounter = 1;
+    const renumbered = customParts.map((p) => {
+      if (p.isDeleted) return p;
+      const updated = { ...p, partNumber: activeCounter };
+      activeCounter++;
+      return updated;
+    });
+    if (onCustomPartsChange) onCustomPartsChange(renumbered);
+  };
+
+  // ── Manual Part Times & Cuts Editing ────────────────────────────────────────
 
   const handlePartTimeChange = (index, field, value) => {
     if (!onCustomPartsChange || !customParts) return;
@@ -176,13 +278,16 @@ export default function Timeline({
     const newStart = lastPart ? lastPart.endTime : startTime;
     const newEnd = Math.min(duration || 9999, Math.round((newStart + (clipDuration || 60)) * 10) / 10);
 
+    const activeCount = currentList.filter(p => !p.isDeleted).length;
+
     const newPart = {
       id: `part-${Date.now()}`,
-      partNumber: currentList.length + 1,
+      partNumber: activeCount + 1,
       title: '',
       startTime: Math.round(newStart * 10) / 10,
       endTime: newEnd,
-      duration: Math.max(0, Math.round((newEnd - newStart) * 10) / 10)
+      duration: Math.max(0, Math.round((newEnd - newStart) * 10) / 10),
+      isDeleted: false
     };
 
     onCustomPartsChange([...currentList, newPart]);
@@ -209,8 +314,14 @@ export default function Timeline({
 
     currentList.splice(index + 1, 0, duplicated);
 
-    // Re-number parts
-    const renumbered = currentList.map((p, idx) => ({ ...p, partNumber: idx + 1 }));
+    // Re-number active clips
+    let activeCounter = 1;
+    const renumbered = currentList.map((p) => {
+      if (p.isDeleted) return p;
+      const u = { ...p, partNumber: activeCounter };
+      activeCounter++;
+      return u;
+    });
     onCustomPartsChange(renumbered);
   };
 
@@ -219,7 +330,7 @@ export default function Timeline({
     const playhead = Math.round((currentTime || 0) * 10) / 10;
 
     // Find which part currently encloses the playhead
-    const targetIdx = customParts.findIndex(p => playhead > p.startTime && playhead < p.endTime);
+    const targetIdx = customParts.findIndex(p => playhead > p.startTime + 0.1 && playhead < p.endTime - 0.1);
     if (targetIdx === -1) return;
 
     const originalPart = customParts[targetIdx];
@@ -232,19 +343,27 @@ export default function Timeline({
     };
 
     const newSecondPart = {
-      id: `part-split-${Date.now()}`,
+      id: `part-split-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       partNumber: targetIdx + 2,
       title: originalPart.title ? `${originalPart.title} (Part 2)` : '',
       startTime: playhead,
       endTime: originalEnd,
-      duration: Math.max(0, Math.round((originalEnd - playhead) * 10) / 10)
+      duration: Math.max(0, Math.round((originalEnd - playhead) * 10) / 10),
+      isDeleted: Boolean(originalPart.isDeleted)
     };
 
     const nextList = [...customParts];
     nextList[targetIdx] = updatedFirstPart;
     nextList.splice(targetIdx + 1, 0, newSecondPart);
 
-    const renumbered = nextList.map((p, idx) => ({ ...p, partNumber: idx + 1 }));
+    // Sequentially renumber active parts
+    let activeCounter = 1;
+    const renumbered = nextList.map((p) => {
+      if (p.isDeleted) return p;
+      const u = { ...p, partNumber: activeCounter };
+      activeCounter++;
+      return u;
+    });
     onCustomPartsChange(renumbered);
   };
 
@@ -258,22 +377,47 @@ export default function Timeline({
     list[index] = list[targetIdx];
     list[targetIdx] = temp;
 
-    const renumbered = list.map((p, idx) => ({ ...p, partNumber: idx + 1 }));
+    // Re-number active parts
+    let activeCounter = 1;
+    const renumbered = list.map((p) => {
+      if (p.isDeleted) return p;
+      const u = { ...p, partNumber: activeCounter };
+      activeCounter++;
+      return u;
+    });
     onCustomPartsChange(renumbered);
   };
 
   const handleDeletePart = (index) => {
     if (!onCustomPartsChange || !customParts || customParts.length <= 1) return;
-    const filtered = customParts.filter((_, idx) => idx !== index).map((p, idx) => ({
-      ...p,
-      partNumber: idx + 1
-    }));
-    onCustomPartsChange(filtered);
+    const filtered = customParts.filter((_, idx) => idx !== index);
+
+    // Re-number active parts so the sequence starts at Part 1
+    let activeCounter = 1;
+    const renumbered = filtered.map((p) => {
+      if (p.isDeleted) return p;
+      const u = { ...p, partNumber: activeCounter };
+      activeCounter++;
+      return u;
+    });
+    onCustomPartsChange(renumbered);
   };
 
-  const handleResetPartsToEqual = () => {
-    const fresh = generateDefaultPartsList(splitMode, numParts, clipDuration);
-    if (onCustomPartsChange) onCustomPartsChange(fresh);
+  const handleToggleCutPart = (index) => {
+    if (!onCustomPartsChange || !customParts) return;
+    const updated = customParts.map((p, idx) =>
+      idx === index ? { ...p, isDeleted: !p.isDeleted } : p
+    );
+
+    // Re-number active parts so the first kept part is always Part 1
+    let activeCounter = 1;
+    const renumbered = updated.map((p) => {
+      if (p.isDeleted) return p;
+      const u = { ...p, partNumber: activeCounter };
+      activeCounter++;
+      return u;
+    });
+    onCustomPartsChange(renumbered);
   };
 
   const handleSeekToPart = (part) => {
@@ -289,70 +433,108 @@ export default function Timeline({
 
   const displayPartsList = customParts && customParts.length > 0
     ? customParts
-    : generateDefaultPartsList(splitMode, numParts, clipDuration);
+    : generateSmartPartsList(splitMode, numParts, clipDuration, false);
 
-  // Total runtime of all active clips
-  const totalClipsRuntime = displayPartsList.reduce((acc, p) => acc + (p.duration || 0), 0);
+  // Total runtime of all active kept clips
+  const totalKeptClipsRuntime = displayPartsList
+    .filter(p => !p.isDeleted)
+    .reduce((acc, p) => acc + (p.duration || Math.max(0, p.endTime - p.startTime)), 0);
 
   // Check if current playhead can be split
-  const canSplitAtPlayhead = displayPartsList.some(p => currentTime > p.startTime + 0.5 && currentTime < p.endTime - 0.5);
+  const canSplitAtPlayhead = displayPartsList.some(
+    p => currentTime > p.startTime + 0.2 && currentTime < p.endTime - 0.2
+  );
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 sm:p-5 shadow-lg space-y-4">
-      {/* Top Header Info & Actions */}
-      <div className="flex flex-wrap items-center justify-between gap-2.5 pb-3 border-b border-slate-800">
-        <div className="flex items-center space-x-2">
-          <Scissors className="w-4 h-4 sm:w-5 sm:h-5 text-orange-400" />
-          <h3 className="font-semibold text-xs sm:text-sm text-white">Timeline &amp; Individual Clip Timing</h3>
+    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 sm:p-5 shadow-xl space-y-3.5 selection:bg-orange-500/30">
+      {/* ── 1. Top Header Info & Quick Pro NLE Action Toolbar ── */}
+      <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-800">
+        <div className="flex items-center space-x-2 flex-wrap gap-1">
+          <div className="w-6 h-6 rounded-lg bg-orange-500/20 border border-orange-500/40 flex items-center justify-center text-orange-400">
+            <Scissors className="w-3.5 h-3.5" />
+          </div>
+          <h3 className="font-semibold text-xs sm:text-sm text-white">Timeline Editor</h3>
+
+          {/* Active Export Runtime Pill */}
+          <span className="px-2 py-0.5 bg-orange-500/10 border border-orange-500/30 text-orange-300 rounded-md font-mono text-[11px] font-bold">
+            {formatTime(totalKeptClipsRuntime, true)}
+          </span>
+
+          <span className="text-[11px] text-slate-400 font-medium">
+            ({keptParts.length} active clip{keptParts.length !== 1 ? 's' : ''}
+            {deletedParts.length > 0 ? `, ${deletedParts.length} cut` : ''})
+          </span>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 text-xs">
+        {/* Action Buttons Toolbar */}
+        <div className="flex items-center space-x-1.5 text-xs flex-wrap gap-1">
           {/* Quick Split at Playhead */}
           <button
             onClick={handleSplitAtCurrentTime}
             disabled={!canSplitAtPlayhead}
-            className="px-2.5 py-1 bg-amber-500/10 hover:bg-amber-500/20 disabled:opacity-40 disabled:pointer-events-none active:scale-95 border border-amber-500/30 text-amber-300 rounded-lg flex items-center space-x-1.5 transition-all cursor-pointer touch-manipulation text-[11px] sm:text-xs"
-            title={`Split clip under playhead at ${formatTime(currentTime)}`}
+            className="px-2.5 py-1.5 bg-gradient-to-r from-amber-500/20 to-orange-500/20 hover:from-amber-500/30 hover:to-orange-500/30 disabled:opacity-40 disabled:pointer-events-none active:scale-95 border border-amber-500/40 text-amber-300 rounded-xl flex items-center space-x-1.5 font-bold transition-all cursor-pointer touch-manipulation text-xs shadow-sm"
+            title={`Split video at playhead (Hotkey: S)`}
           >
             <Scissors className="w-3.5 h-3.5" />
-            <span>Split @ {formatTime(currentTime)}</span>
+            <span>Split ({formatTime(currentTime)})</span>
           </button>
 
-          {/* Full Video Button */}
+          {/* Quick Cut/Keep Toggle at Playhead */}
+          <button
+            onClick={() => {
+              if (!customParts || customParts.length === 0) return;
+              const targetIdx = customParts.findIndex(p => currentTime >= p.startTime && currentTime <= p.endTime);
+              if (targetIdx !== -1) {
+                handleToggleCutPart(targetIdx);
+              }
+            }}
+            className="px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 active:scale-95 border border-rose-500/30 text-rose-300 rounded-xl flex items-center space-x-1 font-semibold transition-all cursor-pointer touch-manipulation text-xs"
+            title="Toggle Cut/Keep under playhead (Hotkey: Delete or Backspace)"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Cut / Keep</span>
+          </button>
+
+          {/* Renumber Active Clips 1..N */}
+          <button
+            onClick={handleRenumberActiveClips}
+            className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 text-slate-300 hover:text-white rounded-xl flex items-center space-x-1 transition-all cursor-pointer touch-manipulation text-xs"
+            title="Cleanly renumber all active clips starting from Part 1"
+          >
+            <Hash className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden sm:inline">Renumber 1..N</span>
+            <span className="sm:hidden">1..N</span>
+          </button>
+
+          {/* Full Video Reset */}
           <button
             onClick={handleFullVideoConvert}
-            className="px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 active:scale-95 border border-emerald-500/30 text-emerald-300 rounded-lg flex items-center space-x-1.5 transition-all cursor-pointer touch-manipulation text-[11px] sm:text-xs"
+            className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 text-slate-400 hover:text-slate-200 rounded-xl flex items-center space-x-1 transition-all cursor-pointer touch-manipulation text-xs"
             title="Select entire video as 1 complete clip"
           >
             <Film className="w-3.5 h-3.5" />
-            <span>Full Video</span>
+            <span className="hidden sm:inline">Full</span>
           </button>
-
-          <span className="text-slate-400 hidden md:inline text-xs">
-            Range: <strong className="text-white font-mono">{formatTime(startTime)}</strong> &rarr;{' '}
-            <strong className="text-white font-mono">{formatTime(endTime)}</strong>
-          </span>
-          <span className="px-2 py-0.5 bg-orange-500/10 border border-orange-500/30 text-orange-300 rounded font-mono font-medium text-[11px] sm:text-xs">
-            Total: {formatTime(totalClipsRuntime, true)}
-          </span>
         </div>
       </div>
 
-      {/* Visual Scrubber Timeline Track */}
-      <div className="relative pt-2 sm:pt-4 pb-2">
-        {/* Main Track Background */}
+      {/* ── 2. Visual Scrubber Timeline Track with Direct Drag Handles ── */}
+      <div className="relative pt-3 sm:pt-4 pb-1">
+        {/* Main Track Background with Audio/Waveform Style Lines */}
         <div
-          className="relative h-12 sm:h-14 bg-slate-950 rounded-xl overflow-hidden border border-slate-800 cursor-pointer select-none"
+          ref={trackRef}
+          className="relative h-14 sm:h-16 bg-slate-950 rounded-xl overflow-hidden border border-slate-800 cursor-pointer select-none shadow-inner"
           onClick={(e) => {
-            if (!duration || !onCurrentTimeChange) return;
+            if (!duration || !onCurrentTimeChange || dragState?.isDragging) return;
             const rect = e.currentTarget.getBoundingClientRect();
             const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-            onCurrentTimeChange(pos * duration);
+            const rawTime = pos * duration;
+            onCurrentTimeChange(applyMagneticSnap(rawTime));
           }}
         >
           {/* Active Global Range Highlight */}
           <div
-            className="absolute top-0 bottom-0 bg-slate-900/80 border-y border-slate-700/50 transition-all pointer-events-none"
+            className="absolute top-0 bottom-0 bg-slate-900/60 border-y border-amber-500/30 transition-all pointer-events-none"
             style={{
               left: `${startPercent}%`,
               width: `${Math.max(0, endPercent - startPercent)}%`
@@ -366,32 +548,147 @@ export default function Timeline({
                 const segLeftPct = (part.startTime / duration) * 100;
                 const segWidthPct = ((part.endTime - part.startTime) / duration) * 100;
                 const isSelected = activePreviewPartId === part.id;
+                const isCut = Boolean(part.isDeleted);
 
                 return (
                   <div
                     key={part.id || idx}
-                    className={`absolute top-0 bottom-0 border-r border-dashed border-amber-400/50 flex flex-col justify-between p-1 transition-all ${
-                      isSelected
-                        ? 'bg-amber-500/25 border-r-2 border-r-amber-400'
+                    className={`absolute top-0 bottom-0 border-r flex flex-col justify-between p-1 transition-all ${
+                      isCut
+                        ? 'bg-[repeating-linear-gradient(45deg,rgba(225,29,72,0.15),rgba(225,29,72,0.15)_8px,rgba(15,23,42,0.8)_8px,rgba(15,23,42,0.8)_16px)] border-r-2 border-r-rose-500/70 border-dashed border-rose-500/50'
+                        : isSelected
+                        ? 'bg-amber-500/25 border-r-2 border-r-amber-400 border-dashed shadow-[inset_0_0_12px_rgba(245,158,11,0.2)]'
                         : idx % 2 === 0
-                        ? 'bg-orange-500/15'
-                        : 'bg-indigo-500/15'
+                        ? 'bg-orange-500/15 border-r border-dashed border-amber-400/50'
+                        : 'bg-indigo-500/15 border-r border-dashed border-amber-400/50'
                     }`}
                     style={{ left: `${segLeftPct}%`, width: `${Math.max(1, segWidthPct)}%` }}
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="text-[8px] sm:text-[9px] font-mono text-amber-200 font-bold bg-black/80 px-1 rounded truncate border border-amber-500/30">
-                        P{part.partNumber || idx + 1}
+                    <div className="flex items-center justify-between gap-1">
+                      <span
+                        className={`text-[8px] sm:text-[9px] font-mono font-bold px-1 rounded truncate border ${
+                          isCut
+                            ? 'bg-rose-950/90 text-rose-300 border-rose-500/50 line-through'
+                            : 'bg-black/80 text-amber-200 border-amber-500/30'
+                        }`}
+                      >
+                        {isCut ? '✂️ CUT' : `Part ${part.partNumber || idx + 1}`}
                       </span>
                     </div>
-                    <span className="text-[8px] font-mono text-slate-300 bg-slate-950/80 px-1 rounded truncate self-start border border-slate-800">
-                      {formatTime(part.duration || 0)}
+
+                    <span
+                      className={`text-[8px] font-mono px-1 rounded truncate self-start border ${
+                        isCut
+                          ? 'text-rose-400/80 bg-rose-950/90 border-rose-900/60 line-through'
+                          : 'text-slate-300 bg-slate-950/80 border-slate-800'
+                      }`}
+                    >
+                      {formatTime(part.duration || (part.endTime - part.startTime) || 0)}
                     </span>
                   </div>
                 );
               })}
             </div>
           )}
+
+          {/* Interactive Split Boundary Handles (Drag & Drop boundary between parts) */}
+          {duration > 0 &&
+            displayPartsList.slice(0, -1).map((part, idx) => {
+              const boundaryPct = (part.endTime / duration) * 100;
+              const isDraggingThis = dragState?.type === 'split-boundary' && dragState?.index === idx;
+
+              return (
+                <div
+                  key={`split-handle-${idx}`}
+                  onMouseDown={(e) => handlePointerDown(e, 'split-boundary', idx)}
+                  onTouchStart={(e) => handlePointerDown(e, 'split-boundary', idx)}
+                  style={{ left: `${boundaryPct}%` }}
+                  className={`absolute top-0 bottom-0 w-5 -ml-2.5 z-30 flex items-center justify-center cursor-ew-resize group touch-manipulation ${
+                    isDraggingThis ? 'scale-110' : ''
+                  }`}
+                  title={`Drag to adjust split point (${formatTime(part.endTime)})`}
+                >
+                  <div
+                    className={`w-1.5 h-full rounded-full transition-all flex flex-col items-center justify-center ${
+                      isDraggingThis
+                        ? 'bg-amber-400 shadow-[0_0_10px_#f59e0b]'
+                        : 'bg-amber-400/60 group-hover:bg-amber-400 group-hover:shadow-[0_0_8px_#f59e0b]'
+                    }`}
+                  >
+                    <div className="w-2.5 h-4 bg-amber-500 text-[8px] text-slate-950 font-black rounded-sm flex items-center justify-center shadow">
+                      &bull;
+                    </div>
+                  </div>
+
+                  {/* Tooltip on drag/hover */}
+                  <div
+                    className={`absolute -top-7 px-1.5 py-0.5 bg-slate-900 border border-amber-500/60 text-amber-300 font-mono text-[9px] font-bold rounded shadow-lg pointer-events-none transition-opacity whitespace-nowrap ${
+                      isDraggingThis ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                    }`}
+                  >
+                    ✂️ P{idx + 1}|P{idx + 2}: {formatTime(part.endTime)}
+                  </div>
+                </div>
+              );
+            })}
+
+          {/* Left Start Range Drag Handle (◄) */}
+          <div
+            onMouseDown={(e) => handlePointerDown(e, 'start')}
+            onTouchStart={(e) => handlePointerDown(e, 'start')}
+            style={{ left: `${startPercent}%` }}
+            className={`absolute top-0 bottom-0 w-6 -ml-3 z-40 flex items-center justify-center cursor-ew-resize group touch-manipulation ${
+              dragState?.type === 'start' ? 'scale-110' : ''
+            }`}
+            title={`Drag to adjust Video Start Point (${formatTime(startTime)})`}
+          >
+            <div
+              className={`w-2 h-full rounded-l-md transition-all flex items-center justify-center ${
+                dragState?.type === 'start'
+                  ? 'bg-amber-400 shadow-[0_0_12px_#f59e0b]'
+                  : 'bg-amber-500/90 hover:bg-amber-400 hover:shadow-[0_0_8px_#f59e0b]'
+              }`}
+            >
+              <span className="text-[9px] font-black text-slate-950">&lsaquo;</span>
+            </div>
+            {/* Tooltip */}
+            <div
+              className={`absolute -top-7 left-0 px-1.5 py-0.5 bg-slate-900 border border-amber-500 text-amber-300 font-mono text-[9px] font-bold rounded shadow-lg pointer-events-none transition-opacity whitespace-nowrap ${
+                dragState?.type === 'start' ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+              }`}
+            >
+              Start: {formatTime(startTime)}
+            </div>
+          </div>
+
+          {/* Right End Range Drag Handle (►) */}
+          <div
+            onMouseDown={(e) => handlePointerDown(e, 'end')}
+            onTouchStart={(e) => handlePointerDown(e, 'end')}
+            style={{ left: `${endPercent}%` }}
+            className={`absolute top-0 bottom-0 w-6 -ml-3 z-40 flex items-center justify-center cursor-ew-resize group touch-manipulation ${
+              dragState?.type === 'end' ? 'scale-110' : ''
+            }`}
+            title={`Drag to adjust Video End Point (${formatTime(endTime)})`}
+          >
+            <div
+              className={`w-2 h-full rounded-r-md transition-all flex items-center justify-center ${
+                dragState?.type === 'end'
+                  ? 'bg-amber-400 shadow-[0_0_12px_#f59e0b]'
+                  : 'bg-amber-500/90 hover:bg-amber-400 hover:shadow-[0_0_8px_#f59e0b]'
+              }`}
+            >
+              <span className="text-[9px] font-black text-slate-950">&rsaquo;</span>
+            </div>
+            {/* Tooltip */}
+            <div
+              className={`absolute -top-7 right-0 px-1.5 py-0.5 bg-slate-900 border border-amber-500 text-amber-300 font-mono text-[9px] font-bold rounded shadow-lg pointer-events-none transition-opacity whitespace-nowrap ${
+                dragState?.type === 'end' ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+              }`}
+            >
+              End: {formatTime(endTime)}
+            </div>
+          </div>
 
           {/* Current Playhead Indicator */}
           <div
@@ -402,56 +699,50 @@ export default function Timeline({
           </div>
         </div>
 
-        {/* Global Start / End Range Sliders */}
-        <div className="relative mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-          <div className="space-y-1 bg-slate-950/40 p-2.5 sm:p-0 rounded-xl border sm:border-0 border-slate-800/80">
-            <div className="flex justify-between text-xs">
-              <span className="text-slate-400 font-medium">Video Start Point</span>
-              <span className="font-mono text-amber-400 font-bold">{formatTime(startTime)}</span>
-            </div>
-            <input
-              type="range"
-              min="0"
-              max={duration || 100}
-              step="0.5"
-              value={startTime}
-              onChange={(e) => {
-                const val = parseFloat(e.target.value);
-                if (val < endTime) onStartChange(val);
-              }}
-              className="w-full h-2 sm:h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500 touch-manipulation"
-            />
+        {/* Range Information & Direct Drag Instructions */}
+        <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1.5 px-0.5 flex-wrap gap-2">
+          <div className="flex items-center space-x-1.5">
+            <span>Range:</span>
+            <strong className="text-amber-400 font-mono font-bold">{formatTime(startTime)}</strong>
+            <span>&rarr;</span>
+            <strong className="text-amber-400 font-mono font-bold">{formatTime(endTime)}</strong>
+            <span className="text-slate-500 font-mono">({formatTime(selectedDuration)})</span>
           </div>
 
-          <div className="space-y-1 bg-slate-950/40 p-2.5 sm:p-0 rounded-xl border sm:border-0 border-slate-800/80">
-            <div className="flex justify-between text-xs">
-              <span className="text-slate-400 font-medium">Video End Point</span>
-              <span className="font-mono text-amber-400 font-bold">{formatTime(endTime)}</span>
-            </div>
-            <input
-              type="range"
-              min="0"
-              max={duration || 100}
-              step="0.5"
-              value={endTime}
-              onChange={(e) => {
-                const val = parseFloat(e.target.value);
-                if (val > startTime) onEndChange(val);
-              }}
-              className="w-full h-2 sm:h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500 touch-manipulation"
-            />
-          </div>
+          <span className="text-[10px] text-slate-500 hidden sm:inline">
+            Drag handles &lsaquo; / &rsaquo; or split boundary lines ✂️ to adjust timing
+          </span>
         </div>
       </div>
 
-      {/* Auto Split Presets Row */}
+      {/* ── 3. Smart Auto Split Presets & Cut-Preservation Controls ── */}
       <div className="pt-2 border-t border-slate-800/80 space-y-3">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center space-x-2">
-            <Layers className="w-4 h-4 text-slate-400" />
-            <span className="text-xs font-semibold text-slate-300">Auto Split Mode:</span>
+            <Layers className="w-4 h-4 text-orange-400" />
+            <span className="text-xs font-semibold text-slate-200">Auto Split Engine:</span>
+
+            {/* Smart Cut Preservation Badge / Toggle */}
+            <button
+              onClick={() => {
+                const next = !preserveCuts;
+                setPreserveCuts(next);
+                const updated = generateSmartPartsList(splitMode, numParts, clipDuration, next);
+                if (onCustomPartsChange) onCustomPartsChange(updated);
+              }}
+              className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border transition-colors cursor-pointer flex items-center space-x-1 ${
+                preserveCuts
+                  ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                  : 'bg-slate-800 border-slate-700 text-slate-400'
+              }`}
+              title="When enabled, auto-split preserves your deleted/cut sections and only splits kept content"
+            >
+              <ShieldCheck className="w-3 h-3 text-emerald-400" />
+              <span>{preserveCuts ? 'Preserve Cuts (Active)' : 'Ignore Cuts'}</span>
+            </button>
           </div>
 
+          {/* Mode Switch Pills */}
           <div className="grid grid-cols-2 sm:inline-flex w-full sm:w-auto rounded-lg bg-slate-950 p-0.5 border border-slate-800">
             <button
               onClick={() => handleSplitModeChange('duration')}
@@ -478,29 +769,35 @@ export default function Timeline({
           </div>
         </div>
 
+        {/* Dynamic Preset Bar */}
         {splitMode === 'duration' ? (
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center space-x-2 flex-wrap gap-1.5">
               <span className="text-xs font-medium text-slate-300">Presets:</span>
               <div className="inline-flex rounded-lg bg-slate-950 p-0.5 border border-slate-800">
-                {[15, 30, 60, 90].map((sec) => (
+                {[
+                  { sec: 15, label: '15s (Reels)' },
+                  { sec: 30, label: '30s (TikTok)' },
+                  { sec: 60, label: '60s (Shorts)' },
+                  { sec: 90, label: '90s' }
+                ].map((item) => (
                   <button
-                    key={sec}
-                    onClick={() => setPresetDuration(sec)}
+                    key={item.sec}
+                    onClick={() => setPresetDuration(item.sec)}
                     className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer touch-manipulation ${
-                      clipDuration === sec
+                      clipDuration === item.sec
                         ? 'bg-orange-500 text-white font-semibold shadow-sm'
                         : 'text-slate-400 hover:text-slate-200'
                     }`}
                   >
-                    {sec}s
+                    {item.label}
                   </button>
                 ))}
               </div>
             </div>
 
             <div className="flex items-center space-x-2">
-              <span className="text-xs text-slate-400">Custom Length (s):</span>
+              <span className="text-xs text-slate-400">Custom (s):</span>
               <input
                 type="number"
                 min="5"
@@ -510,19 +807,19 @@ export default function Timeline({
                   setSplitMode('duration');
                   const val = Math.max(5, parseInt(e.target.value) || 5);
                   onClipDurationChange(val);
-                  const fresh = generateDefaultPartsList('duration', numParts, val);
+                  const fresh = generateSmartPartsList('duration', numParts, val, preserveCuts);
                   if (onCustomPartsChange) onCustomPartsChange(fresh);
                 }}
                 className="w-16 bg-slate-950 border border-slate-800 text-white font-mono text-xs px-2 py-1.5 rounded-lg text-center focus:border-orange-500 focus:outline-none"
               />
               <div className="text-xs text-slate-400 pl-1">
-                &rarr; <span className="text-amber-300 font-semibold">{displayPartsList.length} part{displayPartsList.length > 1 ? 's' : ''}</span>
+                &rarr; <span className="text-amber-300 font-semibold">{keptParts.length} active clip{keptParts.length !== 1 ? 's' : ''}</span>
               </div>
             </div>
           </div>
         ) : (
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center space-x-3 bg-slate-950/70 border border-slate-800 rounded-xl px-3.5 py-2">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center space-x-3 bg-slate-950/70 border border-slate-800 rounded-xl px-3.5 py-1.5">
               <Hash className="w-4 h-4 text-orange-400 shrink-0" />
               <div className="flex items-center space-x-2">
                 <span className="text-xs text-slate-300">Parts count:</span>
@@ -548,7 +845,7 @@ export default function Timeline({
                       : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  {n === 1 ? '1 (Full)' : n}
+                  {n === 1 ? '1 (Full)' : `${n} Parts`}
                 </button>
               ))}
             </div>
@@ -556,7 +853,7 @@ export default function Timeline({
         )}
       </div>
 
-      {/* ── MANUAL INDIVIDUAL CLIPS TIME TABLE ── */}
+      {/* ── 4. MANUAL INDIVIDUAL CLIPS TIME TABLE & RENAMING ── */}
       <div className="pt-3 border-t border-slate-800 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <button
@@ -564,18 +861,18 @@ export default function Timeline({
             className="flex items-center space-x-1.5 text-xs font-semibold text-white hover:text-orange-400 cursor-pointer transition-colors touch-manipulation"
           >
             <ListOrdered className="w-4 h-4 text-orange-400" />
-            <span>Individual Clip Timings ({displayPartsList.length} Clips)</span>
+            <span>Individual Clip Timings ({displayPartsList.length} total • {keptParts.length} active)</span>
             {showManualEditor ? <ChevronUp className="w-3.5 h-3.5 text-slate-400" /> : <ChevronDown className="w-3.5 h-3.5 text-slate-400" />}
           </button>
 
           <div className="flex items-center space-x-2">
             <button
-              onClick={handleResetPartsToEqual}
+              onClick={handleFreshFullSplit}
               className="px-2.5 py-1 text-[11px] text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg flex items-center space-x-1 transition-colors cursor-pointer touch-manipulation"
-              title="Reset all parts back to equal intervals"
+              title="Fresh clean split across entire range (clears custom cuts)"
             >
-              <RefreshCw className="w-3 h-3" />
-              <span>Reset Equal</span>
+              <RotateCcw className="w-3 h-3" />
+              <span>Clean Re-Split</span>
             </button>
 
             <button
@@ -590,182 +887,217 @@ export default function Timeline({
 
         {showManualEditor && (
           <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
-            {displayPartsList.map((part, index) => (
-              <div
-                key={part.id || index}
-                className={`bg-slate-950/80 border rounded-2xl p-3 sm:p-3.5 space-y-2.5 transition-all ${
-                  activePreviewPartId === part.id
-                    ? 'border-orange-500/70 shadow-lg shadow-orange-500/5 bg-slate-950'
-                    : 'border-slate-800/90 hover:border-slate-700'
-                }`}
-              >
-                {/* Part Header Row: Part #, Optional Title, Playhead Preview & Action buttons */}
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center space-x-2 min-w-0 flex-1">
-                    <span className="w-7 h-7 rounded-xl bg-orange-500/10 border border-orange-500/30 text-orange-300 font-bold text-xs flex items-center justify-center font-mono shrink-0">
-                      P{part.partNumber || index + 1}
-                    </span>
-
-                    {/* Optional Clip Label / Title */}
-                    <div className="relative flex-1 max-w-[200px] sm:max-w-xs">
-                      <input
-                        type="text"
-                        value={part.title || ''}
-                        onChange={(e) => handlePartTitleChange(index, e.target.value)}
-                        placeholder={`Clip ${part.partNumber || index + 1} Label (e.g. Intro)`}
-                        className="w-full bg-slate-900/80 border border-slate-800 focus:border-orange-500 rounded-lg px-2.5 py-1 text-xs text-white placeholder-slate-600 outline-none transition-colors"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Actions right: Preview, Duplicate, Reorder, Delete */}
-                  <div className="flex items-center space-x-1 shrink-0">
-                    <span className="px-2.5 py-1 bg-slate-900 border border-slate-800 text-amber-300 rounded-lg font-mono text-xs font-semibold mr-1">
-                      {formatTime(Math.max(0, part.endTime - part.startTime), true)}
-                    </span>
-
-                    <button
-                      onClick={() => handleSeekToPart(part)}
-                      className={`p-1.5 rounded-lg transition-colors cursor-pointer touch-manipulation ${
-                        activePreviewPartId === part.id
-                          ? 'bg-emerald-500 text-slate-950'
-                          : 'text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10'
-                      }`}
-                      title={`Preview from ${formatTime(part.startTime)}`}
-                    >
-                      <Play className="w-3.5 h-3.5 fill-current" />
-                    </button>
-
-                    <button
-                      onClick={() => handleDuplicatePart(index)}
-                      className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-amber-500/10 rounded-lg transition-colors cursor-pointer touch-manipulation"
-                      title="Duplicate this clip"
-                    >
-                      <Copy className="w-3.5 h-3.5" />
-                    </button>
-
-                    <button
-                      onClick={() => handleMovePart(index, 'up')}
-                      disabled={index === 0}
-                      className="p-1.5 text-slate-500 hover:text-slate-300 disabled:opacity-30 disabled:pointer-events-none hover:bg-slate-800 rounded-lg transition-colors cursor-pointer touch-manipulation"
-                      title="Move up"
-                    >
-                      <ArrowUp className="w-3.5 h-3.5" />
-                    </button>
-
-                    <button
-                      onClick={() => handleMovePart(index, 'down')}
-                      disabled={index === displayPartsList.length - 1}
-                      className="p-1.5 text-slate-500 hover:text-slate-300 disabled:opacity-30 disabled:pointer-events-none hover:bg-slate-800 rounded-lg transition-colors cursor-pointer touch-manipulation"
-                      title="Move down"
-                    >
-                      <ArrowDown className="w-3.5 h-3.5" />
-                    </button>
-
-                    {displayPartsList.length > 1 && (
-                      <button
-                        onClick={() => handleDeletePart(index)}
-                        className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer touch-manipulation"
-                        title="Delete this clip"
+            {displayPartsList.map((part, index) => {
+              const isCut = Boolean(part.isDeleted);
+              return (
+                <div
+                  key={part.id || index}
+                  className={`border rounded-2xl p-3 sm:p-3.5 space-y-2.5 transition-all ${
+                    isCut
+                      ? 'bg-rose-950/20 border-rose-500/30 opacity-80'
+                      : activePreviewPartId === part.id
+                      ? 'border-orange-500/70 shadow-lg shadow-orange-500/5 bg-slate-950'
+                      : 'border-slate-800/90 hover:border-slate-700 bg-slate-950/80'
+                  }`}
+                >
+                  {/* Part Header Row */}
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center space-x-2 min-w-0 flex-1">
+                      {/* Part Badge with Export Sequencing */}
+                      <span
+                        className={`px-2 py-1 rounded-xl font-bold text-xs flex items-center justify-center font-mono shrink-0 border ${
+                          isCut
+                            ? 'bg-rose-500/10 border-rose-500/30 text-rose-300 line-through'
+                            : 'bg-orange-500/10 border-orange-500/30 text-orange-300'
+                        }`}
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-                </div>
+                        {isCut ? 'CUT' : `Part ${part.partNumber || index + 1}`}
+                      </span>
 
-                {/* Manual Timing Row: Start & End controls */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
-                  {/* Start Point Controls */}
-                  <div className="bg-slate-900/90 border border-slate-800/80 rounded-xl p-2 flex items-center justify-between gap-2">
-                    <div className="flex items-center space-x-1.5">
-                      <span className="text-[11px] text-slate-400 font-medium">Start:</span>
-                      <input
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        max={part.endTime || duration}
-                        value={part.startTime}
-                        onChange={(e) => handlePartTimeChange(index, 'startTime', e.target.value)}
-                        className="w-16 bg-slate-950 border border-slate-700 text-white font-mono text-xs px-2 py-1 rounded-md text-center font-bold focus:border-orange-500 focus:outline-none"
-                      />
-                      <span className="text-[11px] font-mono text-amber-400/90 font-medium">
-                        ({formatTime(part.startTime)})
+                      {/* Optional Clip Label / Title */}
+                      <div className="relative flex-1 max-w-[200px] sm:max-w-xs">
+                        <input
+                          type="text"
+                          value={part.title || ''}
+                          onChange={(e) => handlePartTitleChange(index, e.target.value)}
+                          placeholder={`Clip ${part.partNumber || index + 1} Label (e.g. Intro)`}
+                          className="w-full bg-slate-900/80 border border-slate-800 focus:border-orange-500 rounded-lg px-2.5 py-1 text-xs text-white placeholder-slate-600 outline-none transition-colors"
+                        />
+                      </div>
+
+                      <span
+                        className={`px-2 py-0.5 rounded-md font-mono text-[9px] font-bold border ${
+                          isCut
+                            ? 'bg-rose-500/20 border-rose-500/40 text-rose-300'
+                            : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                        }`}
+                      >
+                        {isCut ? 'EXCLUDED' : 'EXPORT'}
                       </span>
                     </div>
 
-                    <div className="flex items-center space-x-1">
+                    {/* Actions right */}
+                    <div className="flex items-center space-x-1 shrink-0">
+                      <span className="px-2.5 py-1 bg-slate-900 border border-slate-800 text-amber-300 rounded-lg font-mono text-xs font-semibold mr-1">
+                        {formatTime(Math.max(0, part.endTime - part.startTime), true)}
+                      </span>
+
                       <button
-                        onClick={() => handleNudgeTime(index, 'startTime', -1)}
-                        className="px-1.5 py-0.5 text-[10px] font-mono bg-slate-800 hover:bg-slate-700 text-slate-300 rounded cursor-pointer"
-                        title="-1 second"
+                        onClick={() => handleSeekToPart(part)}
+                        className={`p-1.5 rounded-lg transition-colors cursor-pointer touch-manipulation ${
+                          activePreviewPartId === part.id
+                            ? 'bg-emerald-500 text-slate-950'
+                            : 'text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10'
+                        }`}
+                        title={`Preview from ${formatTime(part.startTime)}`}
                       >
-                        -1s
+                        <Play className="w-3.5 h-3.5 fill-current" />
                       </button>
+
+                      {/* Cut / Keep Toggle */}
                       <button
-                        onClick={() => handleNudgeTime(index, 'startTime', 1)}
-                        className="px-1.5 py-0.5 text-[10px] font-mono bg-slate-800 hover:bg-slate-700 text-slate-300 rounded cursor-pointer"
-                        title="+1 second"
+                        onClick={() => handleToggleCutPart(index)}
+                        className={`px-2 py-1 text-[11px] font-semibold rounded-lg border transition-colors cursor-pointer touch-manipulation ${
+                          isCut
+                            ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/30'
+                            : 'bg-rose-500/10 border-rose-500/30 text-rose-300 hover:bg-rose-500/20'
+                        }`}
+                        title={isCut ? 'Restore clip to export' : 'Cut out and exclude this clip from exports'}
                       >
-                        +1s
+                        {isCut ? 'Restore' : 'Cut'}
                       </button>
+
                       <button
-                        onClick={() => handleSetToCurrentPlayhead(index, 'startTime')}
-                        className="px-2 py-1 text-[10px] bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 text-orange-300 rounded font-semibold flex items-center space-x-1 cursor-pointer touch-manipulation"
-                        title={`Set Start to current playhead (${formatTime(currentTime)})`}
+                        onClick={() => handleDuplicatePart(index)}
+                        className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-amber-500/10 rounded-lg transition-colors cursor-pointer touch-manipulation"
+                        title="Duplicate this clip"
                       >
-                        <Target className="w-3 h-3" />
-                        <span>Now</span>
+                        <Copy className="w-3.5 h-3.5" />
                       </button>
+
+                      <button
+                        onClick={() => handleMovePart(index, 'up')}
+                        disabled={index === 0}
+                        className="p-1.5 text-slate-500 hover:text-slate-300 disabled:opacity-30 disabled:pointer-events-none hover:bg-slate-800 rounded-lg transition-colors cursor-pointer touch-manipulation"
+                        title="Move up"
+                      >
+                        <ArrowUp className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
+                        onClick={() => handleMovePart(index, 'down')}
+                        disabled={index === displayPartsList.length - 1}
+                        className="p-1.5 text-slate-500 hover:text-slate-300 disabled:opacity-30 disabled:pointer-events-none hover:bg-slate-800 rounded-lg transition-colors cursor-pointer touch-manipulation"
+                        title="Move down"
+                      >
+                        <ArrowDown className="w-3.5 h-3.5" />
+                      </button>
+
+                      {displayPartsList.length > 1 && (
+                        <button
+                          onClick={() => handleDeletePart(index)}
+                          className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer touch-manipulation"
+                          title="Delete this clip permanently"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   </div>
 
-                  {/* End Point Controls */}
-                  <div className="bg-slate-900/90 border border-slate-800/80 rounded-xl p-2 flex items-center justify-between gap-2">
-                    <div className="flex items-center space-x-1.5">
-                      <span className="text-[11px] text-slate-400 font-medium">End:</span>
-                      <input
-                        type="number"
-                        step="0.1"
-                        min={part.startTime || 0}
-                        max={duration || 9999}
-                        value={part.endTime}
-                        onChange={(e) => handlePartTimeChange(index, 'endTime', e.target.value)}
-                        className="w-16 bg-slate-950 border border-slate-700 text-white font-mono text-xs px-2 py-1 rounded-md text-center font-bold focus:border-orange-500 focus:outline-none"
-                      />
-                      <span className="text-[11px] font-mono text-amber-400/90 font-medium">
-                        ({formatTime(part.endTime)})
-                      </span>
+                  {/* Manual Timing Row */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                    {/* Start Point Controls */}
+                    <div className="bg-slate-900/90 border border-slate-800/80 rounded-xl p-2 flex items-center justify-between gap-2">
+                      <div className="flex items-center space-x-1.5">
+                        <span className="text-[11px] text-slate-400 font-medium">Start:</span>
+                        <input
+                          type="number"
+                          step="0.1"
+                          min="0"
+                          max={part.endTime || duration}
+                          value={part.startTime}
+                          onChange={(e) => handlePartTimeChange(index, 'startTime', e.target.value)}
+                          className="w-16 bg-slate-950 border border-slate-700 text-white font-mono text-xs px-2 py-1 rounded-md text-center font-bold focus:border-orange-500 focus:outline-none"
+                        />
+                        <span className="text-[11px] font-mono text-amber-400/90 font-medium">
+                          ({formatTime(part.startTime)})
+                        </span>
+                      </div>
+
+                      <div className="flex items-center space-x-1">
+                        <button
+                          onClick={() => handleNudgeTime(index, 'startTime', -1)}
+                          className="px-1.5 py-0.5 text-[10px] font-mono bg-slate-800 hover:bg-slate-700 text-slate-300 rounded cursor-pointer"
+                          title="-1 second"
+                        >
+                          -1s
+                        </button>
+                        <button
+                          onClick={() => handleNudgeTime(index, 'startTime', 1)}
+                          className="px-1.5 py-0.5 text-[10px] font-mono bg-slate-800 hover:bg-slate-700 text-slate-300 rounded cursor-pointer"
+                          title="+1 second"
+                        >
+                          +1s
+                        </button>
+                        <button
+                          onClick={() => handleSetToCurrentPlayhead(index, 'startTime')}
+                          className="px-2 py-1 text-[10px] bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 text-orange-300 rounded font-semibold flex items-center space-x-1 cursor-pointer touch-manipulation"
+                          title={`Set Start to current playhead (${formatTime(currentTime)})`}
+                        >
+                          <Target className="w-3 h-3" />
+                          <span>Now</span>
+                        </button>
+                      </div>
                     </div>
 
-                    <div className="flex items-center space-x-1">
-                      <button
-                        onClick={() => handleNudgeTime(index, 'endTime', -1)}
-                        className="px-1.5 py-0.5 text-[10px] font-mono bg-slate-800 hover:bg-slate-700 text-slate-300 rounded cursor-pointer"
-                        title="-1 second"
-                      >
-                        -1s
-                      </button>
-                      <button
-                        onClick={() => handleNudgeTime(index, 'endTime', 1)}
-                        className="px-1.5 py-0.5 text-[10px] font-mono bg-slate-800 hover:bg-slate-700 text-slate-300 rounded cursor-pointer"
-                        title="+1 second"
-                      >
-                        +1s
-                      </button>
-                      <button
-                        onClick={() => handleSetToCurrentPlayhead(index, 'endTime')}
-                        className="px-2 py-1 text-[10px] bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 text-orange-300 rounded font-semibold flex items-center space-x-1 cursor-pointer touch-manipulation"
-                        title={`Set End to current playhead (${formatTime(currentTime)})`}
-                      >
-                        <Target className="w-3 h-3" />
-                        <span>Now</span>
-                      </button>
+                    {/* End Point Controls */}
+                    <div className="bg-slate-900/90 border border-slate-800/80 rounded-xl p-2 flex items-center justify-between gap-2">
+                      <div className="flex items-center space-x-1.5">
+                        <span className="text-[11px] text-slate-400 font-medium">End:</span>
+                        <input
+                          type="number"
+                          step="0.1"
+                          min={part.startTime || 0}
+                          max={duration || 9999}
+                          value={part.endTime}
+                          onChange={(e) => handlePartTimeChange(index, 'endTime', e.target.value)}
+                          className="w-16 bg-slate-950 border border-slate-700 text-white font-mono text-xs px-2 py-1 rounded-md text-center font-bold focus:border-orange-500 focus:outline-none"
+                        />
+                        <span className="text-[11px] font-mono text-amber-400/90 font-medium">
+                          ({formatTime(part.endTime)})
+                        </span>
+                      </div>
+
+                      <div className="flex items-center space-x-1">
+                        <button
+                          onClick={() => handleNudgeTime(index, 'endTime', -1)}
+                          className="px-1.5 py-0.5 text-[10px] font-mono bg-slate-800 hover:bg-slate-700 text-slate-300 rounded cursor-pointer"
+                          title="-1 second"
+                        >
+                          -1s
+                        </button>
+                        <button
+                          onClick={() => handleNudgeTime(index, 'endTime', 1)}
+                          className="px-1.5 py-0.5 text-[10px] font-mono bg-slate-800 hover:bg-slate-700 text-slate-300 rounded cursor-pointer"
+                          title="+1 second"
+                        >
+                          +1s
+                        </button>
+                        <button
+                          onClick={() => handleSetToCurrentPlayhead(index, 'endTime')}
+                          className="px-2 py-1 text-[10px] bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 text-orange-300 rounded font-semibold flex items-center space-x-1 cursor-pointer touch-manipulation"
+                          title={`Set End to current playhead (${formatTime(currentTime)})`}
+                        >
+                          <Target className="w-3 h-3" />
+                          <span>Now</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

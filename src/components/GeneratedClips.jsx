@@ -4,6 +4,7 @@ import {
   Youtube, ExternalLink, Upload, RotateCcw, Calendar, Clock, Sparkles
 } from 'lucide-react';
 import { formatTime } from '../utils/time';
+import { formatScheduledDateTime } from '../utils/scheduler';
 import { downloadClipsAsZip } from '../services/zipService';
 import YouTubeScheduleModal from './YouTubeScheduleModal';
 
@@ -115,10 +116,11 @@ export default function GeneratedClips({
           </a>
         );
       case 'scheduled':
+        const scheduledTime = state.scheduled_at || state.scheduledAt || clip.scheduledAt;
         return (
-          <span className="inline-flex items-center space-x-1 text-[10px] bg-purple-500/15 text-purple-400 border border-purple-500/25 px-1.5 py-0.5 rounded-full">
-            <Calendar className="w-2.5 h-2.5" />
-            <span>Scheduled</span>
+          <span className="inline-flex items-center space-x-1 text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30 px-2 py-0.5 rounded-full font-medium">
+            <Calendar className="w-2.5 h-2.5 text-purple-400" />
+            <span>Scheduled{scheduledTime ? `: ${formatScheduledDateTime(scheduledTime)}` : ''}</span>
           </span>
         );
       case 'upload_failed':

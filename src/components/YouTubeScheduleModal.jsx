@@ -37,10 +37,13 @@ export default function YouTubeScheduleModal({
 
   const [scheduleType, setScheduleType] = useState('schedule'); // 'schedule' | 'immediate'
   
-  // Default scheduled time: Tomorrow at 18:00 (6 PM)
-  const defaultDate = new Date();
-  defaultDate.setDate(defaultDate.getDate() + 1);
-  defaultDate.setHours(18, 0, 0, 0);
+  // Default scheduled time: clip.scheduledAt if available, otherwise Tomorrow at 18:00 (6 PM)
+  const defaultDate = clip.scheduledAt ? new Date(clip.scheduledAt) : (() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    d.setHours(18, 0, 0, 0);
+    return d;
+  })();
 
   const [scheduledDateTime, setScheduledDateTime] = useState(toDateTimeLocalString(defaultDate));
   const [title, setTitle] = useState(initialTitle);

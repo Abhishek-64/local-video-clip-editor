@@ -151,32 +151,37 @@ export default function TextEditor({
             </div>
 
             {/* Part Options */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-950/60 p-3 sm:p-3.5 rounded-xl border border-slate-800">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-300">Start Part #:</span>
-                <input
-                  type="number"
-                  min="1"
-                  max="999"
-                  value={textSettings.startPart || 1}
-                  onChange={(e) => updateSetting('startPart', Math.max(1, parseInt(e.target.value) || 1))}
-                  className="w-20 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white text-center font-mono focus:border-orange-500 focus:outline-none"
-                />
-              </div>
+            <div className="space-y-2 bg-slate-950/60 p-3 sm:p-3.5 rounded-xl border border-slate-800">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-300">Start Part #:</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="999"
+                    value={textSettings.startPart || 1}
+                    onChange={(e) => updateSetting('startPart', Math.max(1, parseInt(e.target.value) || 1))}
+                    className="w-20 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white text-center font-mono focus:border-orange-500 focus:outline-none"
+                  />
+                </div>
 
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-300">Zero-Pad Numbers:</span>
-                <button
-                  onClick={() => updateSetting('zeroPad', !textSettings.zeroPad)}
-                  className={`px-3 py-1 rounded-lg text-xs font-mono font-medium border cursor-pointer touch-manipulation ${
-                    textSettings.zeroPad
-                      ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
-                      : 'bg-slate-900 border-slate-700 text-slate-400'
-                  }`}
-                >
-                  {textSettings.zeroPad ? 'Part 01, 02...' : 'Part 1, 2...'}
-                </button>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-300">Zero-Pad Numbers:</span>
+                  <button
+                    onClick={() => updateSetting('zeroPad', !textSettings.zeroPad)}
+                    className={`px-3 py-1 rounded-lg text-xs font-mono font-medium border cursor-pointer touch-manipulation ${
+                      textSettings.zeroPad
+                        ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+                        : 'bg-slate-900 border-slate-700 text-slate-400'
+                    }`}
+                  >
+                    {textSettings.zeroPad ? 'Part 01, 02...' : 'Part 1, 2...'}
+                  </button>
+                </div>
               </div>
+              <p className="text-[10px] text-slate-500 pt-0.5">
+                Active clips are automatically numbered sequentially starting from Part {textSettings.startPart || 1} (even if earlier parts are cut/deleted).
+              </p>
             </div>
 
             {/* Position Selector */}

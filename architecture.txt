@@ -1,0 +1,46 @@
+# Full Project Architecture, Deep Audit & Fix Plan
+
+## 1. Project Architecture
+
+The **Local Video Clip Editor** is a privacy-first, ultra-fast video editing and multi-platform automation studio comprising a React frontend and a Cloudflare Worker backend backed by Cloudflare D1 SQL database, Backblaze B2 storage, and social APIs.
+
+```
+┌──────────────────────────────────────────────────────────────────────────────────────────┐
+│                                   FRONTEND (React + Vite)                                │
+│  - VideoPreview (WYSIWYG Canvas Blit + Overlays + Live Timeline Cut-Skipping)            │
+│  - Timeline & SplitCutEditor (Precision Split, Keep/Delete Trimming, Custom Parts Table) │
+│  - Export Engine (WebCodecs Hardware H.264 + Web Audio Offline Mixing + MP4 Muxer)       │
+│  - MultiPlatform & YouTube / Facebook Modals (Smart Scheduling & Template Token Replacers)│
+│  - Studio Template Manager (1-Click Presets for Canvas, YouTube, Facebook, Hashtags)     │
+└────────────────────────────────────────┬─────────────────────────────────────────────────┘
+                                         │  HTTPS / Cookie & Bearer Auth / REST API
+┌────────────────────────────────────────▼─────────────────────────────────────────────────┐
+│                           BACKEND (Cloudflare Worker + Hono)                             │
+│  - /api/auth/*     (User Signup, Login, Multi-Device Session Tokens, Salted Passwords)    │
+│  - /api/settings/* (Project Templates, Tags, Upload Defaults)                            │
+│  - /api/branding/* (Visual Presets, Logos, Text Overlays CRUD)                           │
+│  - /api/uploads/*  (YouTube Resumable Upload Session Generator & Job Audit Log)          │
+│  - /api/user/*     (Storage Accounting, Resource Usage & Scope Purge)                    │
+│  - /api/youtube/*  (Google OAuth 2.0, Channel Info, Token Exchange, Metadata Sync)       │
+│  - /api/facebook/* (Meta Graph API v21.0 OAuth, Page Token Exchange, Reels Scheduler)   │
+│  - /api/storage/*  (Backblaze B2 Auth, Upload URL Generation, Public Signed Links)       │
+│  - /api/admin/*    (Immediate DB Lifecycle Purge, Cleanup Audit Logs, Factory Reset)     │
+│  - Cron Scheduled  (Background Worker Cron every 5 mins for Due Reels & B2 Temp Purge)  │
+└────────────────────────────────────────┬─────────────────────────────────────────────────┘
+                                         │  D1 SQL ORM / Typed Queries
+┌────────────────────────────────────────▼─────────────────────────────────────────────────┐
+│                              DATABASE (Cloudflare D1 SQLite)                             │
+│  - users, sessions, youtube_accounts, facebook_accounts, facebook_oauth_sessions         │
+│  - project_settings, branding_presets, upload_jobs, facebook_scheduled_posts             │
+│  - b2_temp_uploads, system_cleanup_logs                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+# Deploy Backend Worker
+cd e:\local-video-clip-editor\backend
+npx wrangler deploy -c wrangler.toml
+
+# Deploy Frontend
+cd e:\local-video-clip-editor\frontend
+npm run build
+npx wrangler deploy -c wrangler.jsonc

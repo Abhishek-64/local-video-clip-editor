@@ -1,0 +1,20 @@
+{
+  "name": "local-video-clip-editor-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npx wrangler dev -c wrangler.toml",
+    "deploy": "npx wrangler deploy -c wrangler.toml",
+    "db:migrate": "npx wrangler d1 migrations apply videoclip-db --remote -c wrangler.toml",
+    "db:migrate:local": "npx wrangler d1 migrations apply videoclip-db --local -c wrangler.toml",
+    "db:execute:local": "npx wrangler d1 execute videoclip-db --local --file=schema.sql -c wrangler.toml",
+    "db:execute:remote": "npx wrangler d1 execute videoclip-db --remote --file=schema.sql -c wrangler.toml"
+  },
+  "dependencies": {
+    "hono": "^4.6.3"
+  },
+  "devDependencies": {
+    "wrangler": "^3.78.0"
+  }
+}

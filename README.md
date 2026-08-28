@@ -1,404 +1,137 @@
-# Automatic Video Clipper
+# Local Video Clip Editor
 
-Automatic Video Clipper is a browser-based video clipping and editing tool for turning long videos into social-media-ready clips, reels, shorts, square posts, and cinematic exports.
+A privacy-first, ultra-fast video editing and multi-platform automation studio comprising a React frontend and a Cloudflare Worker backend. 
 
-Video, audio, image, and export processing is designed to run locally in the browser. Source media is not uploaded by the editor's current implementation.
+The editor processes video, audio, images, and export generation locally in the browser, while the backend handles authentication, template synchronization, cloud storage (Backblaze B2), and social media API scheduling (YouTube, Facebook Reels).
 
-## Highlights
+---
 
-- Local drag-and-drop video editing
-- Automatic resolution, FPS, duration, file-size, and audio-profile detection
-- Timeline range selection and batch clip splitting
-- Preset and custom aspect ratios
-- Interactive crop, pan, zoom, and framing controls
-- Optional local face tracking for vertical clips
-- Blurred-video, image, and solid-color backdrops
-- Title, part-number, CTA, and custom text overlays
-- Draggable text and logo overlays
-- Logo and watermark support
-- Color presets, manual grading, blur, and fade transitions
-- Original audio, voiceover, and background music mixing
-- Voice ducking and original-audio replacement
-- MP4/WebM export profiles
-- WebCodecs H.264/AAC export when supported
-- MediaRecorder fallback for broader browser compatibility
-- Processing queue with progress, cancellation, and concurrency limits
-- Individual downloads, selected ZIP downloads, and full ZIP downloads
-- Responsive desktop and mobile interface
-
-## User Workflow
-
-1. Select a local video or drag one into the upload area.
-2. Let the browser analyze metadata, quality, frame rate, and audio.
-3. Set the source range and split it into parts using duration, count, or manual times.
-4. Configure crop, backdrop, text, logo, effects, audio, and export options.
-5. Preview the result in phone or framing mode.
-6. Generate all parts, the first N parts, or a selected part range.
-7. Monitor jobs in the processing queue.
-8. Preview, download, or package completed clips into a ZIP archive.
-
-## Supported Input Video
-
-The file picker accepts MP4, MOV, WebM, MKV, AVI, and M4V files. The browser must be able to decode the selected media. Unsupported or corrupted files display an error during metadata loading.
-
-The uploader automatically records the original file object, file name, file size, MIME type, object URL, duration, video dimensions, quality profile, FPS profile, and audio profile.
-
-When a file is loaded, its cleaned filename becomes the default movie name and the recommended resolution/FPS are applied to export settings.
-
-## Preview
-
-The preview supports play/pause, current-time seeking, restart, mute/unmute, preview volume, fullscreen mode, phone preview, framing preview, live visual filters, live backgrounds, live text overlays, and live logos.
-
-Text and logos can be dragged directly on the preview. Custom crop mode exposes an interactive crop rectangle with corner and edge resize handles.
-
-## Crop and Output Formats
-
-Available crop modes:
-
-| Mode | Output use |
-| --- | --- |
-| `9:16` | Instagram Reels, YouTube Shorts, TikTok |
-| `16:9` | Standard YouTube and landscape video |
-| `1:1` | Square Instagram/Facebook posts |
-| `4:5` | Portrait Instagram feed posts |
-| `21:9` | Ultrawide and cinematic video |
-| `custom` | Freeform crop box |
-| `original` | Original source aspect and dimensions |
-
-Crop controls include fit mode, fill mode, manual X/Y positioning, zoom, custom crop width/height, center/left/right/top/bottom alignment, full-frame reset, interactive movement, and interactive resizing.
-
-Standard output dimensions are calculated from the selected format and resolution: 720p, 1080p, 1440p, 4K, or Original.
-
-## Local Face Tracking
-
-The optional Smart AI Face Tracking feature keeps the active speaker centered during vertical fill/crop exports.
-
-Implementation details:
-
-- Runs locally in the browser
-- Attempts the native browser `FaceDetector` API first
-- Selects the largest detected face
-- Uses a low-resolution canvas fallback when native detection is unavailable
-- Smooths movement with an exponential moving average
-- Re-centers gradually when a face is lost
-- Checks faces periodically to limit processing cost
-
-Face tracking is a local framing aid, not a cloud AI service.
-
-## Timeline and Clip Splitting
-
-The timeline provides global start time, global end time, current playhead position, selected-duration display, visual part markers, and part preview seeking.
-
-### Split by Duration
-
-Built-in presets are 15, 30, 60, and 90 seconds. Custom duration accepts values from 5 through 3600 seconds.
-
-### Split by Part Count
-
-- Choose between 1 and 200 parts
-- Equal-duration parts are generated automatically
-- Quick count buttons include 1, 2, 3, 5, and 10
-- One part can represent the complete selected range
-
-### Manual Part Table
-
-Each part supports editable start/end times, calculated duration, preview seeking, deletion, and automatic renumbering. Parts can be added after the last part or reset to equal intervals. The full source can also be converted into one part.
-
-## Batch Processing Queue
-
-The queue can generate all available parts, the first N parts, or an inclusive selected part range.
-
-Each queue job stores the selected video, time range, part number, filename, crop, backdrop, text, logo, effects, audio, and export settings.
-
-Supported statuses are Waiting, Processing, Completed, Failed, and Cancelled. Queue controls include per-job progress, cancellation, clearing, completed-job preview, and individual downloads.
-
-Browser concurrency is intentionally capped between one and two active jobs for canvas, memory, and GPU stability.
-
-## Backdrop and Blur
-
-Backdrop modes are blurred source video, a custom uploaded image, or a solid color. Custom images support common JPG, PNG, and WebP formats.
-
-Controls include blur intensity from 0 to 100 percent, brightness/opacity from 15 to 100 percent, a custom color picker, image replacement, and image removal. Backdrops are primarily used for fit-mode vertical exports.
-
-## Text and Part Numbering
-
-The primary overlay supports enable/disable, movie or series name, custom template, starting part number, zero-padding, seven position presets, drag positioning, X/Y controls, font choice, font size, text color, outline/color/thickness, background pill/color, automatic line wrapping, and automatic font fitting.
-
-Available fonts include Inter-style sans serif, Impact, Arial, Georgia, and Monospace.
-
-Supported placeholders are `{movie}` and `{part}`.
-
-Example templates:
+## 🏗️ Project Architecture
 
 ```text
-{movie} - Part {part}
-{movie}
-Part {part}
-Part {part} | {movie}
-PART {part}
+┌──────────────────────────────────────────────────────────────────────────────────────────┐
+│                                   FRONTEND (React + Vite)                                │
+│  - VideoPreview (WYSIWYG Canvas Blit + Overlays + Live Timeline Cut-Skipping)            │
+│  - Timeline & SplitCutEditor (Precision Split, Keep/Delete Trimming, Custom Parts Table) │
+│  - Export Engine (WebCodecs Hardware H.264 + Web Audio Offline Mixing + MP4 Muxer)       │
+│  - MultiPlatform & YouTube / Facebook Modals (Smart Scheduling & Template Token Replacers)│
+│  - Studio Template Manager (1-Click Presets for Canvas, YouTube, Facebook, Hashtags)     │
+└────────────────────────────────────────┬─────────────────────────────────────────────────┘
+                                         │  HTTPS / Cookie & Bearer Auth / REST API
+┌────────────────────────────────────────▼─────────────────────────────────────────────────┐
+│                           BACKEND (Cloudflare Worker + Hono)                             │
+│  - /api/auth/*     (User Signup, Login, Multi-Device Session Tokens, Salted Passwords)   │
+│  - /api/settings/* (Project Templates, Tags, Upload Defaults)                            │
+│  - /api/branding/* (Visual Presets, Logos, Text Overlays CRUD)                           │
+│  - /api/uploads/*  (YouTube Resumable Upload Session Generator & Job Audit Log)          │
+│  - /api/user/*     (Storage Accounting, Resource Usage & Scope Purge)                    │
+│  - /api/youtube/*  (Google OAuth 2.0, Channel Info, Token Exchange, Metadata Sync)       │
+│  - /api/facebook/* (Meta Graph API v21.0 OAuth, Page Token Exchange, Reels Scheduler)    │
+│  - /api/storage/*  (Backblaze B2 Auth, Upload URL Generation, Public Signed Links)       │
+│  - /api/admin/*    (Immediate DB Lifecycle Purge, Cleanup Audit Logs, Factory Reset)     │
+│  - Cron Scheduled  (Background Worker Cron every 5 mins for Due Reels & B2 Temp Purge)   │
+└────────────────────────────────────────┬─────────────────────────────────────────────────┘
+                                         │  D1 SQL ORM / Typed Queries
+┌────────────────────────────────────────▼─────────────────────────────────────────────────┐
+│                              DATABASE (Cloudflare D1 SQLite)                             │
+│  - users, sessions, youtube_accounts, facebook_accounts, facebook_oauth_sessions         │
+│  - project_settings, branding_presets, upload_jobs, facebook_scheduled_posts             │
+│  - b2_temp_uploads, system_cleanup_logs                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Extra Text Overlays
+---
 
-Extra overlays are intended for social handles, calls to action, banners, and episode labels. Each item supports add/edit/hide/show/delete, custom text, drag positioning, X/Y sliders, 14px-48px font size, color, optional pill background, and outline styling.
+## ✨ Core Features
 
-## Logo and Watermark
+- **Local Video Editing:** Drag-and-drop video processing that runs entirely locally in your browser. Video files are not uploaded to servers for editing, preserving privacy and saving bandwidth.
+- **Timeline & Splitting:** Precision range selection, manual cut-and-keep features, and batch splitting (e.g., cut a video into 15-second chunks, or 5 equal parts).
+- **Studio Template Manager:** Create, save, and 1-click apply branding presets across Canvas overlays, YouTube titles/tags, and Facebook captions.
+- **Smart Framing & Overlays:** Interactive crop modes (9:16, 16:9, 1:1, etc.), blurred backdrops, draggable text overlays with dynamic `{movie}` and `{part}` tokens, and custom logo watermarks.
+- **Local Face Tracking:** Smart AI tracking to keep the active speaker centered in vertical crop exports, processed entirely within the browser via native `FaceDetector` APIs or heuristic fallbacks.
+- **Advanced Audio Engine:** Mix original audio with voiceovers and background music. Includes smart voice ducking and speed-aware sampling.
+- **Multi-Platform Export & Scheduling:** Export locally or automatically schedule and upload finished clips to YouTube Shorts and Facebook Reels through native OAuth integrations.
 
-Logo support includes PNG, JPEG, and WebP uploads, transparent PNGs, enable/disable, replacement, removal, width from 25px to 250px, opacity from 10% to 100%, four corner presets, drag positioning, and X/Y positioning from 3% to 97%.
+---
 
-## Effects
+## 🚀 Export Engine Architecture
 
-Built-in presets:
+The export engine detects browser capabilities and chooses the most efficient pipeline.
 
-- Normal / None
-- Cinematic
-- Vintage 70s
-- Warm Sunset
-- Cool Nordic
-- Black & White
-- Classic Sepia
-- High Contrast
-- Faded Film
+1. **WebCodecs Pipeline (Fastest):** Uses hardware-accelerated `VideoEncoder` (H.264), periodic keyframes, and offline Web Audio mixing, bundled by an internal JavaScript MP4 Muxer for fast-start playback.
+2. **MediaRecorder Fallback:** Used when WebCodecs is unavailable. Captures Canvas streams with Web Audio routing and standard browser encoding. 
 
-Manual controls include brightness (50%-150%), contrast (50%-180%), saturation (0%-200%), sepia, grayscale, invert, blur, fade in, and fade out. Fade durations are 0.25 seconds, 0.5 seconds, 1 second, or 2 seconds.
+The application utilizes web workers for non-blocking UI and caps concurrent render jobs based on the device's CPU and memory constraints.
 
-Effects are previewed with CSS filters and rendered into exports using canvas filters or the available GPU/WebGL path.
+---
 
-## Audio
+## 🛠️ Tech Stack
 
-Original audio supports volume from 0% to 200%, quick presets, export muting, and silent preview monitoring.
+### Frontend
+* React 19 + Vite
+* Tailwind CSS + Lucide Icons
+* WebCodecs, WebGL/WebGL2, Canvas 2D
+* Web Audio API
+* JSZip
 
-Playback speeds are 0.5x, 0.75x, 1x, 1.25x, 1.5x, and 2x.
+### Backend
+* Cloudflare Workers
+* Hono (Web Framework)
+* Cloudflare D1 (Serverless SQLite)
+* Backblaze B2 (Object Storage)
+* YouTube Data API v3 & Meta Graph API v21.0
 
-Voiceover accepts MP3, WAV, AAC, and M4A. It supports independent volume, smart voice ducking, original-audio replacement, and removal.
+---
 
-Background music accepts MP3, WAV, AAC, and M4A. It supports independent volume, seamless looping, replacement, and removal.
+## 💻 Development & Deployment
 
-The offline audio engine provides source slicing, speed-aware sampling, voiceover mixing, music looping, windowed RMS voice detection, automatic original-audio ducking to approximately 35% during speech, stereo output, a 48 kHz mix target, and soft limiting to reduce clipping.
+### Requirements
+- Node.js 18+ (npm or Bun)
+- A modern browser with hardware acceleration enabled (Chrome/Edge recommended)
+- Wrangler CLI (for backend deployment)
 
-## Export Settings
+### Local Development
 
-### Smart Profiles
-
-| Profile | Resolution | Bitrate | FPS |
-| --- | --- | --- | --- |
-| Fast | 720p | Standard | 30 |
-| Balanced (Recommended) | 1080p | High | 30 |
-| High Quality | 1080p | Ultra | 60 |
-| Ultra 4K | 4K | Ultra | 60 |
-
-### Formats
-
-MP4 uses H.264 video and AAC audio when supported and is recommended for Reels, Shorts, TikTok, YouTube, and mobile playback. WebM uses a supported VP9/Opus-style browser codec and is useful for web output.
-
-### Resolution, Bitrate, and FPS
-
-Resolutions are 720p, 1080p, 1440p, 4K, and Original. Video bitrate presets are Standard (approximately 5 Mbps), High (approximately 8.5 Mbps), and Ultra (approximately 16 Mbps, with a higher target for 4K). Frame rates are source-matched, 24, 30, or 60 FPS.
-
-Audio bitrate choices are 128, 192, 256, and 320 kbps. Worker concurrency can be set to one stable job or two parallel jobs for high-memory systems.
-
-## Export Architecture
-
-The export engine detects browser capabilities and chooses an available pipeline.
-
-### WebCodecs Pipeline
-
-When H.264 WebCodecs support is available and MP4 is selected, the engine uses `VideoEncoder`, H.264 Baseline encoding, deterministic timestamps, periodic keyframes, canvas frame rendering, optional face tracking, offline audio mixing, `AudioEncoder` for AAC when available, and the internal JavaScript MP4 muxer.
-
-The muxer creates an ISO Base Media File Format MP4 containing optional video and audio tracks. It writes `ftyp`, `moov`, and `mdat` boxes and places metadata before media payload for fast-start playback.
-
-### MediaRecorder Fallback
-
-If WebCodecs is unavailable or fails, the application uses Canvas capture streams, browser-supported MP4/WebM MIME types, Web Audio routing, source/voiceover/music mixing, canvas crop and overlay rendering, frame callbacks or animation-frame fallback, progress watchdogs, heartbeat completion checks, and abortable processing.
-
-The requested container is preferred, but the browser may return another supported format. An MP4 request can therefore produce WebM on browsers without MP4 MediaRecorder support.
-
-## Generated Clips and ZIP Downloads
-
-Completed clips can be previewed, downloaded individually, selected using cards/checkboxes, selected all at once, quickly selected by first 1/2/3/5 clips, or packaged into a ZIP.
-
-ZIP output supports all completed clips or selected clips, progress reporting, sanitized archive/folder names, and DEFLATE compression.
-
-Filenames use the movie name, part number, template, zero-padding option, and extension. Invalid Windows and Unix filename characters are replaced automatically.
-
-Example:
-
-```text
-My Movie - Part 01.mp4
-```
-
-## Privacy and Data Handling
-
-The current editor's processing path is local to the browser. The editing workflow does not upload source videos, voiceover files, background music, logos, background images, or generated clips.
-
-Object URLs are revoked when media is removed, the queue is cleared, or the application is unmounted. Generated clips are session-local and should be downloaded before refreshing or closing the page.
-
-## Capability Detection
-
-The capability detector checks WebCodecs, VideoEncoder, VideoDecoder, AudioEncoder, AudioDecoder, H.264 support, AAC support, WebGL, WebGL2, WebGPU, Web Workers, OffscreenCanvas, MediaRecorder, MP4/WebM MediaRecorder support, hardware acceleration indicators, CPU cores, device memory, recommended concurrency, and recommended maximum export resolution.
-
-## Responsive Interface
-
-Desktop uses a preview/timeline column, editor-tab column, and queue/output area. Mobile provides Preview & Cut, Style & Text, and Queue views.
-
-The interface includes touch-friendly controls, mobile drag interactions, safe-area padding, horizontally scrollable editor tabs, responsive clip grids, and fullscreen preview support.
-
-## Requirements
-
-- Node.js 18 or newer
-- npm or Bun
-- A modern browser with local media playback support
-
-Recommended browsers are Google Chrome, Microsoft Edge, and other Chromium-based browsers. For faster exports, use WebCodecs/WebGL2 support, at least four CPU cores, and at least 8 GB RAM for high-resolution or parallel jobs.
-
-## Installation
-
+**1. Clone and Install Dependencies:**
 ```bash
+# Frontend
+cd frontend
+npm install
+
+# Backend
+cd backend
 npm install
 ```
 
-Or with Bun:
-
+**2. Start Frontend Dev Server:**
 ```bash
-bun install
-```
-
-## Development
-
-```bash
+cd frontend
 npm run dev
+# Vite will serve at http://localhost:5173
 ```
 
-The Vite server uses port `3000` and listens on all host interfaces:
+**3. Configure Backend (Local / Cloudflare):**
+Ensure your `wrangler.toml` is configured with your D1 databases and bindings, and you've generated necessary OAuth credentials for social platforms.
 
-```text
-http://localhost:3000
-```
+### Production Deployment
 
-## Production Commands
-
+**Frontend:**
 ```bash
-npm run build      # Create a production build
-npm run preview    # Preview the production build
-npm run lint       # Run TypeScript validation
-npm run clean      # Remove generated build files
+cd frontend
+npm run build
+npx wrangler deploy -c wrangler.jsonc
 ```
 
-## Project Structure
-
-```text
-.
-├── index.html
-├── metadata.json
-├── package.json
-├── tsconfig.json
-├── vite.config.ts
-├── assets/
-├── public/
-└── src/
-    ├── App.jsx
-    ├── index.css
-    ├── main.jsx
-    ├── components/
-    │   ├── AudioPanel.jsx
-    │   ├── BackgroundEditor.jsx
-    │   ├── CropEditor.jsx
-    │   ├── EditorTabs.jsx
-    │   ├── EffectsPanel.jsx
-    │   ├── ExportPanel.jsx
-    │   ├── GeneratedClips.jsx
-    │   ├── Header.jsx
-    │   ├── LogoEditor.jsx
-    │   ├── ProcessingQueue.jsx
-    │   ├── TextEditor.jsx
-    │   ├── Timeline.jsx
-    │   ├── VideoPreview.jsx
-    │   └── VideoUploader.jsx
-    ├── hooks/
-    │   └── useProcessingQueue.js
-    ├── services/
-    │   ├── audioEngine.js
-    │   ├── capabilityDetector.js
-    │   ├── exportEngine.js
-    │   ├── faceDetectionService.js
-    │   ├── mp4Muxer.js
-    │   ├── videoProcessingEngine.js
-    │   ├── webglEffectsPipeline.js
-    │   └── zipService.js
-    ├── utils/
-    │   ├── crop.js
-    │   ├── filename.js
-    │   ├── mediaDetector.js
-    │   └── time.js
-    └── workers/
-        └── exportWorker.js
+**Backend (Cloudflare Worker):**
+```bash
+cd backend
+npx wrangler deploy -c wrangler.toml
 ```
 
-## Module Responsibilities
+---
 
-- `App.jsx`: owns editor state, connects panels, creates queue jobs, and handles notifications.
-- `VideoUploader.jsx`: validates local files and detects video/audio metadata.
-- `VideoPreview.jsx`: provides playback, live rendering, overlays, and interactive positioning.
-- `Timeline.jsx`: manages selected ranges, automatic parts, and manual part times.
-- `EditorTabs.jsx`: hosts crop, backdrop, text, logo, effects, audio, and export panels.
-- `useProcessingQueue.js`: manages queue state, processing, cancellation, progress, downloads, and cleanup.
-- `exportEngine.js`: selects WebCodecs or MediaRecorder export.
-- `videoProcessingEngine.js`: contains the compatibility rendering pipeline and shared overlay rendering.
-- `audioEngine.js`: decodes and mixes source, voiceover, and music audio offline.
-- `capabilityDetector.js`: checks browser and device media capabilities.
-- `faceDetectionService.js`: performs local face detection and smoothing.
-- `mp4Muxer.js`: creates MP4 containers from encoded H.264/AAC chunks.
-- `webglEffectsPipeline.js`: contains the WebGL shader effects pipeline and fallback support.
-- `zipService.js`: packages completed clip blobs into ZIP archives.
-- `crop.js`: calculates source crop windows and output canvas dimensions.
-- `mediaDetector.js`: identifies quality, frame-rate, and audio profiles.
-- `filename.js`: sanitizes names and generates output filenames.
-- `time.js`: formats and parses time values.
-- `exportWorker.js`: provides a worker-compatible export entry point.
+## 🔒 Privacy & Data Handling
 
-## Environment Variables
-
-The repository includes `.env.example` with AI Studio compatibility placeholders:
-
-```env
-GEMINI_API_KEY="MY_GEMINI_API_KEY"
-APP_URL="MY_APP_URL"
-```
-
-The current editor source does not make a Gemini API request. The implemented editing workflow uses local browser APIs including WebCodecs, MediaRecorder, Canvas, WebGL, Web Audio, and JSZip.
-
-## Browser Limitations
-
-- Codec support varies by browser and operating system.
-- MP4 requests may fall back to WebM if the browser lacks a compatible MP4 encoder.
-- WebCodecs is not available in every browser.
-- 4K output requires substantial memory, CPU, and GPU resources.
-- Large source videos can consume significant browser memory.
-- Audio decoding depends on browser codec support.
-- Native face detection is not universally available; the local fallback is heuristic.
-- Background tabs may be throttled by the browser.
-- Generated object URLs are temporary and session-local.
-- Generated clips should be downloaded before refreshing or closing the tab.
-- The repository includes an export worker entry point, but the current React queue invokes the export engine directly.
-
-## Technology Stack
-
-- React 19
-- React DOM
-- Vite
-- JSX and JavaScript
-- TypeScript compiler for validation
-- Tailwind CSS
-- Tailwind Vite plugin
-- Lucide React
-- Motion
-- WebCodecs
-- MediaRecorder
-- Canvas 2D
-- WebGL/WebGL2
-- Web Audio API
-- JSZip
-
-## License
-
-No license is currently specified in the repository.
+1. **Video Processing:** Local to the browser.
+2. **Temporary Cloud Uploads:** Used strictly as a bridge for uploading to social media APIs (e.g., Backblaze B2 temporary links).
+3. **Automated Cleanup:** Cloudflare Cron jobs periodically purge temporary files from B2 and clean out stale database records.

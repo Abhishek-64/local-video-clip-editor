@@ -1,0 +1,1312 @@
+Listed directory local-video-clip-editor
+Viewed README.md:1-138
+Viewed architecture.txt:1-47
+Listed directory src
+Listed directory components
+Listed directory facebook
+Listed directory hooks
+Listed directory services
+Listed directory backend
+Listed directory src
+Listed directory routes
+Viewed schema.sql:1-251
+Viewed App.jsx:1-200
+Viewed App.jsx:201-500
+Viewed App.jsx:501-900
+Viewed App.jsx:901-1400
+Viewed App.jsx:1401-1518
+Viewed VideoUploader.jsx:1-222
+Viewed CropEditor.jsx:1-480
+Viewed BackgroundEditor.jsx:1-288
+Viewed TextEditor.jsx:1-574
+Viewed LogoEditor.jsx:1-245
+Viewed EffectsPanel.jsx:1-192
+Viewed AudioPanel.jsx:1-377
+Viewed ExportPanel.jsx:1-301
+Viewed SplitCutEditor.jsx:1-591
+Viewed EditorTabs.jsx:1-310
+Viewed UniversalMasterHub.jsx:1-364
+Viewed StudioTemplatesModal.jsx:1-150
+Viewed YouTubePanel.jsx:1-180
+Viewed FacebookPanel.jsx:1-180
+Viewed StorageSettingsModal.jsx:1-432
+Viewed AuthModal.jsx:1-244
+Viewed ProcessingQueue.jsx:1-520
+Viewed GeneratedClips.jsx:1-474
+Viewed YouTubeScheduleModal.jsx:1-384
+Viewed FacebookReelModal.jsx:1-150
+Viewed MultiPlatformScheduleModal.jsx:1-444
+Viewed YouTubeUploadHistory.jsx:1-238
+Viewed Timeline.jsx:1-150
+Viewed VideoPreview.jsx:1-150
+Viewed apiService.js:1-423
+Viewed faceDetectionService.js:1-168
+Viewed b2Storage.js:1-313
+Viewed facebookApi.js:1-262
+Viewed exportEngine.js:1-120
+Viewed index.js:1-117
+Searched for "caption"
+Searched for "subtitle"
+
+# Functional Specification & Requirements Analysis
+
+---
+
+# 1. Identify the Application
+
+### What the Application Is
+The application is a **Privacy-First Local Video Clip Editor & Multi-Platform Publishing Studio**. It allows creators to take long-form or raw video files, edit, crop, split, trim, brand, and enhance them directly inside their web browser, and then either export the finished clips locally or schedule and publish them automatically to social media platforms (YouTube Shorts and Facebook Reels).
+
+### What Problem It Solves
+1. **Privacy & Bandwidth Constraints:** Traditional online video editors require uploading massive multi-gigabyte source video files to cloud servers before editing can even begin. This application performs video decoding, frame extraction, visual transformations, audio mixing, and encoding locally on the user's computer with zero video data uploaded for editing.
+2. **Repurposing Bottlenecks:** Content creators often need to slice long horizontal videos (e.g., movies, podcasts, gaming streams, interviews) into dozens of short, mobile-optimized vertical clips (9:16 format) with consistent branding, titles, part numbering, and hashtags. Doing this manually in traditional timeline software is repetitive and slow.
+3. **Multi-Platform Distribution Overhead:** Creators waste significant time manually uploading individual clips one-by-one to YouTube and Facebook, configuring titles, tags, descriptions, and scheduling times. The application automates batch generation, metadata templating, and scheduled publishing across platforms.
+
+### Who It Is Intended For
+* **Social Media Content Creators & Clip Channels:** Channels that curate movie clips, anime highlights, podcasts, comedy moments, and gaming highlights for YouTube Shorts, Instagram Reels, TikTok, and Facebook Reels.
+* **Podcasters & Streamers:** Creators wanting fast vertical clipping of highlights with speaker tracking and branded overlays.
+* **Privacy-Conscious Video Editors:** Users who want to edit videos locally on their own hardware without cloud upload dependencies.
+
+### Main Purpose of the Application
+To provide a fast, browser-based workspace for slicing, enhancing, branding, and distributing video clips into single or sequential multi-part short-form content across social video platforms with automated scheduling.
+
+### Primary User Workflow
+1. **Import:** User selects a local video file (MP4, MOV, WebM, MKV, AVI). The application inspects video resolution, framerate, and audio tracks locally.
+2. **Configure Master Metadata:** User enters the project or movie title, chooses a part numbering format (e.g., `{movie} - Part {part}`), and picks global hashtags.
+3. **Framing & Slicing:**
+   * User chooses a target aspect ratio (e.g., 9:16 vertical, 1:1 square, 16:9 horizontal, or custom freeform crop).
+   * User enables optional Smart AI Face Tracking or adjusts background styling (blurred video, custom image, or solid color).
+   * User splits the video into parts (via playhead split, duration intervals, part counts, or custom range points) and marks unwanted sections as "Cut" (excluded).
+4. **Branding & Audio Enhancement:** User adds dynamic text overlays, logo watermarks, color filters/fades, voiceover tracks with smart ducking, and background music.
+5. **Apply or Save Presets:** User can apply 1-click studio presets (saved combinations of overlays, logos, YouTube templates, and Facebook defaults) or save the current setup as a new preset.
+6. **Batch Queue & Render:** User queues single parts, merged cleaned video, or batch sequential clips. The in-browser export engine renders the clips to MP4 or WebM.
+7. **Export & Publish:**
+   * **Local Download:** User previews rendered clips and downloads individual files or all clips bundled in a ZIP archive.
+   * **Social Publishing:** User schedules or publishes clips directly to **YouTube Shorts** and/or **Facebook Reels** with automated release intervals (e.g., every 1 hour, every 2 hours, peak viral hours, or custom schedules).
+
+---
+
+# 2. Complete Feature Inventory
+
+### Feature: Local Video Import & Metadata Detection
+* **What the user can do:** Select a video from their local device via drag-and-drop or file browser; replace or change the selected video at any time.
+* **What it accomplishes:** Loads the video into the browser playback and editing engine without uploading the raw video to any server.
+* **Important user options/settings:** Accepts `.mp4`, `.mov`, `.webm`, `.mkv`, `.avi` video formats.
+* **Expected result/output:** Displays video preview, duration, dimensions, auto-detected resolution profile (e.g., 1080p, 4K), detected framerate (FPS), and audio profile (channel count and sample rate). Automatically initializes project title from the cleaned video filename.
+* **Restrictions/conditions:** Corrupted or browser-unsupported video container formats trigger an error notification.
+
+---
+
+### Feature: Universal Master Sync Hub
+* **What the user can do:** Define a master title, master part naming template, and master hashtag pool that synchronize simultaneously across all editor tools (Canvas text overlay, YouTube metadata, Facebook captions, and batch file naming). Toggle live auto-sync on/off, or manually force synchronization.
+* **What it accomplishes:** Eliminates redundant data entry by ensuring title, part formatting, and hashtags match everywhere.
+* **Important user options/settings:**
+  * Master Title input with "Auto-Clean from File" option (strips file tags, resolutions, and extensions).
+  * Part Naming Style presets (`{movie} - Part {part}`, `{movie} - Pt. {part}`, `{movie} - Ep. {part} Pt. {part}`, `{movie} [Part {part}]`, `{movie} #{part}`).
+  * Universal Hashtag pool with 1-click hashtag packs (All-In-One, Cinema/Movie, Anime, Gaming, Podcast).
+  * Auto-Sync Toggle (Live ON / Manual OFF) and "Sync All" button.
+* **Expected result/output:** Updating master title or template automatically propagates to the video canvas preview, clip naming tables, YouTube title/description templates, and Facebook Reels captions.
+
+---
+
+### Feature: Precision Timeline & Manual Split/Cut Slicing
+* **What the user can do:**
+  * Scrub playback through the entire video with live timestamp indicators.
+  * Adjust global start and end trim boundaries.
+  * Split the video into multiple segments at the exact playhead position (via UI button or global `S` keyboard shortcut).
+  * Split video into equal segments by duration (e.g., 60 seconds per clip) or by part count (e.g., split into 4 equal parts).
+  * Toggle individual segments between **KEPT** and **CUT (Deleted)** states.
+  * Adjust individual segment start and end timestamps (nudge by ±1s or snap to current playhead).
+  * Rename individual segment titles.
+  * Drag segment boundary handles directly on the timeline with magnetic snapping (within 0.35s of adjacent boundaries).
+* **What it accomplishes:** Allows users to cut out silence, filler, or unwanted scenes, and structure continuous or sequential multi-part clips.
+* **Important user options/settings:** Duration mode vs Part count mode; Preserve Cuts toggle (when re-splitting, keeps cut sections excluded); Auto-skip cut sections during preview playback.
+* **Expected result/output:** Sequential list of active parts automatically re-numbered starting from Part 1. Preview player automatically skips cut sections during playback if enabled.
+
+---
+
+### Feature: Interactive Framing & Multi-Platform Aspect Ratio Crop
+* **What the user can do:**
+  * Select target video format / aspect ratio:
+    * `9:16` (Instagram Reels, YouTube Shorts, TikTok — 1080×1920)
+    * `16:9` (YouTube Standard Landscape — 1920×1080)
+    * `1:1` (Square Feed — 1080×1080)
+    * `4:5` (Portrait Feed — 1080×1350)
+    * `21:9` (Cinematic Ultrawide — 2560×1080)
+    * `custom` (Interactive 8-point manual freeform crop box)
+    * `original` (Preserves native video dimensions)
+  * In `9:16` mode, switch between **Fit (Full horizontal video with top/bottom backdrop)** and **Fill (Zoom to fill vertical screen with side cropping)**.
+  * Adjust Horizontal (X) pan, Vertical (Y) pan, and Zoom scale (0.8x to 3.0x).
+  * Use snap alignment shortcuts (Center, Left, Right, Top, Bottom, Full Frame).
+  * Directly drag and resize the crop bounding box on the video preview screen.
+* **What it accomplishes:** Adapts horizontal widescreen video to vertical mobile or custom formats without distortion.
+
+---
+
+### Feature: Local AI Smart Face & Speaker Tracking
+* **What the user can do:** Toggle "Smart AI Face Tracking" on or off for vertical crops.
+* **What it accomplishes:** Automatically detects the active speaker's face in each video frame and smoothly pans the crop frame horizontally to keep the speaker centered.
+* **Important user options/settings:** On/Off toggle.
+* **Expected result/output:** The vertical crop window dynamically follows the primary face with exponential moving average (EMA) smoothing to eliminate jitter. Runs 100% locally in the browser without external AI APIs.
+
+---
+
+### Feature: Top & Bottom Backdrop Styling
+* **What the user can do:**
+  * Choose backdrop type for letterboxed/fit modes:
+    1. **Blurred Video:** Automatically renders a real-time blurred mirror of the video in the background behind the main video.
+    2. **Custom Picture:** Upload any wallpaper, photo, or poster (JPG, PNG, WebP) as the background with replace/remove controls.
+    3. **Solid Color:** Choose any custom color via color picker (default black).
+  * Adjust **Blur Intensity** slider (0% to 100% mapped to 0px–40px blur).
+  * Adjust **Background Brightness / Dimming** slider (15% to 100%).
+* **What it accomplishes:** Creates professional aesthetic backgrounds behind horizontal video clips placed inside vertical 9:16 frames.
+
+---
+
+### Feature: Canvas Text Overlays & Part Numbering
+* **What the user can do:**
+  * Enable/disable primary title and part number overlay.
+  * Enter Movie/Series Name and Naming Template with `{movie}` and `{part}` tokens.
+  * Choose starting part number (e.g., start sequence at Part 1, Part 5, etc.).
+  * Toggle zero-padding (e.g., `Part 01` vs `Part 1`).
+  * Choose font family (Clean Sans / Inter, Impact Bold, Arial, Georgia Serif, Monospace).
+  * Adjust font size (16px to 64px) and text color.
+  * Toggle text shadow outline and customize outline color.
+  * Toggle pill box background behind text and customize background color.
+  * Select from 7 position presets (Top-Left, Top-Center, Top-Right, Center, Bottom-Left, Bottom-Center, Bottom-Right) or fine-tune Vertical (Y) and Horizontal (X) percentages.
+  * Drag the text overlay directly on the video preview player to reposition it.
+  * **Add Extra Text Overlays:** Add multiple custom text banners (e.g., "Follow for Part 2! 🔥", social handles `@channel`, or calls to action) with independent text content, visibility toggle, font size, color, background pill, and positioning controls.
+* **What it accomplishes:** Burns title branding, episode/part indicators, and social call-to-actions directly onto the exported video frames.
+
+---
+
+### Feature: Watermark & Brand Logo Overlay
+* **What the user can do:**
+  * Enable/disable logo overlay.
+  * Upload a custom logo image (PNG with transparency, JPG, WebP).
+  * Adjust logo display width (25px to 250px) and opacity (10% to 100%).
+  * Select 4 corner position presets (Top-Left, Top-Right, Bottom-Left, Bottom-Right) or fine-tune X/Y sliders.
+  * Drag the logo directly on the video preview player to reposition it.
+  * Replace or delete the logo image.
+* **What it accomplishes:** Stamps brand identity or channel watermarks on all exported clips.
+
+---
+
+### Feature: Visual Effects, Color Presets & Video Transitions
+* **What the user can do:**
+  * Apply 1-click visual color presets: Normal, Cinematic, Vintage 70s, Warm Sunset, Cool Nordic, Black & White, Classic Sepia, High Contrast, Faded Film.
+  * Fine-tune manual sliders for **Brightness** (50%–150%), **Contrast** (50%–180%), and **Saturation** (0%–200%).
+  * Enable **Fade In from black** transition with duration selection (0.25s, 0.5s, 1.0s, 2.0s).
+  * Enable **Fade Out to black** transition with duration selection (0.25s, 0.5s, 1.0s, 2.0s).
+  * Reset all effects back to default.
+* **What it accomplishes:** Enhances color grading and adds smooth visual entry/exit transitions to video clips.
+
+---
+
+### Feature: Advanced Audio Engine & Multi-Track Mixing
+* **What the user can do:**
+  * Adjust video playback speed (0.5x, 0.75x, 1.0x, 1.25x, 1.5x, 2.0x).
+  * Adjust original video volume (0% to 200%) with quick volume buttons (Mute, 25%, 50%, 75%, 100%, 125%, 150%, 200%).
+  * Toggle **Silent Preview Monitoring** (mutes local preview speakers during editing while retaining full audio in exported files).
+  * **Add Voiceover / Commentary Track:**
+    * Upload external audio file (MP3, WAV, M4A, AAC).
+    * Adjust voiceover volume (0% to 200%).
+    * Toggle **Smart Voice Ducking** (automatically reduces original video audio when speech is detected on the voiceover track).
+    * Toggle **Replace Original Video Audio** (mutes original track completely in favor of voiceover).
+  * **Add Background Music Track:**
+    * Upload background music file (MP3, WAV, AAC).
+    * Adjust background music volume (0% to 100%).
+* **What it accomplishes:** Allows creators to produce dubbed clips, commentary shorts, or music-backed reels with multi-track audio blending.
+
+---
+
+### Feature: Export Engine & Quality Configuration
+* **What the user can do:**
+  * Select Smart Export Profiles (Fast 720p, Balanced 1080p, High Quality 1080p 60FPS, Ultra 4K).
+  * Choose Container Format: **MP4 (H.264 / AAC)** (universal standard for YouTube Shorts, Reels, TikTok, and mobile players) or **WebM (VP9 / Opus)**.
+  * Choose Resolution: 1080p Full HD, 720p HD, 1440p 2K, 4K Ultra HD, or Original Source Dimensions.
+  * Choose Video Bitrate: Standard (5 Mbps), High (8.5 Mbps Recommended), Ultra (16 Mbps).
+  * Choose Framerate: Auto (Match Source FPS), 60 FPS, 30 FPS, 24 FPS.
+  * Choose Audio Bitrate: 128 kbps, 192 kbps, 256 kbps (Studio Default), 320 kbps.
+  * Choose Worker Concurrency: 1 job at a time (Stable) or 2 jobs in parallel.
+* **What it accomplishes:** Configures the rendering pipeline based on device hardware capabilities and user quality requirements.
+
+---
+
+### Feature: Selective Merging & Cleaned Video Export
+* **What the user can do:**
+  * **Export Cleaned Video (Cut Sections Removed):** Merge all active KEPT segments into one single continuous video with all CUT/deleted segments spliced out.
+  * **Selective Merge:** Check specific segments (e.g., Part 1 + Part 3 + Part 5) and merge only the selected segments into one continuous video file.
+  * **Export Selected as Separate Clips:** Queue only checked segments as independent clip jobs in the batch queue.
+  * **Export Single Part:** Export any individual part directly with one click.
+* **What it accomplishes:** Eliminates the need to export and re-import clips to join non-contiguous sections of a video.
+
+---
+
+### Feature: Batch Processing Queue
+* **What the user can do:**
+  * Queue multiple clip jobs based on:
+    * **All:** Generates all active split segments.
+    * **First N:** Generates the first N clips (e.g., first 3 clips).
+    * **Range:** Generates a specific range of parts (e.g., Parts 2 through 6).
+  * View real-time rendering progress bar and percentage for each job.
+  * Cancel a pending or in-progress render job.
+  * Clear the entire processing queue.
+  * Preview rendered clip directly in a modal player.
+  * Download rendered clip immediately as an MP4/WebM file.
+  * Edit individual scheduled publish dates/times directly from the queue.
+  * Track YouTube upload progress directly within the queue card.
+* **What it accomplishes:** Manages background rendering of multi-part clip batches without freezing the browser interface.
+
+---
+
+### Feature: Generated Clips Library & Batch ZIP Archiving
+* **What the user can do:**
+  * Browse all rendered clips with thumbnail metadata, part numbers, format badges, and time ranges.
+  * Select all clips, deselect all, or select first N clips via quick chips (1, 2, 3, 5, 12).
+  * Download individual clips.
+  * **Download All ZIP:** Bundle every rendered clip into a single `.zip` file with custom project filename.
+  * **Download Selected ZIP:** Bundle only checked clips into a `.zip` file with progress indicator.
+  * Open **Multi-Platform Batch Scheduler** to publish/schedule selected or all clips simultaneously.
+  * Launch single-clip YouTube upload modal or single-clip Facebook Reel modal.
+* **What it accomplishes:** Central repository for inspecting, downloading, or publishing all finished video assets.
+
+---
+
+### Feature: Studio Templates & Preset Manager
+* **What the user can do:**
+  * Browse built-in and user-created studio presets categorized by theme (Movies, Anime, Gaming, Podcast, Comedy, Custom).
+  * 1-Click apply a preset to instantly configure:
+    * Canvas Text overlay (template, font, size, colors, outline, pill box, position)
+    * Watermark / logo settings (size, opacity, position)
+    * YouTube upload defaults (title template, description template, tags, category, visibility, made-for-kids, notify subscribers, schedule interval)
+    * Facebook Reels settings (title template, caption template, hashtags, intervals)
+    * Universal Master Hub values (title formula, hashtag packs)
+  * **Save Current Session as Preset:** Name, categorize, and describe the active editor configuration as a new reusable template.
+  * In-place edit existing template properties.
+  * Duplicate an existing template.
+  * Delete custom templates.
+  * **Export Templates to JSON file:** Backup all templates to local disk.
+  * **Import Templates from JSON file:** Restore or import shared template libraries.
+  * Reset presets back to system defaults.
+* **What it accomplishes:** Enables creators running multiple recurring series or channels to switch entire visual and metadata styles in a single click.
+
+---
+
+### Feature: YouTube Channel Integration & Automated Scheduler
+* **What the user can do:**
+  * Connect YouTube channel via Google OAuth 2.0.
+  * View connected channel info (title, handle, thumbnail avatar).
+  * Disconnect connected YouTube channel.
+  * Configure default YouTube metadata templates with `{movie}` and `{part}` tokens.
+  * Configure default YouTube visibility (`private`, `unlisted`, `public`), category ID, and "Made for Kids" flag.
+  * Configure automated scheduling pipeline:
+    * Choose start date and time ("Starting from...").
+    * Choose interval between clips: 15 min, 30 min, 1 hour, 2 hours, 3 hours, 4 hours, 6 hours, 12 hours, 24 hours, or Custom interval (e.g., every 90 minutes, every 2 days).
+    * View live Schedule Timetable preview showing exact publish times for all clips in the project.
+  * **Upload Modes:**
+    * **Manual Upload:** Upload individual clips on demand with full metadata editing.
+    * **Automated Schedule Pipeline:** As clips finish rendering, they are automatically queued, uploaded directly to YouTube via resumable direct browser upload, set to private, and scheduled for release according to the chosen timetable.
+* **What it accomplishes:** Fully automates the distribution of daily or hourly YouTube Shorts series from a single source video.
+
+---
+
+### Feature: YouTube Upload History & Retry
+* **What the user can do:**
+  * View chronological log of all YouTube uploads with status badges (Pending, Uploading with %, Uploaded, Scheduled with datetime, Published, Failed, Cancelled).
+  * Click direct links to open uploaded videos on YouTube.
+  * Retry failed uploads with one click (if video blob remains in memory, or prompts re-export).
+  * Refresh history logs from the database.
+* **What it accomplishes:** Provides audit visibility and recovery for uploaded social media assets.
+
+---
+
+### Feature: Facebook Page Integration & Reels Publishing Studio
+* **What the user can do:**
+  * Connect Facebook account via Meta OAuth.
+  * Discover all Facebook Pages managed by the user's account and select the active Page.
+  * Validate custom Page IDs.
+  * Disconnect connected Facebook Page.
+  * **Single Reel Publish / Schedule Modal:**
+    * Choose between "Publish Now" or "Schedule for Later".
+    * Edit Reel title, caption, and hashtags with 1-click viral hook templates and themed hashtag packs.
+    * **Visual Cover / Thumbnail Frame Picker:** Scrub through the video to select the exact thumbnail frame for the Reel.
+    * Add **Auto First Comment** (e.g., link in bio or call to action).
+    * Select scheduled date, time, and timezone.
+    * Upload video temporarily to cloud bridge storage, submit Reel to Facebook Graph API, and verify ingestion.
+  * **Batch Reels Scheduler Tab:**
+    * Select multiple completed clips.
+    * Configure unified title, caption, and hashtag templates.
+    * Choose scheduling frequency: **Peak Viral Hours** (9:00 AM, 1:00 PM, 6:00 PM, 9:30 PM), Fixed intervals (Every 1 hr, 2 hrs), or Custom intervals.
+    * Inspect queue of scheduled Reels, edit pending post captions/times, cancel scheduled posts, or force publish immediately.
+    * View published Reels history with links.
+    * Trigger background scheduler run on demand.
+* **What it accomplishes:** Automates end-to-end Facebook Reels creation, thumbnail selection, and scheduled distribution.
+
+---
+
+### Feature: Multi-Platform Dual-Batch Scheduler Modal
+* **What the user can do:**
+  * Open a unified scheduling window for all or selected completed clips.
+  * Select target platforms via checkboxes: **YouTube Shorts**, **Facebook Reels**, or **Both simultaneously**.
+  * Enter unified title template, caption/description template, and hashtag list.
+  * Optionally specify Facebook Auto First Comment.
+  * Select starting date and time.
+  * Choose interval mode (Peak Viral Hours, Every 1 Hour, Every 2 Hours, or Custom Minute Interval).
+  * View live preview release timetable showing exact timestamps for every clip across all chosen platforms.
+  * One-click submit queues the entire batch to YouTube and Facebook in parallel.
+* **What it accomplishes:** Allows creators to schedule an entire multi-part series to both YouTube Shorts and Facebook Reels in a single 10-second action.
+
+---
+
+### Feature: User Account & Session Management
+* **What the user can do:**
+  * Use the application in Anonymous / Guest mode with persistent local identifiers.
+  * Sign up with Email, Password, and Creator Name to create a permanent account.
+  * Sign in to an existing account to sync settings, presets, and social connections across devices.
+  * Sign out of account.
+* **What it accomplishes:** Enables cross-device preset persistence and secure session management.
+
+---
+
+### Feature: Database Storage & Privacy Management
+* **What the user can do:**
+  * View breakdown of stored data records (YouTube upload jobs, Facebook scheduled posts, branding presets, project settings, linked social accounts, temporary cloud bridge files).
+  * **Granular Deletion Controls:**
+    * Clear Upload & Reel History
+    * Delete Saved Presets & Templates
+    * Unlink YouTube Account & erase tokens
+    * Unlink Facebook Page & erase tokens
+    * Reset Project Settings to factory defaults
+    * Purge Temporary Cloud Upload files
+  * **Danger Zone Data Wipe:** Erase all user records and account data.
+  * **Trigger Background Maintenance Now:** Run database cleanup of expired sessions, stale guest caches, and completed upload records older than 30 days.
+* **What it accomplishes:** Gives users complete transparent control over their stored privacy and cloud data.
+
+---
+
+# 3. User Interface Functionality
+
+### 1. Studio Header
+* **Purpose:** Global status display, navigation, account controls, and persistent storage management.
+* **What the user sees:**
+  * Application logo and studio branding badge.
+  * Video status indicator (active video name and duration if loaded; "No Video Loaded" if empty).
+  * YouTube connection badge (shows linked channel title or "Connect YouTube").
+  * Facebook connection badge (shows linked Page name or "Connect Facebook").
+  * User authentication status (user name/email or "Sign In / Register").
+* **Available interactions & buttons:**
+  * "Studio Presets" button (opens Studio Templates modal).
+  * "Database & Storage" button (opens Storage Settings modal).
+  * YouTube badge click (opens YouTube tab / connect flow).
+  * Facebook badge click (opens Facebook tab / connect flow).
+  * "New Video / Reset" button (clears active video workspace).
+  * "Sign In" button (opens Auth modal) / User profile dropdown with "Sign Out".
+* **States:**
+  * *Unauthenticated:* Displays "Sign In" button.
+  * *Authenticated:* Displays user name/avatar and sign out button.
+  * *Video Loaded:* Shows active video details and reset button.
+
+---
+
+### 2. Video Uploader Screen (Empty Workspace State)
+* **Purpose:** The initial landing screen when no video is loaded.
+* **What the user sees:** Large interactive drop zone with upload icon, supported format list (.mp4, .mov, .webm, .mkv, .avi), feature badges (100% In-Browser, Zero Data Upload, Auto Quality/FPS/Audio Detection).
+* **Available interactions & buttons:**
+  * Drag and drop a video file onto the drop zone.
+  * Click anywhere on the drop zone to open the native OS file selection dialog.
+  * "Select Local Video" button.
+* **States:**
+  * *Idle:* Ready for drag-and-drop or file browsing.
+  * *Drag Over:* Highlighted border and glow animation.
+  * *Analyzing (Loading):* Spinner with "Analyzing Video..." badge while detecting resolution, FPS, and audio channels.
+  * *Error State:* Red alert banner displaying format error message (e.g., "Please select a valid video file" or "Unable to load video metadata").
+
+---
+
+### 3. Universal Master Sync Hub (Top Bar on Main Workspace)
+* **Purpose:** High-level project naming, part templating, and cross-platform synchronization control.
+* **What the user sees:**
+  * Master Movie/Project Title text input.
+  * "Auto-Clean from File" action button (appears when raw filename contains clutter).
+  * Part Naming Style preset selector chips (`Part {n}`, `Pt. {n}`, `Ep. {n} Pt. {n}`, `[Part {n}]`, `#{n}`).
+  * Universal Hashtags text input with quick theme packs (All-In-One, Movie, Anime, Gaming, Podcast).
+  * Studio Preset dropdown with "Save" and "Manage" buttons.
+  * Live Sync badge (`Live Sync` vs `Manual`).
+  * Connected target status summary (Canvas Text, YouTube status, Facebook status).
+* **Available interactions & buttons:**
+  * Typing in Master Title, Template, or Hashtags (automatically updates canvas preview, YouTube settings, and Facebook captions if Auto-Sync is ON).
+  * "Auto-Clean from File" button (strips brackets, resolutions, file extensions).
+  * Preset selection dropdown (applies chosen preset immediately).
+  * "+ Save" button (opens Save Preset drawer).
+  * "Manage" button (opens Studio Templates modal).
+  * "Sync: ON / OFF" toggle button.
+  * "Sync All" button (pushes master values to all tabs immediately with confirmation toast).
+  * Collapse / Expand toggle icon.
+
+---
+
+### 4. Video Preview & WYSIWYG Player
+* **Purpose:** Real-time visual preview of all applied transformations, overlays, aspect ratio framing, and cut-skipping.
+* **What the user sees:**
+  * Centered video playback canvas showing the exact framing, backdrop, text overlays, logo watermarks, and color filters.
+  * Dynamic Crop Bounding Box with 8 resize handles (in Custom mode).
+  * Interactive Draggable Canvas Text Overlay with positioning guides.
+  * Interactive Draggable Logo Watermark with positioning guides.
+  * Interactive Draggable Extra Text Overlays.
+  * "Cut Section Skipped" notification overlay when playhead jumps over a deleted segment.
+  * Playback control bar: Play/Pause button, current timestamp / total duration, volume slider, mute toggle, fullscreen toggle.
+  * Quick-action overlay buttons: "Split at Playhead" (`S`), "Toggle Cut/Keep at Playhead".
+* **Available interactions & buttons:**
+  * Click to Play / Pause.
+  * Dragging crop box corner/edge handles to resize crop area.
+  * Dragging title text, extra text, or logo directly on the screen to reposition.
+  * Split button (splits active segment at current playhead).
+  * Cut/Keep button (toggles current segment between kept and deleted).
+  * Fullscreen toggle button.
+
+---
+
+### 5. Timeline Control Bar & Range Scrubber
+* **Purpose:** Visual representation of the full video timeline, start/end range handles, and split boundaries.
+* **What the user sees:**
+  * Timeline track displaying segment blocks with start/end time labels, part numbers, and duration.
+  * Color-coded segment states: Kept segments (active/highlighted), Cut segments (red with strikethrough).
+  * Global Start Time handle and End Time handle.
+  * Interactive Playhead indicator moving in sync with video playback.
+  * Segment boundary split lines with magnetic snap indicators.
+* **Available interactions & buttons:**
+  * Dragging the Playhead across the timeline.
+  * Dragging Start/End range boundary handles.
+  * Dragging interior split boundary dividers between adjacent segments.
+  * Clicking on any segment to seek video playback to that segment's start time.
+
+---
+
+### 6. Multi-Tab Studio Toolset (Sidebar / Tab Panels)
+
+#### Tab A: Split & Cut Editor
+* **Purpose:** Precision part management, slicing presets, timestamp nudging, and merge controls.
+* **What the user sees:**
+  * Quick action header: "Split @ [timestamp]" button, "2 Parts" preset, "4 Parts" preset, "Reset All" button, "Skip Cuts / Play All" toggle.
+  * Mini visual strip representing all video segments with proportioned widths.
+  * Segment list table: Part number badge, time range (`00:00 → 01:00`), segment duration, Play button, Keep/Cut toggle button, "Export Single Part" button, and Expand/Collapse drawer toggle.
+  * Expanded segment drawer: Start time `-1s`, `+1s`, and `Set to Now` buttons; End time `-1s`, `+1s`, and `Set to Now` buttons.
+  * Multi-select checkboxes on each segment for selective merging.
+  * Merge Footer: "Merge [N] Selected Parts into 1 Video" action button, "Export [N] as Separate Clips" action button.
+
+#### Tab B: Framing (Crop Editor)
+* **Purpose:** Aspect ratio selection, fill mode toggling, and manual repositioning.
+* **What the user sees:**
+  * Platform format grid: 9:16 (Shorts/Reels), 16:9 (YouTube), 1:1 (Square), 4:5 (Portrait), 21:9 (Ultrawide), Custom (Freeform), Original.
+  * Smart AI Face Tracking toggle card with "LOCAL AI" badge.
+  * 9:16 Display Style cards: "Fit (Full Horizontal with Backdrop)" vs "Zoom to Fill Screen".
+  * In Custom mode: Width slider (15%–100%), Height slider (15%–100%), Center X slider, Center Y slider, Zoom scale slider (0.8x–3.0x), Snap alignment shortcuts (Center, Left, Right, Top, Bottom, Full Frame).
+  * Reset Framing button.
+
+#### Tab C: Backdrop Editor
+* **Purpose:** Background customization behind letterboxed video.
+* **What the user sees:**
+  * Style selector cards: "Custom Picture", "Blurred Video", "Solid Color".
+  * Upload dropzone for custom background picture with Replace and Remove actions.
+  * Blur Intensity slider (0% to 100%) with indicator marks (Clear, Medium, Max).
+  * Background Brightness / Dimming slider (15% to 100%).
+  * Solid color picker input with hex value display.
+
+#### Tab D: Canvas Text Editor
+* **Purpose:** Primary title, sequential part numbering, styling, and secondary text overlays.
+* **What the user sees:**
+  * Studio preset quick-select bar.
+  * Master Title enable/disable toggle.
+  * Movie/Series name input and Naming template input with template preset buttons.
+  * Start Part Number input and Zero-pad toggle (`Part 01` vs `Part 1`).
+  * 7 Position preset buttons and Vertical (Y) / Horizontal (X) percentage sliders.
+  * Font family dropdown, Font size slider (16px–64px), Text color picker.
+  * Text Shadow Outline checkbox and color picker.
+  * Pill Box Background checkbox and color picker.
+  * **Extra Text Overlays Section:** "+ Add Text" button, list of added text cards with custom text input, visibility toggle, delete button, font size slider, color picker, pill box toggle, and X/Y sliders.
+
+#### Tab E: Watermark & Logo Editor
+* **Purpose:** Brand logo upload and overlay positioning.
+* **What the user sees:**
+  * Enable/disable logo toggle.
+  * Logo file upload box (when empty) / Logo preview card with Replace and Remove buttons.
+  * Logo Width slider (25px to 250px).
+  * Logo Opacity slider (10% to 100%).
+  * 4 Corner position buttons (Top-Left, Top-Right, Bottom-Left, Bottom-Right) and X/Y percentage sliders.
+
+#### Tab F: Visual Effects & Filters
+* **Purpose:** Color grading presets, brightness/contrast adjustments, and fade transitions.
+* **What the user sees:**
+  * 9 Visual style preset cards (Normal, Cinematic, Vintage 70s, Warm Sunset, Cool Nordic, B&W, Sepia, High Contrast, Faded Film).
+  * Brightness slider (50%–150%), Contrast slider (50%–180%), Saturation slider (0%–200%).
+  * Fade In (from Black) toggle with duration dropdown (0.25s, 0.5s, 1.0s, 2.0s).
+  * Fade Out (to Black) toggle with duration dropdown (0.25s, 0.5s, 1.0s, 2.0s).
+  * Reset Visual Effects button.
+
+#### Tab G: Audio Engine
+* **Purpose:** Volume control, speed adjustments, voiceover track mixing, and background music.
+* **What the user sees:**
+  * Auto-detected audio profile badge (channel count, sample rate).
+  * Playback Speed selector buttons (0.5x, 0.75x, 1.0x, 1.25x, 1.5x, 2.0x).
+  * Video Volume slider (0%–200%) and quick volume level buttons (Mute, 25%, 50%, 75%, 100%, 125%, 150%, 200%).
+  * Silent Preview Monitoring toggle switch.
+  * Voiceover / Speech Track card: Enable toggle, audio file uploader with replace/remove, Voice volume slider (0%–200%), "Smart Voice Ducking" checkbox, "Replace original video audio" checkbox.
+  * Background Music card: Enable toggle, music file uploader with remove, Music volume slider (0%–100%).
+
+#### Tab H: Export Engine Panel
+* **Purpose:** Quality profiles, container format, and encoding parameter selection.
+* **What the user sees:**
+  * Hardware acceleration status banner (WebCodecs H.264 support, WebGL support, detected quality/FPS chips).
+  * Smart Export Profile buttons: Fast (720p), Balanced (1080p), High Quality (1080p 60fps), Ultra 4K.
+  * Target Container Format cards: `MP4 (H.264 / AAC)` vs `WebM (VP9 / Opus)`.
+  * Resolution selector cards: 1080p, 720p, 1440p, 4K, Original Source.
+  * Video Bitrate selector buttons: Standard (5 Mbps), High (8.5 Mbps), Ultra (16 Mbps).
+  * Framerate selector buttons: Auto Source, 60 FPS, 30 FPS, 24 FPS.
+  * Audio Bitrate dropdown: 128k, 192k, 256k, 320k.
+  * Worker Concurrency dropdown: 1 job (Stable) vs 2 jobs (High RAM).
+
+#### Tab I: YouTube Panel
+* **Purpose:** YouTube OAuth connection, upload defaults, metadata templates, and scheduling pipeline setup.
+* **What the user sees:**
+  * Channel Connection Card: Shows connected channel avatar, title, and handle with "Disconnect" button (or "Connect YouTube Channel" button if disconnected).
+  * Automated Schedule Pipeline Card:
+    * Upload Mode switcher: "Automated Schedule Pipeline" vs "Manual Upload".
+    * Start Date & Time input with quick preset buttons (+1 Hour, Tonight 8 PM, Tomorrow 6 PM, In 2 Days).
+    * Release Interval selector: 15m, 30m, 1hr, 2hr, 3hr, 4hr, 6hr, 12hr, 24hr, or Custom (number input + minutes/hours/days unit).
+    * Live Release Timetable Preview: Lists every part in the project with calculated date/time stamp.
+  * Shorts Preset & Upload Defaults: Visibility dropdown (Private, Unlisted, Public), Category dropdown, Made for Kids checkbox, Notify Subscribers checkbox.
+  * Metadata Templates: Title template input, Description template input, Tag manager with quick hashtag packs, Live Description Preview box.
+  * Save / Reset Settings action bar with status indicators (Saving / Saved).
+
+#### Tab J: Facebook Reels Panel
+* **Purpose:** Meta OAuth connection, Facebook Page selector, batch Reel scheduler, queue, and publication history.
+* **What the user sees:**
+  * Page Connection Card: Connected Page name and ID with "Disconnect" button (or OAuth connect button / discovered Pages selection dropdown / manual Page ID input).
+  * Sub-tabs: **Schedule Reels**, **Queue**, **Published**, **B2 Storage**.
+  * *Schedule Reels Sub-tab:* Clip selection list, title template input, caption template input, hashtag input, auto first comment input, interval mode buttons (Peak Hours, Every 1 hr, Every 2 hr, Custom), date/time pickers, "Schedule [N] Reels" submit button.
+  * *Queue Sub-tab:* Table of pending scheduled posts with status badges (Scheduled, Publishing, Failed), edit post modal launcher, cancel post action, retry failed post action, "Publish Now" force trigger, "Trigger Scheduler Now" button.
+  * *Published Sub-tab:* List of successfully published Reels with permalink URLs.
+  * *B2 Storage Sub-tab:* Status of cloud bridge storage and active temporary file records.
+
+---
+
+### 7. Batch Processing Queue Component
+* **Purpose:** Queue generator and active render job list.
+* **What the user sees:**
+  * Batch Generator Card: "All", "First N", "Range" selector tabs with numeric inputs and "+ Generate [N] Clips" button.
+  * Active Jobs List: Job name, status badge (Waiting, Rendering %, Ready, Uploading %, Scheduled, Failed), time range, progress bar, action buttons (Preview, Download, Upload to YouTube, Cancel, Retry).
+  * "Clear Queue" button.
+
+---
+
+### 8. Generated Clips Library Component
+* **Purpose:** Display of all completed video exports with bulk actions.
+* **What the user sees:**
+  * Header with total count, "⚡ Multi-Schedule", "Download Selected ZIP", and "Download All ZIP" buttons.
+  * Selection toolbar with Select All / Deselect All and Quick Select chips (1, 2, 3, 5, 12).
+  * Grid of clip cards showing title, duration, time range, format badge, YouTube upload status badge, and action buttons:
+    * **View:** Opens full-screen video preview modal.
+    * **Save:** Downloads individual MP4/WebM file.
+    * **Reel:** Opens Facebook Reel single publish/schedule modal.
+    * **YT:** Opens YouTube single schedule/upload modal.
+    * **Retry:** Retries failed social upload.
+
+---
+
+### 9. YouTube Upload History Component
+* **Purpose:** Collapsible audit log of all YouTube uploads.
+* **What the user sees:** Expandable header showing total records, uploaded count, and scheduled count; list of upload records with video title, part number, visibility, status badge, timestamp, direct YouTube link button, and retry button.
+
+---
+
+### 10. Modals
+
+#### A. User Authentication Modal (`AuthModal`)
+* **Purpose:** Account creation and login.
+* **What the user sees:** Tab switcher (Sign In vs Create Account), Full Name input (signup only), Email input, Password input with show/hide toggle, Submit button with loading spinner, Error banner, List of account benefits.
+
+#### B. Studio Templates Modal (`StudioTemplatesModal`)
+* **Purpose:** Preset browsing, applying, saving, editing, importing, and exporting.
+* **What the user sees:**
+  * Search bar and Category filter chips (All, Movies, Anime, Gaming, Podcast, Comedy, Custom).
+  * Template grid showing preset name, category badge, description, preview chips (Canvas Text, Logo, YouTube, Facebook).
+  * Actions on each template card: "1-Click Apply", "Duplicate", "Edit", "Delete".
+  * Header actions: "+ Save Current Session as Preset" button, "Export JSON" button, "Import JSON" file picker, "Reset to Defaults" button.
+  * "Save Preset" drawer: Preset name input, Category dropdown, Description textarea, Save button.
+
+#### C. Database Storage & Privacy Modal (`StorageSettingsModal`)
+* **Purpose:** View storage consumption and execute granular or full data purges.
+* **What the user sees:**
+  * Automated Background Cleanup Policy card with "Trigger Background Cleanup Now" button.
+  * Granular data cards with item counts and delete buttons: Upload & Reel History, Presets & Templates, YouTube Connection, Facebook Connection, Project Settings, Temporary Cloud Uploads.
+  * Danger Zone: "Clear All My Account Data" button and "Wipe Entire Database (Factory Reset)" button.
+  * User Confirmation Dialog: Explains consequences before executing any irreversible deletion.
+
+#### D. YouTube Single Schedule Modal (`YouTubeScheduleModal`)
+* **Purpose:** Configure metadata and publish time for an individual clip.
+* **What the user sees:** Mode toggle ("Schedule Date & Time" vs "Publish Now"), Datetime-local picker, Quick date presets (+1 Hr, Tonight 8 PM, Tomorrow 6 PM, In 2 Days, In 3 Days, Next Week), Visibility selector (Public, Unlisted, Private), Video Title input, Description textarea, Tag manager with add/remove tags, Made for Kids checkbox, "Queue Scheduled Upload" button.
+
+#### E. Facebook Reel Single Publish Modal (`FacebookReelModal`)
+* **Purpose:** Publish or schedule a single clip as a Facebook Reel.
+* **What the user sees:**
+  * Mode toggle (Publish Now vs Schedule).
+  * Video Title input and Caption textarea.
+  * Viral Hook templates dropdown and Themed Hashtag packs.
+  * **Thumbnail Frame Picker:** Embedded video scrubber to pick cover frame.
+  * Auto First Comment checkbox and input.
+  * Date/time picker and timezone selector (in Schedule mode).
+  * Real-time progress bar (Uploading to B2 → Submitting Reel → Published).
+  * Success banner with direct Reel link.
+
+#### F. Multi-Platform Batch Schedule Modal (`MultiPlatformScheduleModal`)
+* **Purpose:** Simultaneous multi-clip scheduling across YouTube and Facebook.
+* **What the user sees:**
+  * Target platform checkboxes (YouTube Shorts, Facebook Reels) with connection status badges.
+  * Title template input and Caption/Description template input with `{movie}` and `{part}` tokens.
+  * Hashtags input and Facebook Auto First Comment input.
+  * Schedule frequency buttons (Peak Viral Hours, Every 1 hr, Every 2 hr, Custom).
+  * Start date and time pickers.
+  * Preview Release Timetable showing calculated publish timestamps for all clips.
+  * "Dual-Schedule [N] Clips" submit button.
+
+---
+
+# 4. Complete User Workflow
+
+### Workflow 1: Single Clip Quick Edit & Local Download
+1. User opens the application and drops a video file into the dropzone.
+2. Application auto-detects video properties and populates the workspace.
+3. User selects the desired framing (e.g., 9:16 vertical fit with blurred backdrop).
+4. User positions the playhead on the timeline and sets Start and End trim points.
+5. User customizes the on-screen title text and adds a brand logo.
+6. User clicks "Generate Clip" in the Processing Queue.
+7. Application renders the clip in the browser.
+8. User previews the clip in the modal player and clicks "Download" to save the MP4.
+
+---
+
+### Workflow 2: Slicing Long Video into Sequential Parts & Batch Export
+1. User loads a long video file (e.g., a 20-minute video).
+2. User enters Master Title (e.g., `Top 10 Moments`) and selects part template `{movie} - Part {part}`.
+3. User navigates to the **Split & Cut** tab.
+4. User selects "Split into 60s Chunks" or manually scrubs to key timestamps and presses `S` to split at playhead.
+5. User reviews the generated parts table, marking uninteresting segments as "Cut" (excluded). Active parts automatically renumber sequentially (Part 01, Part 02, Part 03...).
+6. User clicks "Generate All ([N] Clips)" in the Processing Queue.
+7. The browser renders each clip sequentially in the background while updating progress bars.
+8. In the Generated Clips library, user clicks "Download All ZIP" to download a single zip archive containing all numbered MP4 clips.
+
+---
+
+### Workflow 3: Non-Contiguous Video Cleaning (Cut & Merge)
+1. User imports a raw video with bad takes, pauses, or filler sections.
+2. User plays the video and splits around unwanted sections, marking those sections as "Cut".
+3. User checks the remaining kept segments in the Split & Cut table.
+4. User clicks **"Merge All Kept Parts into 1 Video"**.
+5. Application exports a single continuous video with all cut sections seamlessly removed.
+
+---
+
+### Workflow 4: Studio Preset Creation & Application
+1. User designs a complete channel branding style: 9:16 vertical crop, blurred background at 40% blur, Impact font title text with yellow outline, top-right logo, cinematic color filter, and specific YouTube upload defaults.
+2. User clicks "+ Save Preset" in the Universal Master Hub.
+3. User names the preset `Cinematic Shorts`, selects category `Movies`, and saves.
+4. On future sessions with different video files, user selects `Cinematic Shorts` from the preset dropdown to re-apply the entire visual, branding, and metadata configuration in one click.
+
+---
+
+### Workflow 5: Automated YouTube Shorts Scheduled Series Pipeline
+1. User signs in and connects their YouTube channel via Google OAuth.
+2. In the YouTube tab, user selects **"Automated Schedule Pipeline"**.
+3. User sets starting release time (e.g., Tomorrow at 6:00 PM) and interval (e.g., `Every 2 Hours`).
+4. User verifies the calculated timetable preview (Part 1 at 6 PM, Part 2 at 8 PM, Part 3 at 10 PM...).
+5. User clicks "Generate All Clips".
+6. As each clip finishes in-browser rendering, the upload engine automatically creates a YouTube upload session, transfers video bytes directly to YouTube, sets visibility to private, and assigns the scheduled release timestamp.
+7. User monitors live upload progress and views scheduled confirmation links in the YouTube History log.
+
+---
+
+### Workflow 6: Facebook Reels Batch Scheduling via Cloud Bridge
+1. User connects their Facebook Page via Meta OAuth.
+2. User renders clips in the editor.
+3. In the Facebook tab or Multi-Schedule modal, user selects all completed clips, chooses **Peak Viral Hours** scheduling, and enters captions and hashtags.
+4. User submits the batch.
+5. For each clip, the application uploads the video temporarily to Backblaze B2 storage, generates a signed HTTPS ingestion link, and registers the scheduled Reel with the Meta Graph API.
+6. The background cron worker verifies publication at the scheduled time and automatically purges the temporary B2 storage file.
+
+---
+
+### Workflow 7: Simultaneous Multi-Platform Batch Scheduling
+1. User has both YouTube channel and Facebook Page connected.
+2. User renders a batch of 5 clips.
+3. User clicks **"⚡ Multi-Schedule"** in the Generated Clips library.
+4. User checks both "YouTube Shorts" and "Facebook Reels".
+5. User chooses starting time and interval.
+6. User clicks "Dual-Schedule 5 Clips".
+7. All 5 clips are queued, uploaded, and scheduled on both YouTube and Facebook in a single automated process.
+
+---
+
+# 5. Authentication & Account Functionality
+
+### Available Functionality
+* **Anonymous Guest Mode:** Users can use all editing, local export, and local template saving features without creating an account. A persistent anonymous identifier tracks guest session state.
+* **Email & Password Sign Up:** New users can create an account by providing Full Name, Email, and Password (minimum 6 characters).
+* **Email & Password Sign In:** Existing users can log in with Email and Password across multiple devices.
+* **Session Persistence:** Authenticated sessions persist across browser reloads and multi-device logins.
+* **Sign Out:** Clears active session tokens and returns the workspace to guest mode.
+* **Account Benefits for Logged-In Users:**
+  * Synchronized YouTube OAuth connection across devices.
+  * Synchronized Facebook OAuth connection and Page selections across devices.
+  * Cloud storage of custom studio presets and branding templates.
+  * Persistent upload and scheduled post history records.
+* **Connected Accounts Management:**
+  * **YouTube Connection:** OAuth 2.0 authorization, channel info retrieval, token refresh handling, and channel disconnection.
+  * **Facebook Page Connection:** Meta OAuth authorization, managed Pages discovery, Page selection, Page token storage, and Page disconnection.
+* **Authentication Error Handling:** Visual alerts for invalid email format, short passwords, incorrect credentials, expired sessions, and account conflicts.
+
+---
+
+# 6. Main Application Features
+
+* **Local Video Ingestion:** Direct in-browser video loading without server upload.
+* **Auto Media Analysis:** Automatic extraction of video dimensions, duration, quality tiers, framerate, and audio channel configurations.
+* **Interactive WYSIWYG Video Editor:** Live playback preview with overlay repositioning, aspect ratio framing, and real-time cut skipping.
+* **Multi-Format Aspect Ratio Converter:** 9:16 vertical, 16:9 widescreen, 1:1 square, 4:5 portrait, 21:9 ultrawide, custom freeform crop, and original aspect ratio.
+* **Local AI Speaker Centering:** Automated face detection and smooth camera panning for vertical clips.
+* **Backdrop Engine:** Real-time blurred video mirroring, custom image backdrop upload, or solid color letterboxing.
+* **Text Overlay Engine:** Dynamic title branding, sequential part numbering with `{movie}`/`{part}` tokens, zero-padding, typography styling, outline shadows, pill backgrounds, and multi-text banner support.
+* **Watermark Stamping:** Brand logo overlay with sizing, opacity, and drag-and-drop placement.
+* **Color Grading & Transitions:** 9 visual color presets, brightness/contrast/saturation sliders, fade-in from black, and fade-out to black.
+* **Multi-Track Audio Mixer:** Video speed control, volume scaling up to 200%, silent preview monitoring, voiceover narration track with smart speech ducking and audio replacement, and background music track mixing.
+* **Timeline Slicing & Precision Trimming:** Playhead splitting (`S` key), duration-based chunking, part-count division, individual timestamp fine-nudging, and keep/cut exclusion toggling.
+* **Continuous Splicing (Merge):** Merge all kept parts or selected subsets into single continuous video files with cut sections removed.
+* **Batch Export Queue:** Concurrent and sequential multi-clip rendering with progress bars and job cancellation.
+* **Export Engine Profiles:** High-speed hardware-accelerated WebCodecs encoding (MP4/H.264), stream recording fallback (WebM), customizable bitrates, resolutions up to 4K, and framerates up to 60 FPS.
+* **Batch ZIP Downloader:** Download individual clips or archive all/selected clips into single `.zip` downloads.
+* **Studio Preset Manager:** Save, apply, duplicate, edit, export to JSON, and import from JSON complete studio templates.
+* **Universal Master Sync Hub:** Synchronize titles, naming formulas, and hashtags across all editor panels and social outputs in real time.
+* **Direct YouTube Shorts Upload & Scheduling:** Resumable browser-to-YouTube video uploads, metadata templating, tag generation, visibility settings, and automated interval scheduling.
+* **Facebook Reels Studio & Scheduler:** Page discovery, thumbnail frame extraction, viral hooks/hashtags, auto first comment, cloud bridge uploads, Graph API Reels submission, queue management, and cron-triggered publishing.
+* **Multi-Platform Batch Scheduler:** Dual-platform simultaneous scheduling to YouTube Shorts and Facebook Reels from a single modal.
+* **Audit & Upload History:** Logged records of all uploaded and scheduled videos with status tracking, direct links, and retry mechanisms.
+* **Privacy & Granular Storage Control:** Transparent storage breakdown, granular item deletion, automated background maintenance, and complete database factory reset.
+
+---
+
+# 7. Media / Content Functionality
+
+### Supported Video Formats
+* **Containers:** `.mp4`, `.mov`, `.webm`, `.mkv`, `.avi`
+* **Video Codecs (Decoded Locally):** H.264, VP8, VP9, AV1, HEVC/H.265 (hardware dependent)
+* **Audio Codecs (Decoded Locally):** AAC, MP3, Opus, PCM
+
+### Supported Audio Formats (Voiceover & Background Music)
+* `.mp3`, `.wav`, `.aac`, `.m4a`, `.ogg`
+
+### Supported Image Formats (Logo & Backdrop)
+* `.png` (with full alpha transparency), `.jpg`, `.jpeg`, `.webp`
+
+### Editing & Transformation Capabilities
+* **Trim / Slicing:** Global start/end trim; multi-segment splitting at exact timestamps; reordering and renumbering.
+* **Aspect Ratio & Framing:** 9:16, 16:9, 1:1, 4:5, 21:9, custom freeform, original native.
+* **Fill vs Fit:** Fit with backdrop padding vs Zoom-to-fill crop.
+* **Speaker Tracking:** Automated local AI face tracking with coordinate smoothing.
+* **Backdrop:** Real-time blurred video mirror (adjustable blur & brightness), uploaded custom image, solid color.
+* **Text Burn-in:** Primary dynamic titles, part numbering (`01` vs `1`), font selection, outline stroke, pill background box, secondary call-to-action banners, 7 anchor presets + freeform X/Y placement.
+* **Logo Stamp:** Custom image watermark with width scaling, opacity fading, 4 corner anchors + freeform X/Y placement.
+* **Color Grading:** 9 color filter presets, brightness, contrast, saturation sliders.
+* **Transitions:** Fade in from black (0.25s–2.0s), Fade out to black (0.25s–2.0s).
+* **Audio Manipulation:** Speed adjustment (0.5x–2.0x), volume boost up to 200%, silent local monitoring, external voiceover track, smart voice ducking, original audio replacement, background music track with volume control.
+* **Merging:** Joining multiple non-adjacent kept video segments into one continuous video file.
+* **Export Encoding:** MP4 (H.264 / AAC) or WebM (VP9 / Opus) in 720p, 1080p, 1440p, 4K, or Original resolution; bitrates 5 Mbps to 16 Mbps; framerates 24, 30, 60 FPS.
+* **ZIP Archiving:** Client-side bundling of multiple exported video files into `.zip` archives.
+
+---
+
+# 8. Settings and Options
+
+| Setting Name | Available Choices | Default Value | Functional Impact |
+| :--- | :--- | :--- | :--- |
+| **Aspect Ratio Mode** | `9:16`, `16:9`, `1:1`, `4:5`, `21:9`, `custom`, `original` | `9:16` | Sets target canvas dimensions and framing orientation. |
+| **9:16 Display Style** | `fit` (Fit with Backdrop), `fill` (Zoom to Fill) | `fit` | Controls whether horizontal video is letterboxed with backdrop or cropped on sides. |
+| **Smart Face Tracking** | `true`, `false` | `false` | Enables local AI face tracking to center active speakers in vertical crops. |
+| **Backdrop Type** | `blur-video`, `image`, `color` | `blur-video` | Sets the visual background behind letterboxed video. |
+| **Backdrop Blur** | `0%` to `100%` (0px to 40px) | `50%` (20px) | Controls blur intensity of the background canvas. |
+| **Backdrop Brightness** | `15%` to `100%` | `65%` | Controls brightness/dimming of the background canvas. |
+| **Text Overlay Enable** | `true`, `false` | `true` | Toggles on-screen title text overlay on exported video. |
+| **Text Part Numbering** | Any positive integer | `1` | Starting part number for sequential clip naming. |
+| **Text Zero-Pad** | `true` (`Part 01`), `false` (`Part 1`) | `true` | Formats part numbers with leading zeros. |
+| **Text Font Family** | `Inter`, `Impact`, `Arial`, `Georgia`, `Monospace` | `Inter` | Sets typeface for burned-in text overlays. |
+| **Text Position Preset** | 7 anchor positions + freeform X/Y | `top-center` | Anchors text placement on the video canvas. |
+| **Logo Overlay Enable** | `true`, `false` | `false` | Toggles logo watermark stamp on exported video. |
+| **Logo Size** | `25px` to `250px` | `70px` | Scales the display width of the logo image. |
+| **Logo Opacity** | `10%` to `100%` | `85%` | Controls transparency of the logo watermark. |
+| **Visual Color Preset** | Normal, Cinematic, Vintage, Warm, Cool, B&W, Sepia, High Contrast, Faded | `normal` | Applies color grading LUT/matrix adjustments to video frames. |
+| **Fade In / Out** | `true`, `false` (durations: 0.25s, 0.5s, 1.0s, 2.0s) | `false` (0.5s) | Adds black fade transitions to clip start/end. |
+| **Playback Speed** | `0.5x`, `0.75x`, `1.0x`, `1.25x`, `1.5x`, `2.0x` | `1.0x` | Speeds up or slows down video playback and audio. |
+| **Video Audio Volume**| `0%` to `200%` | `100%` | Adjusts master video track gain. |
+| **Silent Monitoring** | `true`, `false` | `false` | Mutes local browser speakers without affecting export audio. |
+| **Smart Voice Ducking**| `true`, `false` | `true` | Automatically lowers background audio when voiceover is active. |
+| **Export Container** | `mp4`, `webm` | `mp4` | Selects output file wrapper and codec configuration. |
+| **Export Resolution** | `720p`, `1080p`, `1440p`, `4k`, `original` | `1080p` | Sets output pixel dimensions. |
+| **Export Bitrate** | `standard` (5M), `high` (8.5M), `ultra` (16M) | `high` | Sets target video encoding bitrate. |
+| **Export Framerate** | `original`, `24`, `30`, `60` | `original` | Sets output frame rate. |
+| **Export Concurrency** | `1` job, `2` jobs | `1` | Controls parallel render workers. |
+| **YouTube Upload Mode**| `manual`, `auto` | `manual` | Controls whether clips auto-upload to YouTube upon render completion. |
+| **YouTube Visibility** | `private`, `unlisted`, `public` | `private` | Default visibility status assigned to YouTube uploads. |
+| **Schedule Interval** | `15m`, `30m`, `1hour`, `2hours`, `3hours`, `4hours`, `6hours`, `12hours`, `24hours`, `custom` | `1hour` | Sets time spacing between scheduled multi-part releases. |
+| **Auto-Sync Mode** | `true` (Live ON), `false` (Manual OFF) | `true` | Automatically mirrors Master Hub title and tags across all tabs. |
+
+---
+
+# 9. Integrations
+
+### 1. YouTube Data API v3 (Google OAuth 2.0)
+* **Purpose:** Direct-from-browser uploading, metadata assignment, and scheduled release of YouTube Shorts.
+* **User Capabilities:**
+  * Connect YouTube account via Google OAuth popup or redirect.
+  * View connected channel title, handle, and avatar.
+  * Disconnect YouTube channel.
+  * Create resumable upload sessions.
+  * Upload video bytes directly from browser to YouTube servers via resumable XHR.
+  * Set title, description, tags, category ID, made-for-kids status, visibility, and scheduled publish timestamps.
+  * Track upload progress percentage and receive YouTube video ID.
+  * View upload history and retry failed uploads.
+* **Limitations:** Requires valid Google OAuth credentials; uploads subject to Google daily API quota limits.
+
+---
+
+### 2. Meta Graph API v21.0 (Facebook OAuth)
+* **Purpose:** Facebook Page discovery, token authentication, and Facebook Reels publishing/scheduling.
+* **User Capabilities:**
+  * Connect Facebook account via Meta OAuth.
+  * Discover all Facebook Pages managed by the user and select the target Page.
+  * Validate custom Page IDs.
+  * Publish video directly as a Facebook Reel.
+  * Schedule Facebook Reels for future automated release.
+  * Extract and attach custom video thumbnail cover frames.
+  * Post automated First Comments with Reels.
+  * Poll video processing and publishing status.
+  * View published Reel history with direct Facebook permalinks.
+* **Limitations:** Facebook Reels require public HTTPS video URLs for ingestion; user must have administrator/editor role on target Facebook Page.
+
+---
+
+### 3. Backblaze B2 Object Storage (Cloud Bridge)
+* **Purpose:** Secure temporary staging bridge for Facebook Reel ingestion.
+* **User Capabilities:**
+  * Check B2 connection status.
+  * Upload rendered video clips directly from browser to B2 using temporary single-use upload tokens.
+  * Generate signed, time-limited public HTTPS download URLs for Facebook Graph API ingestion.
+  * Inspect temporary cloud storage usage.
+  * Purge temporary upload files manually or rely on automated 5-minute background cron cleanup.
+* **Limitations:** Staged files are temporary and automatically deleted once Facebook ingestion completes.
+
+---
+
+# 10. Processing & Outputs
+
+```
+┌─────────────────┐       ┌──────────────────────────────┐       ┌────────────────────────┐
+│  Input Video    │ ────> │  In-Browser Export Engine    │ ────> │  Completed Outputs     │
+│  (MP4/MOV/WebM) │       │  (WebCodecs H.264 / WebGL)   │       │  (MP4 / WebM / ZIP)    │
+└─────────────────┘       └──────────────────────────────┘       └───────────┬────────────┘
+                                                                             │
+                                              ┌──────────────────────────────┴──────────────────────────────┐
+                                              ▼                                                             ▼
+                               ┌─────────────────────────────┐                               ┌─────────────────────────────┐
+                               │  YouTube Shorts Pipeline    │                               │  Facebook Reels Pipeline    │
+                               │  (Direct Resumable Upload)  │                               │  (B2 Staging + Graph API)   │
+                               └─────────────────────────────┘                               └─────────────────────────────┘
+```
+
+### Processing Execution
+1. **Input:** Local video file, audio tracks (voiceover, background music), image assets (logo, background picture), and configured timeline split segments.
+2. **User Action:** Clicks "Generate All", "Generate First N", "Generate Range", "Export Merged Cleaned", or "Export Single Part".
+3. **Processing Steps (Client-Side):**
+   * Initializes target canvas at specified resolution (e.g., 1080×1920).
+   * Spawns WebCodecs hardware `VideoEncoder` (H.264) with configured bitrate and framerate (or falls back to MediaRecorder stream capture).
+   * Mixes audio tracks offline (original audio + voiceover ducking + background music).
+   * Seeks through video frames, rendering backdrop, cropped video, color grading filters, text overlays, and logo watermarks onto each frame.
+   * Feeds rendered frames to encoder.
+   * Bundles encoded video and audio into fast-start ISOBMFF MP4 container.
+4. **Outputs:**
+   * In-memory video Blob and playable object URL.
+   * Downloadable MP4 or WebM video file.
+   * Packaged multi-clip ZIP archive.
+5. **Publishing / Cloud Outputs:**
+   * Direct-to-YouTube video record with assigned video ID and scheduled release date.
+   * Staged B2 video record + Meta Graph API Reel submission with permalink.
+6. **Error / Retry Handling:**
+   * Individual failed jobs flag an error status badge without stopping the rest of the batch queue.
+   * Single-click retry action available for failed rendering or failed social uploads.
+
+---
+
+# 11. Error, Loading & Empty States
+
+### Empty States
+* **Workspace:** When no video is loaded, displays the large drag-and-drop file upload zone.
+* **Queue:** When no jobs are active, displays "No clips currently running" with clock icon.
+* **Generated Clips:** When no clips are rendered, the output section is hidden.
+* **Upload History:** When no uploads exist, history section is hidden.
+* **Extra Text List:** Displays prompt to add first social handle / banner.
+* **Templates Modal:** When search yields no matches, displays "No matching templates found".
+
+### Loading & Processing States
+* **File Analysis:** "Analyzing Video..." spinner while probing resolution, FPS, and audio profile.
+* **Rendering Jobs:** Pulsing badge with live percentage (`Rendering 45%`) and animated progress bar.
+* **ZIP Generation:** "Creating ZIP (60%)..." on download buttons.
+* **YouTube Uploading:** "Uploading 35%" badge with animated upload icon.
+* **Facebook Reel Publishing:** Step indicators: "Uploading to Backblaze B2..." → "Submitting Reel to Facebook..." → "Published successfully!".
+* **Database Maintenance:** Spinning refresh icon with "Running Cleanup...".
+
+### Error States & User Recovery
+* **Invalid Video Format:** Red alert banner explaining supported extensions (.mp4, .mov, .webm, .mkv, .avi).
+* **Seek / Decode Failure:** Graceful frame skip preventing export pipeline freezes.
+* **Authentication Error:** Red alert box displaying validation errors (invalid email, short password, duplicate account).
+* **Social Disconnected:** Warning toasts prompting user to connect account before attempting publishing.
+* **YouTube Upload Error:** Error message displayed on job card with one-click "Retry Upload" button.
+* **Facebook Publish Error:** Detailed error banner showing Graph API error message with retry options.
+
+---
+
+# 12. Permissions & Restrictions
+
+* **Anonymous vs Authenticated:** Anonymous users have full access to local editing, rendering, and downloading. Cloud sync of presets and cross-device social tokens requires account login.
+* **Browser Capabilities:**
+  * Hardware acceleration and WebCodecs require a modern Chromium-based browser (Chrome, Edge, Brave, Opera) or compatible browser for maximum export speed.
+  * If WebCodecs is unsupported, system automatically falls back to standard MediaRecorder stream capture.
+* **File Constraints:**
+  * Supported video containers: MP4, MOV, WebM, MKV, AVI.
+  * Supported audio: MP3, WAV, AAC, M4A, OGG.
+  * Supported images: PNG, JPG, WebP.
+* **Platform Publishing Restrictions:**
+  * YouTube Shorts: Videos must be 60 seconds or less and vertical/square to be categorized as Shorts. Scheduled dates must be in the future.
+  * Facebook Reels: Maximum duration 90 seconds (recommended 60s); vertical 9:16 aspect ratio recommended; requires connected Facebook Page.
+  * Backblaze B2 files: Automatically purged after Reel submission; maximum temporary storage duration 7 days.
+
+---
+
+# 13. Data the User Can Create or Manage
+
+| Entity | User Actions | Data Managed |
+| :--- | :--- | :--- |
+| **Video Projects** | Import, replace, reset, clear | Local video file, duration, dimensions, detected profiles |
+| **Custom Split Parts** | Create, split at playhead, adjust timestamps, rename, mark cut/kept, delete, merge | Part ID, start time, end time, duration, part number, title, deleted status |
+| **Studio Templates / Presets** | Create from session, browse, 1-click apply, edit, duplicate, delete, export JSON, import JSON | Preset name, category, description, canvas text styles, logo settings, YouTube defaults, Facebook defaults, hashtags |
+| **Render Queue Jobs** | Add batch, cancel, preview, download, retry | Job ID, clip configuration, render progress, output blob URL, format, status |
+| **Completed Clips** | Preview, download single, download all ZIP, download selected ZIP, schedule | Clip ID, output blob, part number, time range, filename |
+| **User Account & Sessions** | Sign up, sign in, sign out, switch devices | User ID, email, password hash, session tokens, creator name |
+| **YouTube Connection & Settings** | Connect OAuth, disconnect, update title/desc templates, set visibility/category/kids flags, set interval | Channel ID, title, handle, avatar, tokens, default metadata templates, schedule base time, interval |
+| **Facebook Connection & Scheduled Reels** | Connect OAuth, select Page, disconnect, schedule Reel, edit pending post, cancel post, retry, force publish | Page ID, Page name, encrypted tokens, scheduled posts (title, caption, hashtags, time, status, video ID, permalink) |
+| **Database Storage Records** | Inspect statistics, clear upload history, delete presets, unlink accounts, factory reset database | Storage accounting, cleanup audit logs, table row counts |
+
+---
+
+# 14. Navigation & Functional Relationships
+
+```
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                           STUDIO HEADER                                          │
+│  [Logo / Status]   [Studio Presets Modal]   [Storage Settings Modal]   [Auth Modal]   [Reset]    │
+└────────────────────────────────────────┬─────────────────────────────────────────────────────────┘
+                                         │
+                 ┌───────────────────────┴───────────────────────┐
+                 ▼                                               ▼
+     ┌───────────────────────┐                       ┌───────────────────────┐
+     │  Video Uploader       │ (No video loaded)     │  Main Studio Workspace│ (Video loaded)
+     └───────────────────────┘                       └───────────┬───────────┘
+                                                                 │
+      ┌──────────────────────────────────────────────────────────┴──────────────────────────────────────────────────────────┐
+      ▼                                                          ▼                                                          ▼
+┌───────────────────────────┐                              ┌───────────────────────────┐                              ┌───────────────────────────┐
+│ Universal Master Hub      │                              │ Video Preview & Timeline  │                              │ Multi-Tab Studio Toolset  │
+│ - Title & Auto-Clean      │                              │ - WYSIWYG Canvas Player   │                              │ - Split & Cut Editor      │
+│ - Part Naming Presets     │                              │ - On-Screen Drag Overlays │                              │ - Framing / 9:16 Crop     │
+│ - Hashtag Packs           │                              │ - Timeline Range Handles  │                              │ - Backdrop (Blur/Image)   │
+│ - Studio Preset Selector  │                              │ - Split Playhead Divider  │                              │ - Canvas Text & Numbering │
+│ - Live Sync Toggle        │                              └───────────────────────────┘                              │ - Watermark / Logo        │
+└───────────────────────────┘                                                                                         │ - Visual Effects / Colors │
+                                                                                                                      │ - Audio & Voice Ducking   │
+                                                                                                                      │ - Export Engine Settings  │
+                                                                                                                      │ - YouTube Channel Panel   │
+                                                                                                                      │ - Facebook Reels Panel    │
+                                                                                                                      └─────────────┬─────────────┘
+                                                                                                                                    │
+                                         ┌──────────────────────────────────────────────────────────────────────────────────────────┘
+                                         ▼
+                 ┌───────────────────────────────────────────────┐
+                 │ Batch Processing Queue                        │
+                 │ - All / First N / Range Generator             │
+                 │ - Active Render & Upload Progress             │
+                 └───────────────────────┬───────────────────────┘
+                                         │
+                                         ▼
+                 ┌───────────────────────────────────────────────┐
+                 │ Generated Clips Library                       │
+                 │ - View / Download Single                      │
+                 │ - Download All ZIP / Selected ZIP             │
+                 │ - Single YouTube / Reel Schedule Modals       │
+                 │ - Multi-Platform Dual-Batch Schedule Modal    │
+                 └───────────────────────┬───────────────────────┘
+                                         │
+                                         ▼
+                 ┌───────────────────────────────────────────────┐
+                 │ YouTube & Facebook Upload History             │
+                 │ - Audit Logs, Status Badges, Direct Links     │
+                 └───────────────────────────────────────────────┘
+```
+
+---
+
+# 15. Feature Dependencies
+
+* **Video Editing / Cropping / Splitting:** Requires an imported local video file.
+* **Canvas Text Overlay:** Requires an imported video file (inherits Master Title from Universal Master Hub or filename).
+* **Batch Processing Queue:** Requires at least one active (kept) video segment.
+* **Selective / Cleaned Merge:** Requires at least one kept video segment.
+* **ZIP Download:** Requires at least one completed rendered clip.
+* **Studio Preset Application:** Can be applied before or after video import (synchronously updates Master Hub, overlays, YouTube defaults, and Facebook defaults).
+* **Direct YouTube Upload / Scheduling:** Requires a completed rendered clip, active YouTube channel OAuth connection, and configured API backend.
+* **Facebook Reels Publishing / Scheduling:** Requires a completed rendered clip, connected Facebook Page, active Backblaze B2 storage bridge, and configured API backend.
+* **Multi-Platform Batch Scheduling:** Requires completed rendered clips and at least one connected social platform (YouTube or Facebook).
+* **Cloud Preset / Cross-Device Sync:** Requires an authenticated user account (email/password login).
+* **Granular Storage Deletion:** Requires an active user session or client ID.
+
+---
+
+# 16. Existing Functionality vs Missing Functionality
+
+### Currently Implemented (Fully Functional)
+* ✅ Local video file loading and client-side playback.
+* ✅ Automatic detection of video resolution tier, framerate (FPS), and audio tracks.
+* ✅ Multi-aspect ratio framing (9:16, 16:9, 1:1, 4:5, 21:9, custom freeform, original).
+* ✅ 9:16 Fit mode with customizable blurred video background, uploaded image background, or solid color.
+* ✅ 9:16 Fill mode with zoom and manual repositioning.
+* ✅ Local AI smart face and speaker tracking with coordinate smoothing.
+* ✅ Precision timeline splitting, start/end trimming, split at playhead (`S` shortcut), and magnetic boundary snapping.
+* ✅ Segment Keep / Cut exclusion toggling with real-time preview cut-skipping.
+* ✅ Continuous Merged Cleaned Video export (cut sections removed).
+* ✅ Selective segment merging into a single video.
+* ✅ Dynamic canvas text burning with `{movie}`/`{part}` tokens, zero-padding, typography styles, outline strokes, and pill backgrounds.
+* ✅ Secondary extra text overlays for social handles and call-to-actions.
+* ✅ Brand watermark/logo stamping with sizing, opacity, and drag-and-drop placement.
+* ✅ 9 visual color grading presets, manual brightness/contrast/saturation sliders, and fade in/out transitions.
+* ✅ Multi-track audio engine: speed adjustment (0.5x–2.0x), volume boost up to 200%, silent local monitoring, voiceover narration track with smart ducking and audio replacement, and background music mixing.
+* ✅ High-performance WebCodecs hardware H.264 encoding with ISOBMFF fast-start MP4 muxer and MediaRecorder fallback.
+* ✅ Batch processing queue with All, First N, and Range generation modes.
+* ✅ Generated clips library with single MP4 download and batch ZIP archiving.
+* ✅ Universal Master Sync Hub with title auto-cleaning, part naming presets, hashtag packs, and live cross-platform sync.
+* ✅ Studio Presets / Template Manager (create, apply, edit, duplicate, delete, JSON export, JSON import).
+* ✅ Google OAuth 2.0 connection for YouTube with channel info display and disconnection.
+* ✅ YouTube resumable direct-from-browser uploads with metadata templating and automated interval scheduling.
+* ✅ Meta OAuth connection for Facebook with managed Pages discovery and validation.
+* ✅ Facebook Reels single-clip and batch scheduling with thumbnail cover frame picker, viral hooks, and auto first comments.
+* ✅ Backblaze B2 temporary cloud bridge uploads with signed public URLs and automated 5-minute cron cleanup.
+* ✅ Multi-Platform Dual-Batch Scheduling modal (YouTube + Facebook simultaneous scheduling).
+* ✅ User authentication (Email/Password signup, login, session persistence, logout).
+* ✅ Database storage statistics, granular data deletion, background auto-maintenance, and database factory reset.
+
+### Partially Implemented / Fallback-Dependent
+* ⚠️ **Native FaceDetector API:** Uses browser `window.FaceDetector` where available; falls back to an internal skin-tone/luminance centroid analyzer on browsers without native FaceDetector.
+* ⚠️ **Direct Facebook Video URL:** Facebook Reels upload requires Backblaze B2 temporary cloud bridge since Meta Graph API requires public HTTPS download URLs for video ingestion.
+* ⚠️ **WebCodecs Encoding:** Uses WebCodecs hardware H.264 when supported by browser; falls back to MediaRecorder stream capture on browsers lacking WebCodecs VideoEncoder.
+
+### UI Only / Static Placeholders
+* ℹ️ **Social Share Links:** External link buttons that open YouTube or Facebook in new tabs.
+
+### Not Implemented (Advertised / Future Scope)
+* ❌ **Automatic Speech-to-Text / Video Subtitles / Closed Captions:** Automated transcription (e.g., Whisper AI word-by-word animated subtitles) is not currently implemented.
+* ❌ **Multi-Track Video B-Roll / Picture-in-Picture Overlays:** Only one primary video track with image/text overlays is supported.
+* ❌ **Advanced Video Transitions:** Only fade-in from black and fade-out to black are supported (no wipe, slide, zoom, or glitch transitions).
+* ❌ **Timeline Audio Waveform Visualization:** Visual audio waveforms along the timeline track are not currently rendered.
+* ❌ **Direct TikTok / Instagram API Publishing:** Only YouTube Shorts and Facebook Reels API integrations are implemented.
+
+---
+
+# 17. Functional Requirements for the New Project
+
+### Core Requirements (Essential Functionality)
+1. **Local Media Ingestion & Decoding:** Fast in-browser loading of MP4, MOV, WebM, MKV, AVI files with instant metadata detection (resolution, FPS, duration, audio tracks).
+2. **Timeline Slicing & Cut Exclusion:** Precision playhead splitting, duration/count chunking, segment keep/cut exclusion toggling, and automatic sequential part renumbering.
+3. **Smart Aspect Ratio Framing:** 9:16 vertical, 16:9 widescreen, 1:1 square, 4:5 portrait, 21:9 ultrawide, and freeform manual crop with Fit (Backdrop) and Fill (Zoom) modes.
+4. **Dynamic Canvas Branding Overlays:** Text burn-in with `{movie}`/`{part}` tokens, zero-padding, typography styling, outline strokes, background pill boxes, secondary CTA text banners, and image logo watermarks.
+5. **Backdrop Generator:** Real-time blurred video mirror backdrop with adjustable blur and brightness, custom image upload, and solid color letterboxing.
+6. **Multi-Track Audio Mixing:** Speed scaling (0.5x–2.0x), volume boost up to 200%, silent local monitoring, voiceover narration track with smart speech ducking, and background music track mixing.
+7. **Cleaned Video Merging:** Export all kept segments or selected segments as single merged video files with cut sections removed.
+8. **Deterministic Export Pipeline:** High-speed hardware-accelerated MP4 (H.264/AAC) and WebM export with customizable resolutions (720p–4K), bitrates, framerates, and audio quality.
+9. **Batch Queue & ZIP Archiving:** Multi-clip queue management with live progress tracking, single MP4 downloads, and bulk ZIP packaging.
+10. **Universal Master Sync Hub:** Master title auto-cleaning, part naming style presets, hashtag packs, and live cross-platform synchronization.
+
+### Secondary Requirements (Social Integrations & Automation)
+1. **YouTube Shorts Integration:** Google OAuth 2.0 authentication, channel info display, direct resumable browser uploads, metadata templates, tag generator, and automated interval scheduling (every 1hr, 2hr, custom).
+2. **Facebook Reels Studio:** Meta OAuth authentication, Facebook Page discovery and selection, thumbnail cover frame picker, viral hooks/captions, auto first comment, temporary cloud bridge staging (Backblaze B2), and scheduled batch publishing via Meta Graph API.
+3. **Multi-Platform Batch Scheduler:** Single-action simultaneous scheduling across YouTube Shorts and Facebook Reels with peak viral hour presets and live timetable previews.
+4. **Studio Template & Preset Manager:** Complete preset creation, 1-click application, in-place editing, duplication, JSON backup export, and JSON import.
+5. **Local AI Speaker Tracking:** Client-side face detection and smooth camera panning for vertical crops.
+6. **Visual Color Grading & Transitions:** 9 visual color presets, manual brightness/contrast/saturation sliders, and fade in/out black transitions.
+7. **User Account & Session Sync:** Multi-device email/password signup, login, session persistence, and cloud settings synchronization.
+8. **Upload History & Audit Log:** Chronological record of social uploads with status badges, direct links, and retry mechanisms.
+9. **Granular Privacy & Storage Management:** Transparent record statistics, itemized data clearing, automated background cleanup, and database factory reset.
+
+### Optional Requirements (Future Enhancements)
+1. **Animated Automatic Subtitles (Speech-to-Text):** In-browser transcription and burning of viral word-by-word highlighted captions.
+2. **Timeline Audio Waveforms:** Visual waveform rendering on the timeline track.
+3. **Additional Social Platforms:** Direct publishing integrations for TikTok, Instagram Reels, and Twitter/X.
+4. **Advanced Transitions:** Additional video transition effects (cross-dissolve, zoom blur, slide, glitch).
+
+---
+
+# 18. What NOT to Carry Over
+
+* **Old UI Layout & Visual Styling:** Do not copy the existing styling, color scheme, element positioning, or component structures.
+* **Old Frontend Codebase & Monolithic State:** Do not reproduce the existing state management, custom hooks, or component hierarchies.
+* **Specific Internal Libraries:** Do not treat non-essential third-party helper libraries as functional requirements.
+* **Temporary Workarounds & Stale Code:** Do not preserve legacy workarounds for older browser quirks that are no longer applicable.
+* **Old Backend Framework Constraints:** The backend requirements are strictly functional (REST APIs for OAuth, metadata synchronization, resumable upload sessions, storage bridging, and cron scheduling).
+* **Hardcoded Styling Rules:** All new interface elements should be built from scratch according to a modern, premium design system.
+
+---
+
+# 19. Final Functional Specification
+
+## NEW PROJECT — FUNCTIONAL REQUIREMENTS
+
+### A. Application Purpose
+The application is a high-speed, privacy-first local video clip editor and multi-platform publishing studio. It enables content creators to import local video files, trim, split, crop, enhance, brand, and export clips inside their browser with zero raw video uploaded to external servers, and automatically schedule or publish finished clips to YouTube Shorts and Facebook Reels.
+
+---
+
+### B. User Roles
+1. **Guest / Anonymous User:** Has full access to local video importing, editing, splitting, merging, branding, local MP4/WebM export, ZIP archiving, and local template presets.
+2. **Authenticated Creator:** Has all guest capabilities plus persistent multi-device login, cloud-synchronized studio presets, connected YouTube and Facebook accounts, automated scheduling queues, and cloud upload history.
+
+---
+
+### C. Authentication
+* **Sign Up:** Email address, password (minimum 6 characters), and creator name.
+* **Sign In:** Email address and password with multi-device session token issuance.
+* **Sign Out:** Revocation of active session tokens and return to guest mode.
+* **OAuth Connections:**
+  * Google OAuth 2.0 (YouTube Data API v3 scope for channel reading and resumable video uploads).
+  * Meta OAuth (Facebook Graph API v21.0 scope for Page discovery, Page token generation, and Reels publishing).
+* **Account Disconnect:** Users can independently disconnect YouTube or Facebook at any time.
+
+---
+
+### D. Dashboard & Universal Master Hub
+* **Master Title Management:** Input field for project title with one-click "Auto-Clean from File" functionality that strips file tags, resolutions, and extensions.
+* **Part Naming Formulas:** Customizable template supporting `{movie}` and `{part}` tokens with quick presets (`Part {n}`, `Pt. {n}`, `Ep. {n} Pt. {n}`, `[Part {n}]`, `#{n}`).
+* **Universal Hashtag Pool:** Global tag input with one-click themed packs (All-In-One, Movie, Anime, Gaming, Podcast).
+* **Live Auto-Sync:** Toggleable mode that automatically propagates master title, template formulas, and hashtags across Canvas Text overlays, YouTube metadata, and Facebook captions.
+* **Studio Preset Quick-Selector:** Dropdown to apply saved branding presets in one click, with "+ Save Current" and "Manage" buttons.
+* **Workspace Reset:** One-click clear action to reset video workspace and timeline state.
+
+---
+
+### E. Core Features
+* **100% In-Browser Video Processing:** Raw video files are decoded, manipulated, and encoded locally on the user's hardware.
+* **Media Auto-Detection:** Automatically probes and displays video dimensions, quality tier (e.g., 1080p, 4K), framerate (FPS), duration, and audio channel configuration upon import.
+* **Timeline Slicing:** Playhead splitting (`S` keyboard shortcut), equal duration-based chunking, equal part-count division, individual timestamp fine-nudging (±1s / snap to playhead), and magnetic boundary snapping.
+* **Keep / Cut Segmentation:** Segment-level toggles to mark unwanted sections as "Cut" (excluded), with automatic sequential renumbering of remaining active parts.
+* **Real-Time Cut Skipping:** Preview player automatically skips over cut/deleted segments during playback.
+* **Merged Cleaned Video Export:** Ability to export all active kept segments as a single joined video file with all cut sections removed.
+* **Selective Sub-Segment Merging:** Ability to select specific segments (e.g., Part 2 + Part 4) and merge them into one video file.
+* **Batch Rendering Queue:** Concurrent and sequential queue manager supporting All, First N, and Range generation modes with live progress bars and job cancellation.
+* **Batch ZIP Archiving:** Download individual clips or package all/selected clips into single `.zip` archives.
+
+---
+
+### F. Content/Media Features
+* **Supported Video Input:** `.mp4`, `.mov`, `.webm`, `.mkv`, `.avi`.
+* **Supported Audio Input:** `.mp3`, `.wav`, `.aac`, `.m4a`, `.ogg`.
+* **Supported Image Input:** `.png` (alpha transparency), `.jpg`, `.webp`.
+* **Aspect Ratio Framing:** `9:16` (Shorts/Reels/TikTok), `16:9` (YouTube), `1:1` (Square), `4:5` (Portrait), `21:9` (Ultrawide), `custom` (8-point freeform crop), `original` (native source dimensions).
+* **9:16 Display Styles:** Fit mode (full horizontal video with top/bottom backdrop) vs Fill mode (zoom to fill vertical screen with side cropping).
+* **Local AI Speaker Tracking:** Client-side face detection that dynamically centers the primary active speaker in vertical crops with EMA coordinate smoothing.
+* **Backdrop Engine:** Real-time blurred video mirror (adjustable blur 0%–100% and brightness 15%–100%), uploaded custom image background, or solid color letterboxing.
+* **Canvas Text Overlay:** Burn-in title branding with `{movie}`/`{part}` tokens, zero-padding (`01` vs `1`), font selection, outline shadow stroke, pill background box, 7 anchor presets + freeform X/Y placement.
+* **Secondary Text Overlays:** Multiple custom text banners for social handles (`@channel`) or calls to action with independent sizing, colors, and positioning.
+* **Logo Watermark Stamp:** Brand logo image overlay with width scaling (25px–250px), opacity control (10%–100%), 4 corner presets + freeform X/Y placement.
+* **Visual Color Grading:** 9 color presets, brightness (50%–150%), contrast (50%–180%), saturation (0%–200%), fade-in from black (0.25s–2.0s), and fade-out to black (0.25s–2.0s).
+* **Multi-Track Audio Engine:** Video speed scaling (0.5x–2.0x), volume boost (0%–200%), silent local preview monitoring, external voiceover narration track with smart speech ducking and audio replacement, and background music track mixing.
+
+---
+
+### G. Editing/Processing Features
+* **Output Video Containers:** MP4 (H.264 / AAC) with ISOBMFF fast-start metadata and WebM (VP9 / Opus).
+* **Output Resolutions:** 720p, 1080p, 1440p, 4K, and Original Native Dimensions.
+* **Output Bitrates:** Standard (5 Mbps), High (8.5 Mbps), Ultra (16 Mbps).
+* **Output Framerates:** Auto Source, 60 FPS, 30 FPS, 24 FPS.
+* **Output Audio Bitrates:** 128 kbps, 192 kbps, 256 kbps, 320 kbps.
+* **Export Engine Architecture:** Hardware-accelerated WebCodecs encoder with offline audio mixing and MediaRecorder stream capture fallback.
+
+---
+
+### H. Settings
+* **Universal Master Hub Settings:** Master title, part naming template, global hashtags, auto-sync toggle.
+* **Studio Template Presets:** Name, category, description, canvas text styles, logo settings, YouTube defaults, Facebook defaults, hashtags.
+* **Project Defaults:** YouTube visibility, category ID, made-for-kids, notify subscribers, schedule base time, default interval.
+* **Storage & Privacy Settings:** Granular data clear controls (history, presets, YouTube tokens, Facebook tokens, settings, temp files), danger zone full account wipe, database factory reset, automated background maintenance trigger.
+
+---
+
+### I. Integrations
+* **YouTube Data API v3:** Google OAuth connection, channel info retrieval, resumable upload session creation, direct browser-to-YouTube video uploads, metadata/tag assignment, and automated interval scheduling.
+* **Meta Graph API v21.0:** Facebook OAuth connection, managed Pages discovery and validation, Reels publishing, scheduled Reels queue, thumbnail cover frame selection, auto first comments, and permalink generation.
+* **Backblaze B2 Object Storage:** Cloud bridge for temporary video staging during Facebook Reel ingestion with signed public URLs and automated 5-minute cron cleanup.
+
+---
+
+### J. Export/Publishing
+* **Local File Export:** Instant download of individual MP4/WebM files or bulk `.zip` archives.
+* **YouTube Publishing:** Direct upload or automated pipeline scheduling with customizable intervals (15m, 30m, 1hr, 2hr, 3hr, 4hr, 6hr, 12hr, 24hr, custom).
+* **Facebook Reels Publishing:** Direct publish or scheduled queue with Peak Viral Hours presets (9am, 1pm, 6pm, 9:30pm) or fixed/custom intervals.
+* **Dual-Platform Batch Scheduling:** Simultaneous scheduling of multiple clips across both YouTube Shorts and Facebook Reels from a single interface.
+* **Audit & Upload History:** Detailed history logs with status badges (Pending, Uploading %, Uploaded, Scheduled, Published, Failed), direct links, and one-click retries.
+
+---
+
+### K. Error & Loading States
+* **Empty States:** Clear visual guidance for empty video dropzones, empty queues, and empty preset lists.
+* **Loading States:** Live progress indicators for video analysis, rendering percentages, ZIP creation, B2 staging, and social media uploading.
+* **Error Recovery:** Inline visual alerts for invalid file formats, seek errors, auth errors, and social API errors with one-click retry actions.
+
+---
+
+### L. Permissions
+* **Guest Users:** Full access to local editing, rendering, downloading, and local template presets.
+* **Authenticated Users:** Multi-device synchronization of presets, settings, social accounts, and upload logs.
+* **Social Publishing:** Requires active OAuth authentication and appropriate permissions on target channels/pages.
+
+---
+
+### M. User Workflows
+1. **Single Clip Quick Edit:** Import → Crop/Frame → Trim → Brand → Render → Download.
+2. **Multi-Part Series Batching:** Import → Master Title & Template → Split/Cut → Brand/Enhance → Batch Queue → Download ZIP.
+3. **Cleaned Video Export:** Import → Split unwanted sections → Mark as Cut → Merge Kept Parts → Download Continuous Video.
+4. **Automated YouTube Series Schedule:** Import → Slicing → Set YouTube Schedule Pipeline & Interval → Batch Render & Auto-Upload.
+5. **Facebook Reels Scheduling:** Import → Slicing → Select Clips → Choose Peak Hours & Thumbnail Frames → Staged Cloud Bridge Submission.
+6. **Dual-Platform Multi-Scheduling:** Render Clips → Open Multi-Schedule Modal → Check YouTube + Facebook → Select Interval → One-Click Dual Schedule.
+
+---
+
+### N. Functional Dependencies
+* Video slicing, framing, branding, and export require an imported video file.
+* Multi-part numbering requires an active segment sequence.
+* Merged video export requires at least one kept video segment.
+* YouTube publishing requires an active Google OAuth connection.
+* Facebook Reels publishing requires an active Meta OAuth connection, connected Page, and Backblaze B2 storage bridge.
+* Multi-platform dual-scheduling requires at least one connected social account.
+* Cloud preset synchronization requires user authentication.
+
+---
+
+### O. Future/Optional Features
+* Automatic speech-to-text with animated, highlighted video captions (word-by-word viral subtitles).
+* Interactive audio waveform rendering along timeline tracks.
+* Multi-layer B-roll and picture-in-picture video overlays.
+* Additional visual video transition effects (cross-dissolve, zoom, wipe, glitch).
+* Direct publishing integrations for TikTok, Instagram Reels, and Twitter/X.

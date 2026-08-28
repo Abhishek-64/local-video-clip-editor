@@ -1,37 +1,26 @@
 {
-  "name": "react-example",
+  "name": "local-video-clip-editor",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --port=3000 --host=0.0.0.0",
-    "worker:dev": "npm --prefix worker run dev",
-    "build": "vite build",
-    "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@google/genai": "^2.4.0",
-    "@tailwindcss/vite": "^4.1.14",
-    "@vitejs/plugin-react": "^5.0.4",
-    "dotenv": "^17.2.3",
-    "express": "^4.21.2",
-    "jszip": "^3.10.1",
-    "lucide-react": "^0.546.0",
-    "motion": "^12.23.24",
-    "react": "^19.0.1",
-    "react-dom": "^19.0.1",
-    "vite": "^6.2.3"
+    "dev": "npm --prefix frontend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "dev:backend": "npm --prefix backend run dev",
+    "build": "npm --prefix frontend run build",
+    "build:frontend": "npm --prefix frontend run build",
+    "preview": "npm --prefix frontend run preview",
+    "deploy": "npm run deploy:all",
+    "deploy:frontend": "npm --prefix frontend run build && npx wrangler deploy --config frontend/wrangler.jsonc",
+    "deploy:backend": "npm --prefix backend run deploy",
+    "deploy:all": "npm run deploy:backend && npm run deploy:frontend",
+    "db:migrate": "npm --prefix backend run db:migrate",
+    "db:migrate:local": "npm --prefix backend run db:migrate:local",
+    "db:execute:local": "npm --prefix backend run db:execute:local",
+    "db:execute:remote": "npm --prefix backend run db:execute:remote",
+    "lint": "npm --prefix frontend run lint"
   },
   "devDependencies": {
-    "@types/node": "^22.14.0",
-    "autoprefixer": "^10.4.21",
-    "esbuild": "^0.25.0",
-    "tailwindcss": "^4.1.14",
-    "tsx": "^4.21.0",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.3",
-    "@types/express": "^4.17.21"
+    "wrangler": "^4.125.0"
   }
 }

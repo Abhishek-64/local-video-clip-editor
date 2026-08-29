@@ -310,3 +310,95 @@ export async function clearUserData(db, userId, scope = 'all') {
 
   return { success: true, scope, cleared };
 }
+
+// ─── Template CRUD Helpers ───────────────────────────────────────────────────
+
+export async function getTemplates(db, userId) {
+  if (!userId) return [];
+  const result = await db
+    .prepare('SELECT * FROM templates WHERE user_id = ? ORDER BY created_at DESC')
+    .bind(userId)
+    .all();
+  return result?.results || [];
+}
+
+export async function getTemplateById(db, userId, templateId) {
+  if (!userId || !templateId) return null;
+  return db
+    .prepare('SELECT * FROM templates WHERE id = ? AND user_id = ?')
+    .bind(templateId, userId)
+    .first();
+}
+
+export async function createTemplate(db, userId, data) {
+  const id = data.id || crypto.randomUUID();
+  const name = (data.name || 'Untitled Template').trim();
+  const description = data.description ? data.description.trim() : null;
+  const textData = typeof data.text_data === 'object' ? JSON.stringify(data.text_data) : (data.text_data || null);
+  const youtubeData = typeof data.youtube_data === 'object' ? JSON.stringify(data.youtube_data) : (data.youtube_data || null);
+  const logoData = typeof data.logo_data === 'object' ? JSON.stringify(data.logo_data) : (data.logo_data || null);
+
+  await db
+    .prepare(`
+      INSERT INTO templates (id, user_id, name, description, text_data, youtube_data, logo_data, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+    `)
+    .bind(id, userId, name, description, textData, youtubeData, logoData)
+    .run();
+
+  return {
+    id,
+    user_id: userId,
+    name,
+    description,
+    text_data: textData,
+    youtube_data: youtubeData,
+    logo_data: logoData
+  };
+}
+
+export async function updateTemplate(db, userId, templateId, data) {
+  const existing = await getTemplateById(db, userId, templateId);
+  if (!existing) return null;
+
+  const name = data.name !== undefined ? data.name.trim() : existing.name;
+  const description = data.description !== undefined ? (data.description ? data.description.trim() : null) : existing.description;
+  const textData = data.text_data !== undefined
+    ? (typeof data.text_data === 'object' ? JSON.stringify(data.text_data) : data.text_data)
+    : existing.text_data;
+  const youtubeData = data.youtube_data !== undefined
+    ? (typeof data.youtube_data === 'object' ? JSON.stringify(data.youtube_data) : data.youtube_data)
+    : existing.youtube_data;
+  const logoData = data.logo_data !== undefined
+    ? (typeof data.logo_data === 'object' ? JSON.stringify(data.logo_data) : data.logo_data)
+    : existing.logo_data;
+
+  await db
+    .prepare(`
+      UPDATE templates
+      SET name = ?, description = ?, text_data = ?, youtube_data = ?, logo_data = ?, updated_at = datetime('now')
+      WHERE id = ? AND user_id = ?
+    `)
+    .bind(name, description, textData, youtubeData, logoData, templateId, userId)
+    .run();
+
+  return {
+    id: templateId,
+    user_id: userId,
+    name,
+    description,
+    text_data: textData,
+    youtube_data: youtubeData,
+    logo_data: logoData
+  };
+}
+
+export async function deleteTemplate(db, userId, templateId) {
+  if (!userId || !templateId) return { success: false };
+  const res = await db
+    .prepare('DELETE FROM templates WHERE id = ? AND user_id = ?')
+    .bind(templateId, userId)
+    .run();
+  return { success: true, deleted: res?.meta?.changes ?? 0 };
+}
+

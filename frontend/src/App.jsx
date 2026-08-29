@@ -9,6 +9,7 @@ import GeneratedClips from './components/GeneratedClips';
 import YouTubeUploadHistory from './components/YouTubeUploadHistory';
 import AuthModal from './components/AuthModal';
 import StorageSettingsModal from './components/StorageSettingsModal';
+import TemplateManagerModal from './components/TemplateManagerModal';
 import { generateClipFilename } from './utils/filename';
 import { calculateSingleScheduleTime, formatScheduledDateTime, getDefaultScheduleStartTime, toDateTimeLocalString } from './utils/scheduler';
 import { cleanVideoFilename } from './utils/titleCleaner';
@@ -16,6 +17,7 @@ import { useProcessingQueue } from './hooks/useProcessingQueue';
 import { useYouTube } from './hooks/useYouTube';
 import { useUploadQueue } from './hooks/useUploadQueue';
 import { useAuth } from './hooks/useAuth';
+import { useTemplates } from './hooks/useTemplates';
 import { Check, Info, X, Film, Palette, Layers, Sparkles } from 'lucide-react';
 
 export default function App() {
@@ -218,6 +220,41 @@ export default function App() {
     renderTemplate,
     movieName: ytSettings?.yt_name || textSettings.movieName
   });
+
+  // ── Templates / Presets Hook (Cross-Section Multi-Configuration) ──────────────
+  const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
+  const {
+    templates,
+    isLoading: isLoadingTemplates,
+    createNewTemplate,
+    editTemplate,
+    removeTemplate
+  } = useTemplates({ isAuthenticated: isUserLoggedIn });
+
+  const handleApplyTemplate = (template) => {
+    if (!template) return;
+    try {
+      const textConfig = typeof template.text_data === 'string' ? JSON.parse(template.text_data || '{}') : (template.text_data || {});
+      const ytConfig = typeof template.youtube_data === 'string' ? JSON.parse(template.youtube_data || '{}') : (template.youtube_data || {});
+      const logoConfig = typeof template.logo_data === 'string' ? JSON.parse(template.logo_data || '{}') : (template.logo_data || {});
+
+      if (textConfig && Object.keys(textConfig).length > 0) {
+        setTextSettings(prev => ({ ...prev, ...textConfig }));
+      }
+      if (ytConfig && Object.keys(ytConfig).length > 0) {
+        updateYtSettings(ytConfig);
+      }
+      if (logoConfig && Object.keys(logoConfig).length > 0) {
+        setLogoSettings(prev => ({ ...prev, ...logoConfig }));
+      }
+
+      showToast(`Template "${template.name}" applied across Text, YouTube & Logo!`, 'success');
+    } catch (e) {
+      console.error('Failed to apply template:', e);
+      showToast('Error applying template.', 'error');
+    }
+  };
+
 
   // ── Handle Video Loading and Auto-Detection ───────────────────────────────────
   const handleVideoSelect = (data) => {
@@ -711,6 +748,8 @@ export default function App() {
         onOpenAuth={openAuthModal}
         onLogout={handleLogout}
         onOpenStorage={() => setIsStorageModalOpen(true)}
+        onOpenTemplates={() => setIsTemplateModalOpen(true)}
+        templatesCount={templates.length}
         ytAccount={ytAccount}
       />
 
@@ -971,9 +1010,6 @@ export default function App() {
           if (scope === 'history' || scope === 'all') {
             refreshHistory();
           }
-          if (scope === 'presets' || scope === 'all') {
-            fetchBrandingPresets();
-          }
           if (scope === 'youtube' || scope === 'all') {
             refreshAccount();
           }
@@ -981,6 +1017,20 @@ export default function App() {
             refreshAccount();
           }
         }}
+      />
+
+      {/* Cross-Section Templates Management Modal */}
+      <TemplateManagerModal
+        isOpen={isTemplateModalOpen}
+        onClose={() => setIsTemplateModalOpen(false)}
+        templates={templates}
+        isLoading={isLoadingTemplates}
+        onSaveTemplate={createNewTemplate}
+        onApplyTemplate={handleApplyTemplate}
+        onDeleteTemplate={removeTemplate}
+        currentTextSettings={textSettings}
+        currentYtSettings={ytSettings}
+        currentLogoSettings={logoSettings}
       />
     </div>
   );

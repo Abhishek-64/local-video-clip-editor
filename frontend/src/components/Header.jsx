@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ShieldCheck, Film, Sparkles, User, LogOut, Youtube, ChevronDown, CheckCircle2, Database } from 'lucide-react';
+import { ShieldCheck, Film, Sparkles, User, LogOut, Youtube, ChevronDown, CheckCircle2, Database, LayoutTemplate, Bookmark } from 'lucide-react';
 
 export default function Header({
   onReset,
@@ -9,6 +9,8 @@ export default function Header({
   onOpenAuth,
   onLogout,
   onOpenStorage,
+  onOpenTemplates,
+  templatesCount = 0,
   ytAccount
 }) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -40,25 +42,32 @@ export default function Header({
               <span className="font-bold text-sm sm:text-base tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-100 to-slate-300 truncate">
                 AUTOMATIC VIDEO CLIPPER
               </span>
-              {/* <span className="hidden sm:inline text-[9px] uppercase font-semibold px-1.5 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-full shrink-0">
-                100% Local
-              </span> */}
             </div>
             <p className="text-[10px] sm:text-xs text-slate-400 truncate">Local Browser Processing &bull; Private</p>
           </div>
         </div>
 
         {/* Header Right Actions */}
-        <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
-          {/* <div className="hidden lg:flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-950/40 border border-emerald-500/30 rounded-lg text-xs text-emerald-300">
-            <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span>100% Local &bull; Private</span>
-          </div> */}
+        <div className="flex items-center space-x-1.5 sm:space-x-3 shrink-0">
+          {/* Templates / Presets Button */}
+          <button
+            onClick={onOpenTemplates}
+            className="px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-orange-300 hover:text-white bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 rounded-xl transition-all cursor-pointer flex items-center space-x-1.5 touch-manipulation shadow-sm"
+            title="Manage saved video section templates"
+          >
+            <LayoutTemplate className="w-3.5 h-3.5 text-orange-400" />
+            <span className="hidden sm:inline">Templates</span>
+            {templatesCount > 0 && (
+              <span className="px-1.5 py-0.2 bg-orange-500/30 text-orange-200 rounded-full text-[10px] font-mono">
+                {templatesCount}
+              </span>
+            )}
+          </button>
 
           {hasVideo && (
             <button
               onClick={onReset}
-              className="px-2.5 sm:px-3 py-1.5 text-xs font-medium text-slate-200 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors cursor-pointer touch-manipulation"
+              className="px-2.5 sm:px-3 py-1.5 text-xs font-medium text-slate-200 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl transition-colors cursor-pointer touch-manipulation"
             >
               Change Video
             </button>
@@ -123,8 +132,19 @@ export default function Header({
                     </div>
                   )}
 
-                  {/* Storage & Privacy Management */}
-                  <div className="p-1 border-b border-slate-800/80">
+                  {/* Templates & Storage Management */}
+                  <div className="p-1 border-b border-slate-800/80 space-y-0.5">
+                    <button
+                      onClick={() => {
+                        setIsDropdownOpen(false);
+                        onOpenTemplates && onOpenTemplates();
+                      }}
+                      className="w-full flex items-center space-x-2 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                    >
+                      <LayoutTemplate className="w-3.5 h-3.5 text-orange-400" />
+                      <span>Saved Templates ({templatesCount})</span>
+                    </button>
+
                     <button
                       onClick={() => {
                         setIsDropdownOpen(false);
@@ -132,7 +152,7 @@ export default function Header({
                       }}
                       className="w-full flex items-center space-x-2 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
                     >
-                      <Database className="w-3.5 h-3.5 text-orange-400" />
+                      <Database className="w-3.5 h-3.5 text-amber-400" />
                       <span>Database &amp; Storage</span>
                     </button>
                   </div>

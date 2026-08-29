@@ -84,3 +84,22 @@ CREATE TABLE IF NOT EXISTS upload_jobs (
 
 CREATE INDEX IF NOT EXISTS idx_upload_jobs_user_id ON upload_jobs(user_id);
 CREATE INDEX IF NOT EXISTS idx_upload_jobs_status ON upload_jobs(status);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 5. Templates Table (Cross-Section Configuration Presets)
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS templates (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL,
+  name         TEXT NOT NULL,
+  description  TEXT,
+  text_data    TEXT,
+  youtube_data TEXT,
+  logo_data    TEXT,
+  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_templates_user_id ON templates(user_id);
+

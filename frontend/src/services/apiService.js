@@ -341,3 +341,53 @@ export async function triggerAdminCleanup() {
   });
 }
 
+// ─── Templates / Presets Management ──────────────────────────────────────────
+
+/**
+ * Fetch all saved templates for the current user.
+ */
+export async function getTemplates() {
+  const res = await apiFetch('/api/templates');
+  return res?.templates || [];
+}
+
+/**
+ * Fetch a single saved template by ID.
+ */
+export async function getTemplate(id) {
+  const res = await apiFetch(`/api/templates/${id}`);
+  return res?.template || null;
+}
+
+/**
+ * Save a new cross-section template.
+ */
+export async function saveTemplate(templateData) {
+  const res = await apiFetch('/api/templates', {
+    method: 'POST',
+    body: JSON.stringify(templateData)
+  });
+  return res?.template || null;
+}
+
+/**
+ * Update an existing template.
+ */
+export async function updateTemplate(id, templateData) {
+  const res = await apiFetch(`/api/templates/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(templateData)
+  });
+  return res?.template || null;
+}
+
+/**
+ * Delete a saved template.
+ */
+export async function deleteTemplate(id) {
+  return apiFetch(`/api/templates/${id}`, {
+    method: 'DELETE'
+  });
+}
+
+

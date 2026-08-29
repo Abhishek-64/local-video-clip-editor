@@ -45,7 +45,12 @@ import {
   getUploadJob,
   runAutoCleanup,
   getUserStorageStats,
-  clearUserData
+  clearUserData,
+  getTemplates,
+  getTemplateById,
+  createTemplate,
+  updateTemplate,
+  deleteTemplate
 } from './db.js';
 
 import {
@@ -702,6 +707,89 @@ app.get('/api/schedule', withUser, async (c) => {
   const userId = c.get('userId');
   const jobs = await getUploadJobs(c.env.DB, userId);
   return c.json(jobs.filter((j) => j.status === 'scheduled' || Boolean(j.scheduled_at)));
+});
+
+// ─── Templates / Presets (Cross-Section Multi-Configuration) ──────────────────
+
+/**
+ * GET /api/templates
+ * List all saved templates for the current user.
+ */
+app.get('/api/templates', withUser, async (c) => {
+  const userId = c.get('userId');
+  const templates = await getTemplates(c.env.DB, userId);
+  return c.json({ success: true, templates });
+});
+
+/**
+ * GET /api/templates/:id
+ * Get a specific saved template.
+ */
+app.get('/api/templates/:id', withUser, async (c) => {
+  const userId = c.get('userId');
+  const id = c.req.param('id');
+  const template = await getTemplateById(c.env.DB, userId, id);
+  if (!template) return c.json({ error: 'Template not found' }, 404);
+  return c.json({ success: true, template });
+});
+
+/**
+ * POST /api/templates
+ * Create a new saved template.
+ */
+app.post('/api/templates', withUser, async (c) => {
+  const userId = c.get('userId');
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Invalid JSON body' }, 400);
+  }
+
+  if (!body.name || !body.name.trim()) {
+    return c.json({ error: 'Please enter a name for the template.' }, 400);
+  }
+
+  const newTemplate = await createTemplate(c.env.DB, userId, {
+    name: body.name,
+    description: body.description,
+    text_data: body.text_data,
+    youtube_data: body.youtube_data,
+    logo_data: body.logo_data
+  });
+
+  return c.json({ success: true, template: newTemplate }, 201);
+});
+
+/**
+ * PUT /api/templates/:id
+ * Update an existing template.
+ */
+app.put('/api/templates/:id', withUser, async (c) => {
+  const userId = c.get('userId');
+  const id = c.req.param('id');
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Invalid JSON body' }, 400);
+  }
+
+  const updated = await updateTemplate(c.env.DB, userId, id, body);
+  if (!updated) return c.json({ error: 'Template not found' }, 404);
+
+  return c.json({ success: true, template: updated });
+});
+
+/**
+ * DELETE /api/templates/:id
+ * Delete a template.
+ */
+app.delete('/api/templates/:id', withUser, async (c) => {
+  const userId = c.get('userId');
+  const id = c.req.param('id');
+  const result = await deleteTemplate(c.env.DB, userId, id);
+  return c.json(result);
 });
 
 // ─── User Storage & Database Data Management ──────────────────────────────────

@@ -802,7 +802,19 @@ export default function YouTubePanel({
                 <Tag className="w-3.5 h-3.5 text-orange-400" />
                 <span>Default Tags &amp; Hashtags</span>
               </label>
-              <span className="text-[10px] text-slate-500">{(ytSettings?.yt_tags || []).length} active</span>
+              <div className="flex items-center space-x-2">
+                <span className="text-[10px] text-slate-500">{(ytSettings?.yt_tags || []).length} active</span>
+                {(ytSettings?.yt_tags || []).length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => updateYtSettings({ yt_tags: [] })}
+                    className="text-[10px] text-rose-400 hover:text-rose-300 font-medium cursor-pointer touch-manipulation flex items-center space-x-1 px-1.5 py-0.5 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 rounded transition-colors"
+                    title="Clear all active tags and hashtags"
+                  >
+                    <span>Clear All</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="flex flex-wrap gap-1.5 bg-slate-950/60 border border-slate-800 rounded-xl p-2.5 min-h-[44px]">

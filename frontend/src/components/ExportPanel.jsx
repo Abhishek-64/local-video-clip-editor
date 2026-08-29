@@ -1,13 +1,29 @@
 import React, { useEffect, useState } from 'react';
-import { Settings, Cpu, HardDrive, Sparkles, Film, Zap, CheckCircle2, Gauge, Layers } from 'lucide-react';
+import {
+  Settings,
+  Cpu,
+  HardDrive,
+  Sparkles,
+  Film,
+  Zap,
+  CheckCircle2,
+  Gauge,
+  Layers,
+  FileText,
+  Copy,
+  Check
+} from 'lucide-react';
 import { detectCapabilities } from '../services/capabilityDetector';
+import { sanitizeFilename } from '../utils/filename';
 
 export default function ExportPanel({
-  exportSettings,
+  exportSettings = {},
   onChange,
   sourceResolution,
   detectedQuality,
-  detectedFps
+  detectedFps,
+  textSettings = {},
+  onTextChange
 }) {
   const [capabilities, setCapabilities] = useState(null);
 
@@ -21,6 +37,47 @@ export default function ExportPanel({
       [key]: value
     });
   };
+
+  const fileTemplatePresets = [
+    { label: 'Standard', value: '{movie} - Part {part}' },
+    { label: 'Underscores', value: '{movie}_Part_{part}' },
+    { label: 'Part First', value: 'Part_{part}_{movie}' },
+    { label: 'Short', value: '{movie}_{part}' }
+  ];
+
+  const handleFileTemplateChange = (val) => {
+    updateSetting('fileTemplate', val);
+    if (onTextChange && textSettings) {
+      onTextChange({
+        ...textSettings,
+        fileTemplate: val
+      });
+    }
+  };
+
+  const insertToken = (token) => {
+    const current = exportSettings.fileTemplate || textSettings?.fileTemplate || textSettings?.template || '{movie} - Part {part}';
+    const updated = `${current}${current ? ' ' : ''}${token}`;
+    handleFileTemplateChange(updated);
+  };
+
+  const handleMatchOverlay = () => {
+    const overlayTpl = textSettings?.template || '{movie} - Part {part}';
+    handleFileTemplateChange(overlayTpl);
+  };
+
+  const movieTitle = textSettings?.movieName || 'My Movie';
+  const startPart = Math.max(1, parseInt(textSettings?.startPart) || 1);
+  const partFormatted = textSettings?.zeroPad !== false ? String(startPart).padStart(2, '0') : String(startPart);
+  const activeFileTemplate = exportSettings.fileTemplate || textSettings?.fileTemplate || textSettings?.template || '{movie} - Part {part}';
+  const ext = exportSettings.format || 'mp4';
+  const previewSampleFilename = `${sanitizeFilename(
+    activeFileTemplate
+      .replace(/\{movie\}/gi, movieTitle)
+      .replace(/\{title\}/gi, movieTitle)
+      .replace(/\{text\}/gi, movieTitle)
+      .replace(/\{part\}/gi, partFormatted)
+  )}.${ext}`;
 
   const presets = [
     {
@@ -124,6 +181,107 @@ export default function ExportPanel({
               ⚡ {detectedFps.label}
             </span>
           )}
+        </div>
+      </div>
+
+      {/* ── EXPORT FILE NAMING TEMPLATE CARD (Relocated to Export Section) ── */}
+      <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3.5 shadow-lg">
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-800">
+          <div className="flex items-center space-x-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-xl bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-blue-400 shrink-0">
+              <FileText className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center space-x-2">
+                <h4 className="text-xs sm:text-sm font-bold text-white">Export File Naming Template</h4>
+                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-500/10 border border-blue-500/30 text-blue-300">
+                  Local File Naming
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 truncate">
+                Controls downloaded MP4 filenames (Independent from on-screen video text)
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleMatchOverlay}
+            className="flex items-center space-x-1 px-2.5 py-1 text-[10px] sm:text-[11px] bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 rounded-lg transition-colors cursor-pointer touch-manipulation shrink-0"
+            title="Copy template from On-Screen Text Template"
+          >
+            <Copy className="w-3 h-3 text-slate-400" />
+            <span>Match Overlay</span>
+          </button>
+        </div>
+
+        <div className="space-y-2.5">
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-slate-300">File Naming Template:</label>
+              <div className="flex items-center space-x-1">
+                <button
+                  type="button"
+                  onClick={() => insertToken('{movie}')}
+                  className="px-1.5 py-0.5 text-[9px] bg-slate-900 hover:bg-slate-800 text-blue-300 border border-blue-500/30 rounded font-mono cursor-pointer touch-manipulation"
+                >
+                  +{'{movie}'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => insertToken('{part}')}
+                  className="px-1.5 py-0.5 text-[9px] bg-slate-900 hover:bg-slate-800 text-blue-300 border border-blue-500/30 rounded font-mono cursor-pointer touch-manipulation"
+                >
+                  +{'{part}'}
+                </button>
+              </div>
+            </div>
+
+            <input
+              type="text"
+              value={exportSettings.fileTemplate || textSettings?.fileTemplate || textSettings?.template || '{movie} - Part {part}'}
+              onChange={(e) => handleFileTemplateChange(e.target.value)}
+              placeholder="{movie} - Part {part}"
+              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs sm:text-sm text-white font-mono focus:border-blue-500 focus:outline-none shadow-inner"
+            />
+
+            <div className="flex flex-wrap items-center gap-1 pt-0.5">
+              <span className="text-[10px] text-slate-500 mr-1">Presets:</span>
+              {fileTemplatePresets.map((p) => {
+                const currentVal = exportSettings.fileTemplate || textSettings?.fileTemplate || textSettings?.template || '{movie} - Part {part}';
+                const isSelected = currentVal === p.value;
+                return (
+                  <button
+                    key={p.label}
+                    type="button"
+                    onClick={() => handleFileTemplateChange(p.value)}
+                    className={`px-2 py-0.5 text-[10px] rounded border transition-colors cursor-pointer touch-manipulation ${
+                      isSelected
+                        ? 'bg-blue-500/20 border-blue-500/50 text-blue-300 font-bold'
+                        : 'bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border-slate-800'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Live Filename Preview */}
+          <div className="bg-slate-900/90 border border-blue-500/20 rounded-xl p-3 flex items-center justify-between gap-2 shadow-sm">
+            <div className="min-w-0">
+              <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider block mb-0.5">
+                Output File Name Preview:
+              </span>
+              <p className="text-xs font-bold text-white font-mono truncate">
+                {previewSampleFilename}
+              </p>
+            </div>
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/30 text-blue-300 shrink-0">
+              Auto-Sanitized
+            </span>
+          </div>
         </div>
       </div>
 

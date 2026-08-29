@@ -600,9 +600,12 @@ export default function VideoPreview({
       ? String(activePartNumber).padStart(2, '0')
       : String(activePartNumber);
 
+    const displayText = textSettings.text || textSettings.movieName || 'My Movie';
     return (textSettings.template || '{movie} - Part {part}')
-      .replace(/{movie}/g, textSettings.movieName || 'My Movie')
-      .replace(/{part}/g, formattedPart);
+      .replace(/\{movie\}/gi, displayText)
+      .replace(/\{title\}/gi, displayText)
+      .replace(/\{text\}/gi, displayText)
+      .replace(/\{part\}/gi, formattedPart);
   };
 
   // Compute Primary Text overlay position style

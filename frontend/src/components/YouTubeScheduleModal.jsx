@@ -5,7 +5,6 @@ import {
 } from 'lucide-react';
 import { formatTime } from '../utils/time';
 import {
-  GLOBAL_HASHTAG_PACKS,
   formatTagsAsHashtagString,
   parseTagsInput
 } from '../utils/titleCleaner';
@@ -29,36 +28,43 @@ export default function YouTubeScheduleModal({
   clip,               // single clip object or array of clips for batch
   ytSettings = {},
   movieName = 'Movie',
+  youtubeName,
   onConfirmUpload,
   isBatch = false
 }) {
   if (!isOpen || !clip) return null;
 
   const clipPartNumber = clip.partNumber || 1;
+  const isZeroPad = ytSettings?.yt_zero_pad !== false;
+  const partStr = isZeroPad ? String(clipPartNumber).padStart(2, '0') : String(clipPartNumber);
+  const activeYtName = youtubeName || ytSettings?.yt_name || movieName || 'Movie';
+
   const initialTags = (clip.tagsOverride && clip.tagsOverride.length > 0)
     ? parseTagsInput(clip.tagsOverride)
-    : parseTagsInput(ytSettings.yt_tags || ['shorts', 'youtube shorts', 'clips', 'viral', 'fyp']);
-  const initialHashtagsStr = formatTagsAsHashtagString(initialTags);
+    : (Array.isArray(ytSettings?.yt_tags) && ytSettings.yt_tags.length > 0
+        ? parseTagsInput(ytSettings.yt_tags)
+        : ['shorts', 'viral', 'clips']);
+  const initialHashtagsStr = formatTagsAsHashtagString(initialTags) || '#Shorts #Viral';
 
   const initialTitle = clip.titleOverride || (ytSettings.yt_title_template
     ? ytSettings.yt_title_template
-        .replace(/\{movie\}/gi, movieName)
-        .replace(/\{part\}/gi, String(clipPartNumber).padStart(2, '0'))
+        .replace(/\{movie\}/gi, activeYtName)
+        .replace(/\{part\}/gi, partStr)
         .replace(/\{hashtags\}/gi, initialHashtagsStr)
         .replace(/\{tags\}/gi, initialTags.join(', '))
-    : (clip.partTitle ? `${movieName} - ${clip.partTitle} | Part ${clipPartNumber} #Shorts` : `${movieName} - Part ${clipPartNumber} | #Shorts`));
+    : (clip.partTitle ? `${activeYtName} - ${clip.partTitle} | Part ${partStr} #Shorts` : `${activeYtName} - Part ${partStr} | #Shorts`));
 
   const initialDescription = clip.descriptionOverride || (() => {
     let desc = ytSettings.yt_description_template
       ? ytSettings.yt_description_template
-          .replace(/\{movie\}/gi, movieName)
-          .replace(/\{part\}/gi, String(clipPartNumber).padStart(2, '0'))
+          .replace(/\{movie\}/gi, activeYtName)
+          .replace(/\{part\}/gi, partStr)
           .replace(/\{hashtags\}/gi, initialHashtagsStr)
           .replace(/\{tags\}/gi, initialTags.join(', '))
-      : `${movieName} - Part ${clipPartNumber}\n\n#Shorts\n\n${initialHashtagsStr}`;
+      : `${activeYtName} - Part ${partStr}\n\n#Shorts\n\n${initialHashtagsStr}`;
 
-    if (initialHashtagsStr && !ytSettings.yt_description_template?.includes('{hashtags}')) {
-      const missing = initialHashtagsStr.split(' ').filter(ht => !desc.toLowerCase().includes(ht.toLowerCase()));
+    if (initialHashtagsStr) {
+      const missing = initialHashtagsStr.split(' ').filter(Boolean).filter(ht => !desc.toLowerCase().includes(ht.toLowerCase()));
       if (missing.length > 0) {
         desc = `${desc.trim()}\n\n${missing.join(' ')}`;
       }
@@ -189,6 +195,7 @@ export default function YouTubeScheduleModal({
     }
 
     onConfirmUpload(clip, {
+      movieName: activeYtName,
       titleOverride: title.trim() || initialTitle,
       descriptionOverride: finalDescription,
       tagsOverride: cleanTags,
@@ -399,24 +406,6 @@ export default function YouTubeScheduleModal({
                   Tags &amp; Keywords ({tags.length})
                 </label>
                 <span className="text-[10px] text-slate-500">Auto-appends to YouTube SEO tags</span>
-              </div>
-
-              {/* Quick Viral Packs */}
-              <div className="space-y-1">
-                <span className="text-[10px] text-slate-500 font-medium">Quick 1-Click Packs:</span>
-                <div className="flex flex-wrap gap-1">
-                  {GLOBAL_HASHTAG_PACKS.map(pack => (
-                    <button
-                      key={pack.label}
-                      type="button"
-                      onClick={() => applyHashtagPack(pack)}
-                      className="px-2 py-0.5 text-[10px] bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 rounded-md transition-colors cursor-pointer touch-manipulation"
-                      title={pack.tags}
-                    >
-                      <span>{pack.label}</span>
-                    </button>
-                  ))}
-                </div>
               </div>
 
               <div className="flex items-center space-x-2">

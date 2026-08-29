@@ -15,6 +15,7 @@ export default function GeneratedClips({
   isZipping,
   zipProgress,
   movieName = 'Movie',
+  youtubeName,
   // YouTube upload integration
   uploadJobs = {},
   onUploadClip,
@@ -371,6 +372,7 @@ export default function GeneratedClips({
           clip={scheduleModalClip}
           ytSettings={ytSettings}
           movieName={movieName}
+          youtubeName={youtubeName || ytSettings?.yt_name || movieName}
           onConfirmUpload={(clipToUpload, overrides) => {
             onUploadClip(clipToUpload, overrides);
           }}

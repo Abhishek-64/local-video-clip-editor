@@ -11,6 +11,7 @@ import AuthModal from './components/AuthModal';
 import StorageSettingsModal from './components/StorageSettingsModal';
 import { generateClipFilename } from './utils/filename';
 import { calculateSingleScheduleTime, formatScheduledDateTime, getDefaultScheduleStartTime, toDateTimeLocalString } from './utils/scheduler';
+import { cleanVideoFilename } from './utils/titleCleaner';
 import { useProcessingQueue } from './hooks/useProcessingQueue';
 import { useYouTube } from './hooks/useYouTube';
 import { useUploadQueue } from './hooks/useUploadQueue';
@@ -79,6 +80,7 @@ export default function App() {
     enabled: true,
     movieName: 'My Movie',
     template: '{movie} - Part {part}',
+    fileTemplate: '{movie} - Part {part}',
     startPart: 1,
     zeroPad: true,
     font: 'Inter, sans-serif',
@@ -141,7 +143,8 @@ export default function App() {
     bitrate: 'high',
     fps: 'original',
     audioBitrate: '256k',
-    concurrency: 1
+    concurrency: 1,
+    fileTemplate: '{movie} - Part {part}'
   });
 
 
@@ -194,10 +197,7 @@ export default function App() {
     clearYouTubeState,
     refreshAccount,
     ytSettings,
-    isLoadingSettings,
-    isSavingSettings,
     updateYtSettings,
-    persistSettings,
     renderTemplate,
     apiAvailable
   } = useYouTube({ isAuthenticated: isUserLoggedIn });
@@ -216,7 +216,7 @@ export default function App() {
     isConnected,
     ytSettings,
     renderTemplate,
-    movieName: textSettings.movieName
+    movieName: ytSettings?.yt_name || textSettings.movieName
   });
 
   // ── Handle Video Loading and Auto-Detection ───────────────────────────────────
@@ -227,11 +227,15 @@ export default function App() {
     setCurrentTime(0);
 
     // Auto-populate movie name from filename (cleaned)
-    const baseName = data.file.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
+    const baseName = cleanVideoFilename(data.file.name);
     setTextSettings((prev) => ({
       ...prev,
       movieName: baseName
     }));
+    updateYtSettings({
+      yt_name: baseName,
+      yt_start_part: 1
+    });
 
     // Auto configure smart export profile based on detected media
     if (data.detectedQuality || data.detectedFps) {
@@ -391,7 +395,7 @@ export default function App() {
         : generateClipFilename({
             movieName: textSettings.movieName || 'Clip',
             partNumber: partNum,
-            template: textSettings.template || '{movie} - Part {part}',
+            template: exportSettings.fileTemplate || textSettings.fileTemplate || textSettings.template || '{movie} - Part {part}',
             zeroPad: textSettings.zeroPad,
             extension: exportSettings.format || 'mp4'
           });
@@ -400,10 +404,15 @@ export default function App() {
         ? calculateSingleScheduleTime(scheduleStartTime, scheduleInterval || '1hour', idx)
         : null;
 
+      const ytStartPart = Math.max(1, parseInt(ytSettings?.yt_start_part) || 1);
+      const ytPartNum = ytStartPart + idx;
+
       return {
         id: `job-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 6)}`,
         name: filename,
         partNumber: partNum,
+        ytPartNumber: ytPartNum,
+        movieName: ytSettings?.yt_name || textSettings.movieName || 'My Movie',
         partTitle: part.title || `Part ${partNum}`,
         startTime: part.startTime,
         endTime: part.endTime,
@@ -548,7 +557,7 @@ export default function App() {
       : generateClipFilename({
           movieName: textSettings.movieName || 'Clip',
           partNumber: partNum,
-          template: textSettings.template || '{movie} - Part {part}',
+          template: exportSettings.fileTemplate || textSettings.fileTemplate || textSettings.template || '{movie} - Part {part}',
           zeroPad: textSettings.zeroPad,
           extension: exportSettings.format || 'mp4'
         });
@@ -844,8 +853,6 @@ export default function App() {
                   refreshAccount={refreshAccount}
                   ytSettings={ytSettings}
                   updateYtSettings={updateYtSettings}
-                  persistSettings={persistSettings}
-                  isSavingSettings={isSavingSettings}
                   apiAvailable={apiAvailable}
                   isAuthenticated={isUserLoggedIn}
                   onOpenAuth={openAuthModal}
@@ -887,6 +894,7 @@ export default function App() {
                 isZipping={isZipping}
                 zipProgress={zipProgress}
                 movieName={textSettings.movieName}
+                youtubeName={ytSettings?.yt_name || textSettings.movieName}
                 // YouTube upload integration
                 uploadJobs={uploadJobs}
                 onUploadClip={handleUploadClip}

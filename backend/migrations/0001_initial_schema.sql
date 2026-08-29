@@ -56,32 +56,7 @@ CREATE TABLE IF NOT EXISTS youtube_accounts (
 CREATE INDEX IF NOT EXISTS idx_youtube_accounts_user_id ON youtube_accounts(user_id);
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- 4. Project Settings Table (Per-User Defaults & Templates)
--- ─────────────────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS project_settings (
-  id                         TEXT NOT NULL DEFAULT 'default',
-  user_id                    TEXT NOT NULL,
-  yt_title_template          TEXT NOT NULL DEFAULT '{movie} - Part {part} | #Shorts',
-  yt_description_template    TEXT NOT NULL DEFAULT '{movie} - Part {part}
-
-#Shorts
-
-{hashtags}',
-  yt_tags                    TEXT NOT NULL DEFAULT '["shorts","youtube shorts","clips","viral","fyp"]',
-  yt_visibility              TEXT NOT NULL DEFAULT 'private',
-  yt_category                TEXT NOT NULL DEFAULT '22',
-  yt_made_for_kids           INTEGER NOT NULL DEFAULT 0,
-  yt_notify_subscribers      INTEGER NOT NULL DEFAULT 1,
-  yt_default_upload          TEXT NOT NULL DEFAULT 'manual',
-  schedule_interval          TEXT NOT NULL DEFAULT '1day',
-  schedule_base_time         TEXT NOT NULL DEFAULT '20:00',
-  schedule_timezone          TEXT NOT NULL DEFAULT 'UTC',
-  updated_at                 TEXT NOT NULL DEFAULT (datetime('now')),
-  PRIMARY KEY (id, user_id)
-);
-
--- ─────────────────────────────────────────────────────────────────────────────
--- 5. Upload Jobs Table (YouTube Resumable Upload Tracking & Audit Logs)
+-- 4. Upload Jobs Table (YouTube Resumable Upload Tracking & Audit Logs)
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS upload_jobs (
   id                  TEXT PRIMARY KEY,

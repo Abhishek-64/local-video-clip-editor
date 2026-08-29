@@ -35,7 +35,7 @@ The editor processes video, audio, images, and export generation locally in the 
 ┌────────────────────────────────────────▼─────────────────────────────────────────────────┐
 │                              DATABASE (Cloudflare D1 SQLite)                             │
 │  - users, sessions, youtube_accounts, facebook_accounts, facebook_oauth_sessions         │
-│  - project_settings, branding_presets, upload_jobs, facebook_scheduled_posts             │
+│  - branding_presets, upload_jobs, facebook_scheduled_posts                                │
 │  - b2_temp_uploads, system_cleanup_logs                                                  │
 └──────────────────────────────────────────────────────────────────────────────────────────┘
 ```

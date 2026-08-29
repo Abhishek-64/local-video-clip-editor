@@ -56,8 +56,6 @@ export default function EditorTabs({
   refreshAccount,
   ytSettings,
   updateYtSettings,
-  persistSettings,
-  isSavingSettings,
   apiAvailable,
   isAuthenticated = false,
   onOpenAuth,
@@ -174,6 +172,9 @@ export default function EditorTabs({
           <TextEditor
             textSettings={textSettings}
             onChange={onTextChange}
+            onNavigateTab={setActiveTab}
+            ytSettings={ytSettings}
+            updateYtSettings={updateYtSettings}
           />
         )}
 
@@ -207,6 +208,8 @@ export default function EditorTabs({
             sourceResolution={sourceResolution}
             detectedQuality={detectedQuality}
             detectedFps={detectedFps}
+            textSettings={textSettings}
+            onTextChange={onTextChange}
           />
         )}
 
@@ -221,14 +224,13 @@ export default function EditorTabs({
             refreshAccount={refreshAccount}
             ytSettings={ytSettings}
             updateYtSettings={updateYtSettings}
-            persistSettings={persistSettings}
-            isSavingSettings={isSavingSettings}
             apiAvailable={apiAvailable}
             isAuthenticated={isAuthenticated}
             onOpenAuth={onOpenAuth}
             pipelineStartTime={pipelineStartTime}
             setPipelineStartTime={setPipelineStartTime}
             customParts={customParts}
+            textSettings={textSettings}
           />
         )}
       </div>

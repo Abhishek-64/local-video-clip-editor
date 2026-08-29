@@ -1,29 +1,33 @@
 /**
- * useYouTube — React hook for YouTube connection state and settings
+ * useYouTube — React hook for YouTube connection state and live settings
  *
  * Manages:
  * - YouTube account connection status (from Cloudflare Worker / D1)
  * - YouTube upload settings (title template, description, tags, visibility, etc.)
+ *   applied directly in real-time to all render & upload pipelines, persisted in localStorage.
  * - OAuth connect/disconnect flow
  *
  * If VITE_API_URL is not set, the hook gracefully degrades:
  * all YouTube features are disabled, existing local features work unchanged.
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   getYouTubeAccount,
   getYouTubeConnectUrl,
   disconnectYouTube,
-  getSettings,
-  saveSettings,
   isApiConfigured,
   setClientUserId
 } from '../services/apiService';
 import { formatTagsAsHashtagString, parseTagsInput } from '../utils/titleCleaner';
 
-// Default YouTube settings (applied when no D1 record exists yet)
+const STORAGE_KEY = 'yt_editor_settings';
+
+// Default YouTube settings (applied directly to uploads)
 const DEFAULT_YT_SETTINGS = {
+  yt_name: 'My Movie',
+  yt_start_part: 1,
+  yt_zero_pad: true,
   yt_title_template: '{movie} - Part {part} | #Shorts',
   yt_description_template: '{movie} - Part {part}\n\n#Shorts\n\n{hashtags}',
   yt_tags: ['shorts', 'youtube shorts', 'clips', 'viral', 'fyp'],
@@ -37,6 +41,25 @@ const DEFAULT_YT_SETTINGS = {
   schedule_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 };
 
+function getInitialYtSettings() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      return {
+        ...DEFAULT_YT_SETTINGS,
+        ...parsed,
+        yt_tags: Array.isArray(parsed.yt_tags) && parsed.yt_tags.length > 0
+          ? parseTagsInput(parsed.yt_tags)
+          : DEFAULT_YT_SETTINGS.yt_tags
+      };
+    }
+  } catch (e) {
+    console.warn('Could not parse saved YouTube settings from localStorage:', e);
+  }
+  return DEFAULT_YT_SETTINGS;
+}
+
 export function useYouTube({ isAuthenticated = false } = {}) {
   const apiAvailable = isApiConfigured();
 
@@ -46,19 +69,16 @@ export function useYouTube({ isAuthenticated = false } = {}) {
   const [isLoadingAccount, setIsLoadingAccount] = useState(false);
   const [accountError, setAccountError] = useState(null);
 
-  // Settings state
-  const [ytSettings, setYtSettings] = useState(DEFAULT_YT_SETTINGS);
-  const [isLoadingSettings, setIsLoadingSettings] = useState(false);
-  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  // Settings state (applied directly in memory & synced with localStorage)
+  const [ytSettings, setYtSettings] = useState(getInitialYtSettings);
 
   const clearYouTubeState = useCallback(() => {
     setYtAccount(null);
     setIsConnected(false);
     setAccountError(null);
-    setYtSettings(DEFAULT_YT_SETTINGS);
   }, []);
 
-  // ── Fetch account + settings on mount / auth change ─────────────────────────
+  // ── Fetch account on mount / auth change ─────────────────────────────────────
 
   const fetchAccountStatus = useCallback(async () => {
     if (!apiAvailable || !isAuthenticated) return;
@@ -82,26 +102,6 @@ export function useYouTube({ isAuthenticated = false } = {}) {
     }
   }, [apiAvailable, isAuthenticated]);
 
-  const fetchSettings = useCallback(async () => {
-    if (!apiAvailable || !isAuthenticated) return;
-    setIsLoadingSettings(true);
-    try {
-      const data = await getSettings();
-      setYtSettings({
-        ...DEFAULT_YT_SETTINGS,
-        ...data,
-        // Ensure tags is always an array of clean strings
-        yt_tags: Array.isArray(data.yt_tags) && data.yt_tags.length > 0
-          ? parseTagsInput(data.yt_tags)
-          : DEFAULT_YT_SETTINGS.yt_tags
-      });
-    } catch (err) {
-      console.warn('Could not load YouTube settings:', err.message);
-    } finally {
-      setIsLoadingSettings(false);
-    }
-  }, [apiAvailable, isAuthenticated]);
-
   useEffect(() => {
     if (!isAuthenticated) {
       clearYouTubeState();
@@ -109,21 +109,18 @@ export function useYouTube({ isAuthenticated = false } = {}) {
     }
 
     fetchAccountStatus();
-    fetchSettings();
 
     // Check for OAuth callback params in URL (if opened via direct redirect)
     const params = new URLSearchParams(window.location.search);
     if (params.get('yt_connected') === '1') {
       fetchAccountStatus();
-      fetchSettings();
-      // Clean URL without reloading
       window.history.replaceState({}, '', window.location.pathname + window.location.hash);
     }
     if (params.get('yt_error')) {
       setAccountError(decodeURIComponent(params.get('yt_error')));
       window.history.replaceState({}, '', window.location.pathname + window.location.hash);
     }
-  }, [isAuthenticated, fetchAccountStatus, fetchSettings, clearYouTubeState]);
+  }, [isAuthenticated, fetchAccountStatus, clearYouTubeState]);
 
   // ── Connect / Disconnect ─────────────────────────────────────────────────────
 
@@ -167,7 +164,6 @@ export function useYouTube({ isAuthenticated = false } = {}) {
           setClientUserId(event.data.userId);
         }
         fetchAccountStatus();
-        fetchSettings();
       } else if (event.data?.type === 'YOUTUBE_AUTH_ERROR') {
         window.removeEventListener('message', handleAuthMessage);
         setAccountError(event.data.error || 'Failed to connect YouTube account');
@@ -183,10 +179,9 @@ export function useYouTube({ isAuthenticated = false } = {}) {
         window.removeEventListener('message', handleAuthMessage);
         // Refresh status once popup is closed
         fetchAccountStatus();
-        fetchSettings();
       }
     }, 1000);
-  }, [fetchAccountStatus, fetchSettings]);
+  }, [fetchAccountStatus]);
 
   const disconnectYouTubeAccount = useCallback(async () => {
     if (!apiAvailable) return;
@@ -199,25 +194,19 @@ export function useYouTube({ isAuthenticated = false } = {}) {
     }
   }, [apiAvailable]);
 
-  // ── Settings ─────────────────────────────────────────────────────────────────
+  // ── Settings (Direct live updates + client-side persistence) ─────────────────
 
   const updateYtSettings = useCallback((updates) => {
-    setYtSettings(prev => ({ ...prev, ...updates }));
+    setYtSettings(prev => {
+      const next = { ...prev, ...updates };
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      } catch (e) {
+        console.warn('Could not persist YouTube settings to localStorage:', e);
+      }
+      return next;
+    });
   }, []);
-
-  const persistSettings = useCallback(async (overrides) => {
-    if (!apiAvailable) return;
-    setIsSavingSettings(true);
-    try {
-      const toSave = { ...ytSettings, ...overrides };
-      await saveSettings(toSave);
-    } catch (err) {
-      console.error('Failed to save YouTube settings:', err);
-      throw err;
-    } finally {
-      setIsSavingSettings(false);
-    }
-  }, [apiAvailable, ytSettings]);
 
   // ── Template Rendering ────────────────────────────────────────────────────────
 
@@ -227,18 +216,35 @@ export function useYouTube({ isAuthenticated = false } = {}) {
    * {hashtags} → #Shorts #Viral #Tag
    * {tags} → shorts, viral, tag
    */
-  const renderTemplate = useCallback((template, { movieName, partNumber, zeroPad = true, tags = [] }) => {
-    const partStr = zeroPad ? String(partNumber).padStart(2, '0') : String(partNumber);
-    const cleanTagArray = parseTagsInput(tags);
-    const hashtagsStr = formatTagsAsHashtagString(cleanTagArray);
-    const tagsStr = cleanTagArray.join(', ');
+  const renderTemplate = useCallback((template, { movieName, partNumber, zeroPad, tags } = {}) => {
+    const isZeroPad = zeroPad !== undefined ? zeroPad : (ytSettings?.yt_zero_pad !== false);
+    const num = partNumber != null ? partNumber : (ytSettings?.yt_start_part || 1);
+    const partStr = isZeroPad ? String(num).padStart(2, '0') : String(num);
 
-    return (template || '')
-      .replace(/\{movie\}/gi, movieName || 'My Movie')
+    // Resolve tags: use explicitly passed tags if non-empty, otherwise use ytSettings.yt_tags, otherwise default hashtags
+    const tagSource = (tags && tags.length > 0)
+      ? tags
+      : (Array.isArray(ytSettings?.yt_tags) && ytSettings.yt_tags.length > 0
+          ? ytSettings.yt_tags
+          : ['shorts', 'viral', 'clips']);
+    const cleanTagArray = parseTagsInput(tagSource);
+    let hashtagsStr = formatTagsAsHashtagString(cleanTagArray);
+    if (!hashtagsStr) {
+      hashtagsStr = '#Shorts #Viral';
+    }
+    const tagsStr = cleanTagArray.join(', ');
+    const finalMovie = movieName || ytSettings?.yt_name || 'My Movie';
+
+    let rendered = (template || '{movie} - Part {part}\n\n#Shorts\n\n{hashtags}')
+      .replace(/\{movie\}/gi, finalMovie)
+      .replace(/\{title\}/gi, finalMovie)
+      .replace(/\{text\}/gi, finalMovie)
       .replace(/\{part\}/gi, partStr)
       .replace(/\{hashtags\}/gi, hashtagsStr)
       .replace(/\{tags\}/gi, tagsStr);
-  }, []);
+
+    return rendered;
+  }, [ytSettings?.yt_name, ytSettings?.yt_start_part, ytSettings?.yt_zero_pad, ytSettings?.yt_tags]);
 
   return {
     // API availability
@@ -254,12 +260,9 @@ export function useYouTube({ isAuthenticated = false } = {}) {
     clearYouTubeState,
     refreshAccount: fetchAccountStatus,
 
-    // Settings
+    // Settings (Direct live applied)
     ytSettings,
-    isLoadingSettings,
-    isSavingSettings,
     updateYtSettings,
-    persistSettings,
 
     // Utilities
     renderTemplate

@@ -60,6 +60,24 @@ export function useUploadQueue({
   const abortControllersRef = useRef(new Map());
   const processedExportIdsRef = useRef(new Set()); // track which exports we've already enqueued
 
+  // Always keep latest refs to avoid stale closure in upload async callbacks
+  const ytSettingsRef = useRef(ytSettings);
+  const renderTemplateRef = useRef(renderTemplate);
+  const movieNameRef = useRef(movieName);
+  const startUploadRef = useRef(null);
+
+  useEffect(() => {
+    ytSettingsRef.current = ytSettings;
+  }, [ytSettings]);
+
+  useEffect(() => {
+    renderTemplateRef.current = renderTemplate;
+  }, [renderTemplate]);
+
+  useEffect(() => {
+    movieNameRef.current = movieName;
+  }, [movieName]);
+
   const UPLOAD_CONCURRENCY = 1;
 
   // ── Load upload history on mount ─────────────────────────────────────────────
@@ -100,7 +118,7 @@ export function useUploadQueue({
       uploadQueueRef.current.length > 0
     ) {
       const next = uploadQueueRef.current.shift();
-      if (next) startUpload(next);
+      if (next && startUploadRef.current) startUploadRef.current(next);
     }
   }, [apiAvailable, isConnected]);
 
@@ -108,6 +126,9 @@ export function useUploadQueue({
 
   const startUpload = useCallback(async (clip) => {
     const { id: jobId, blob, partNumber, name } = clip;
+    const currentYt = ytSettingsRef.current || ytSettings;
+    const currentRender = renderTemplateRef.current || renderTemplate;
+    const currentMovie = movieNameRef.current || movieName;
 
     if (!blob) {
       updateLocalJob(jobId, {
@@ -125,41 +146,47 @@ export function useUploadQueue({
 
     const rawTags = (clip.tagsOverride && clip.tagsOverride.length > 0)
       ? clip.tagsOverride
-      : (ytSettings.yt_tags || ['shorts', 'youtube shorts', 'clips', 'viral', 'fyp']);
+      : (Array.isArray(currentYt?.yt_tags) && currentYt.yt_tags.length > 0
+          ? currentYt.yt_tags
+          : ['shorts', 'viral', 'clips']);
     const tags = parseTagsInput(rawTags);
-    const hashtagsStr = formatTagsAsHashtagString(tags);
+    const hashtagsStr = formatTagsAsHashtagString(tags) || '#Shorts #Viral';
+
+    const activeMovieName = clip.movieName || currentYt?.yt_name || currentMovie || 'My Movie';
+    const isZeroPad = currentYt?.yt_zero_pad !== false;
+    const activePartNumber = clip.ytPartNumber != null ? clip.ytPartNumber : (clip.partNumber != null ? clip.partNumber : (currentYt?.yt_start_part || 1));
 
     let title = clip.titleOverride;
     if (!title) {
-      if (renderTemplate && ytSettings.yt_title_template) {
-        title = renderTemplate(ytSettings.yt_title_template, {
-          movieName,
-          partNumber: partNumber || 1,
-          zeroPad: true,
+      if (currentRender && currentYt?.yt_title_template) {
+        title = currentRender(currentYt.yt_title_template, {
+          movieName: activeMovieName,
+          partNumber: activePartNumber,
+          zeroPad: isZeroPad,
           tags
         });
       } else {
-        title = clip.name || `${movieName} - Part ${partNumber || 1} | #Shorts`;
+        title = clip.name || `${activeMovieName} - Part ${activePartNumber} | #Shorts`;
       }
     }
 
     let description = clip.descriptionOverride;
     if (!description) {
-      if (renderTemplate && ytSettings.yt_description_template) {
-        description = renderTemplate(ytSettings.yt_description_template, {
-          movieName,
-          partNumber: partNumber || 1,
-          zeroPad: true,
+      if (currentRender && currentYt?.yt_description_template !== undefined) {
+        description = currentRender(currentYt.yt_description_template, {
+          movieName: activeMovieName,
+          partNumber: activePartNumber,
+          zeroPad: isZeroPad,
           tags
         });
       } else {
-        description = `${movieName} - Part ${partNumber || 1}\n\n#Shorts\n\n${hashtagsStr}`;
+        description = `${activeMovieName} - Part ${activePartNumber}\n\n#Shorts\n\n${hashtagsStr}`;
       }
     }
 
-    // If description doesn't already contain hashtags and tags exist, append hashtags
-    if (hashtagsStr && !ytSettings.yt_description_template?.includes('{hashtags}')) {
-      const individualHashtags = hashtagsStr.split(' ');
+    // Ensure description contains hashtags
+    if (hashtagsStr) {
+      const individualHashtags = hashtagsStr.split(' ').filter(Boolean);
       const missingHashtags = individualHashtags.filter(ht => !description.toLowerCase().includes(ht.toLowerCase()));
       if (missingHashtags.length > 0) {
         description = `${description ? description.trim() + '\n\n' : ''}${missingHashtags.join(' ')}`;
@@ -167,22 +194,22 @@ export function useUploadQueue({
     }
 
     const scheduledAt = clip.scheduledAt || null;
-    const visibility = scheduledAt ? 'private' : (clip.visibilityOverride || ytSettings.yt_visibility || 'private');
-    const madeForKids = clip.madeForKids != null ? clip.madeForKids : (ytSettings.yt_made_for_kids || false);
+    const visibility = scheduledAt ? 'private' : (clip.visibilityOverride || currentYt?.yt_visibility || 'private');
+    const madeForKids = clip.madeForKids != null ? clip.madeForKids : (currentYt?.yt_made_for_kids || false);
 
     try {
       // Step 1: Create D1 record and get YouTube resumable upload URL
       const { jobId: serverJobId, uploadUrl } = await createUploadSession({
         jobId,
-        partNumber,
-        movieName,
+        partNumber: activePartNumber,
+        movieName: activeMovieName,
         title,
         description,
         tags,
         visibility,
-        category: ytSettings.yt_category || '22',
+        category: currentYt?.yt_category || '22',
         madeForKids,
-        notifySubscribers: ytSettings.yt_notify_subscribers !== false,
+        notifySubscribers: currentYt?.yt_notify_subscribers !== false,
         scheduledAt,
         fileSize: blob.size,
         mimeType: blob.type || 'video/mp4'
@@ -247,6 +274,10 @@ export function useUploadQueue({
       processNextUpload();
     }
   }, [ytSettings, movieName, renderTemplate, updateLocalJob, refreshHistory, processNextUpload]);
+
+  useEffect(() => {
+    startUploadRef.current = startUpload;
+  }, [startUpload]);
 
   // ── Watch for newly completed exports (Auto-Upload) ──────────────────────────
 

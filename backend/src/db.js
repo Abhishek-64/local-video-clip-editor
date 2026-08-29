@@ -139,73 +139,6 @@ export async function updateAccessToken(db, accountId, accessToken, tokenExpiry)
     .run();
 }
 
-// ─── Project Settings Helpers ─────────────────────────────────────────────────
-
-export async function getProjectSettings(db, userId) {
-  const row = await db
-    .prepare('SELECT * FROM project_settings WHERE user_id = ? AND id = "default"')
-    .bind(userId)
-    .first();
-
-  if (!row) {
-    // Return defaults
-    return {
-      id: 'default',
-      user_id: userId,
-      yt_title_template: '{movie} - Part {part} | #Shorts',
-      yt_description_template: '{movie} - Part {part}\n\nCreated with Local Video Clip Editor\n\n#Shorts',
-      yt_tags: '["shorts","youtube shorts","clips"]',
-      yt_visibility: 'private',
-      yt_category: '22',
-      yt_made_for_kids: 0,
-      yt_notify_subscribers: 1,
-      yt_default_upload: 'manual',
-      schedule_interval: '1day',
-      schedule_base_time: '20:00',
-      schedule_timezone: 'UTC'
-    };
-  }
-  return row;
-}
-
-export async function upsertProjectSettings(db, userId, data) {
-  await db
-    .prepare(`
-      INSERT INTO project_settings
-        (id, user_id, yt_title_template, yt_description_template, yt_tags,
-         yt_visibility, yt_category, yt_made_for_kids, yt_notify_subscribers,
-         yt_default_upload, schedule_interval, schedule_base_time, schedule_timezone, updated_at)
-      VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      ON CONFLICT(id, user_id) DO UPDATE SET
-        yt_title_template       = excluded.yt_title_template,
-        yt_description_template = excluded.yt_description_template,
-        yt_tags                 = excluded.yt_tags,
-        yt_visibility           = excluded.yt_visibility,
-        yt_category             = excluded.yt_category,
-        yt_made_for_kids        = excluded.yt_made_for_kids,
-        yt_notify_subscribers   = excluded.yt_notify_subscribers,
-        yt_default_upload       = excluded.yt_default_upload,
-        schedule_interval       = excluded.schedule_interval,
-        schedule_base_time      = excluded.schedule_base_time,
-        schedule_timezone       = excluded.schedule_timezone,
-        updated_at              = datetime('now')
-    `)
-    .bind(
-      userId,
-      data.yt_title_template ?? '{movie} - Part {part} | #Shorts',
-      data.yt_description_template ?? '{movie} - Part {part}\n\n#Shorts\n\n{hashtags}',
-      data.yt_tags ?? '["shorts","youtube shorts","clips","viral","fyp"]',
-      data.yt_visibility ?? 'private',
-      data.yt_category ?? '22',
-      data.yt_made_for_kids ?? 0,
-      data.yt_notify_subscribers ?? 1,
-      data.yt_default_upload ?? 'manual',
-      data.schedule_interval ?? '1day',
-      data.schedule_base_time ?? '20:00',
-      data.schedule_timezone ?? 'UTC'
-    )
-    .run();
-}
 
 // ─── Upload Job Helpers ───────────────────────────────────────────────────────
 
@@ -337,20 +270,18 @@ export async function runAutoCleanup(db) {
  */
 export async function getUserStorageStats(db, userId) {
   if (!userId) {
-    return { uploadJobsCount: 0, hasYouTube: false, hasSettings: false };
+    return { uploadJobsCount: 0, hasYouTube: false };
   }
 
-  const [uploadsRes, ytRes, settingsRes] = await Promise.all([
+  const [uploadsRes, ytRes] = await Promise.all([
     db.prepare('SELECT COUNT(*) as count FROM upload_jobs WHERE user_id = ?').bind(userId).first(),
-    db.prepare('SELECT id, channel_title FROM youtube_accounts WHERE user_id = ?').bind(userId).first(),
-    db.prepare('SELECT id FROM project_settings WHERE user_id = ?').bind(userId).first()
+    db.prepare('SELECT id, channel_title FROM youtube_accounts WHERE user_id = ?').bind(userId).first()
   ]);
 
   return {
     uploadJobsCount: uploadsRes?.count ?? 0,
     hasYouTube: Boolean(ytRes),
-    youtubeChannel: ytRes?.channel_title || null,
-    hasSettings: Boolean(settingsRes)
+    youtubeChannel: ytRes?.channel_title || null
   };
 }
 
@@ -365,11 +296,6 @@ export async function clearUserData(db, userId, scope = 'all') {
   if (scope === 'history' || scope === 'all') {
     const res = await db.prepare('DELETE FROM upload_jobs WHERE user_id = ?').bind(userId).run();
     cleared.history = res?.meta?.changes ?? 0;
-  }
-
-  if (scope === 'settings' || scope === 'all') {
-    const res = await db.prepare('DELETE FROM project_settings WHERE user_id = ?').bind(userId).run();
-    cleared.settings = res?.meta?.changes ?? 0;
   }
 
   if (scope === 'youtube' || scope === 'all') {

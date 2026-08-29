@@ -140,14 +140,3 @@ export const PART_FORMAT_PRESETS = [
   { id: 'bracket', label: '[Part {n}]', template: '{movie} [Part {part}]', example: 'Movie [Part 1]' },
   { id: 'hashtag', label: '#{n} Clip', template: '#{part} | {movie}', example: '#1 | Movie' }
 ];
-
-/**
- * Common Viral Hashtag Packs for 1-click sync
- */
-export const GLOBAL_HASHTAG_PACKS = [
-  { label: '🔥 All-In-One', tags: '#reels #shorts #viral #fyp #trending' },
-  { label: '🍿 Movie & Cinema', tags: '#movies #cinema #filmclips #scenes #hollywood' },
-  { label: '⛩️ Anime & Manga', tags: '#anime #animereels #otaku #animeclips #manga' },
-  { label: '🎮 Gaming & Action', tags: '#gaming #gamer #gameplay #gametok #twitch' },
-  { label: '😂 Funny & Memes', tags: '#funny #comedy #memes #hilarious #relatable' }
-];

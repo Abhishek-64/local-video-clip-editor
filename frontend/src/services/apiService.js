@@ -190,19 +190,6 @@ export async function disconnectYouTube() {
   return apiFetch('/api/youtube/disconnect', { method: 'POST' });
 }
 
-// ─── Project Settings ─────────────────────────────────────────────────────────
-
-export async function getSettings() {
-  return apiFetch('/api/settings');
-}
-
-export async function saveSettings(settings) {
-  return apiFetch('/api/settings', {
-    method: 'PUT',
-    body: JSON.stringify(settings)
-  });
-}
-
 // ─── Upload Jobs ──────────────────────────────────────────────────────────────
 
 export async function getUploadHistory() {

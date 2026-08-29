@@ -39,8 +39,6 @@ import {
   getYouTubeAccount,
   upsertYouTubeAccount,
   deleteYouTubeAccount,
-  getProjectSettings,
-  upsertProjectSettings,
   getUploadJobs,
   createUploadJob,
   updateUploadJob,
@@ -255,8 +253,6 @@ app.post('/api/auth/login', withUser, async (c) => {
   await getOrCreateUser(c.env.DB, user.id);
 
   const ytAccount = await getYouTubeAccount(c.env.DB, user.id);
-  const settings = await getProjectSettings(c.env.DB, user.id);
-  const branding = await getBrandingPresets(c.env.DB, user.id);
 
   return c.json({
     success: true,
@@ -272,9 +268,7 @@ app.post('/api/auth/login', withUser, async (c) => {
       channel_title: ytAccount.channel_title,
       channel_handle: ytAccount.channel_handle,
       channel_thumbnail: ytAccount.channel_thumbnail
-    } : null,
-    settings,
-    brandingPresets: branding
+    } : null
   });
 });
 
@@ -518,26 +512,6 @@ app.post('/api/youtube/disconnect', withUser, async (c) => {
   return c.json({ success: true });
 });
 
-// ─── Project Settings ─────────────────────────────────────────────────────────
-
-app.get('/api/settings', withUser, async (c) => {
-  const userId = c.get('userId');
-  const settings = await getProjectSettings(c.env.DB, userId);
-  // Parse tags JSON string
-  try { settings.yt_tags = JSON.parse(settings.yt_tags); } catch {}
-  return c.json(settings);
-});
-
-app.put('/api/settings', withUser, async (c) => {
-  const userId = c.get('userId');
-  const data = await c.req.json();
-  // Serialize tags array to JSON string for D1
-  if (Array.isArray(data.yt_tags)) {
-    data.yt_tags = JSON.stringify(data.yt_tags);
-  }
-  await upsertProjectSettings(c.env.DB, userId, data);
-  return c.json({ success: true });
-});
 
 // ─── Upload Jobs ──────────────────────────────────────────────────────────────
 

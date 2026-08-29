@@ -17,7 +17,6 @@ The **Local Video Clip Editor** is a privacy-first, ultra-fast video editing and
 ┌────────────────────────────────────────▼─────────────────────────────────────────────────┐
 │                           BACKEND (Cloudflare Worker + Hono)                             │
 │  - /api/auth/*     (User Signup, Login, Multi-Device Session Tokens, Salted Passwords)    │
-│  - /api/settings/* (Project Templates, Tags, Upload Defaults)                            │
 │  - /api/branding/* (Visual Presets, Logos, Text Overlays CRUD)                           │
 │  - /api/uploads/*  (YouTube Resumable Upload Session Generator & Job Audit Log)          │
 │  - /api/user/*     (Storage Accounting, Resource Usage & Scope Purge)                    │
@@ -31,7 +30,7 @@ The **Local Video Clip Editor** is a privacy-first, ultra-fast video editing and
 ┌────────────────────────────────────────▼─────────────────────────────────────────────────┐
 │                              DATABASE (Cloudflare D1 SQLite)                             │
 │  - users, sessions, youtube_accounts, facebook_accounts, facebook_oauth_sessions         │
-│  - project_settings, branding_presets, upload_jobs, facebook_scheduled_posts             │
+│  - branding_presets, upload_jobs, facebook_scheduled_posts                                │
 │  - b2_temp_uploads, system_cleanup_logs                                                  │
 └──────────────────────────────────────────────────────────────────────────────────────────┘
 ```

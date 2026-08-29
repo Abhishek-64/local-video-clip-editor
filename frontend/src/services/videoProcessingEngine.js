@@ -785,9 +785,12 @@ export function renderTextOverlay(ctx, canvasWidth, canvasHeight, textSettings, 
     } = textSettings;
 
     const formattedPart = zeroPad ? String(partNumber).padStart(2, '0') : String(partNumber);
-    const fullText = template
-      .replace(/{movie}/g, movieName || 'My Movie')
-      .replace(/{part}/g, formattedPart);
+    const displayText = textSettings.text || movieName || 'My Movie';
+    const fullText = (template || '{movie} - Part {part}')
+      .replace(/\{movie\}/gi, displayText)
+      .replace(/\{title\}/gi, displayText)
+      .replace(/\{text\}/gi, displayText)
+      .replace(/\{part\}/gi, formattedPart);
 
     ctx.save();
 

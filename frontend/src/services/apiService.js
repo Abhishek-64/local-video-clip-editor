@@ -390,4 +390,132 @@ export async function deleteTemplate(id) {
   });
 }
 
+// ─── Facebook & Meta Graph API Management ─────────────────────────────────────
+
+/**
+ * Fetch connected Facebook account & managed pages.
+ */
+export async function getFacebookAccount() {
+  return apiFetch('/api/facebook/account');
+}
+
+/**
+ * Select active Facebook Page to publish to.
+ */
+export async function selectFacebookPage(pageId) {
+  return apiFetch('/api/facebook/select-page', {
+    method: 'POST',
+    body: JSON.stringify({ page_id: pageId })
+  });
+}
+
+/**
+ * Safe Page Diagnostics Check
+ */
+export async function debugFacebookPage() {
+  return apiFetch('/api/facebook/debug-page');
+}
+
+/**
+ * Connect a Facebook Page by Page ID
+ */
+export async function connectFacebookPageById({ pageId }) {
+  return apiFetch('/api/facebook/connect-page-id', {
+    method: 'POST',
+    body: JSON.stringify({
+      page_id: pageId
+    })
+  });
+}
+
+/**
+ * Disconnect Facebook account.
+ */
+export async function disconnectFacebookAccount() {
+  return apiFetch('/api/facebook/disconnect', {
+    method: 'POST'
+  });
+}
+
+/**
+ * Get presigned Backblaze B2 upload target.
+ */
+export async function getB2UploadTarget() {
+  return apiFetch('/api/facebook/b2/upload-url', {
+    method: 'POST'
+  });
+}
+
+/**
+ * Upload binary clip to Backblaze B2 using direct XHR with progress tracking.
+ */
+export function uploadToB2(uploadUrl, authorizationToken, blob, fileName, onProgress = null, signal = null) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', uploadUrl, true);
+
+    xhr.setRequestHeader('Authorization', authorizationToken);
+    xhr.setRequestHeader('X-Bz-File-Name', encodeURIComponent(fileName));
+    xhr.setRequestHeader('Content-Type', blob.type || 'video/mp4');
+    xhr.setRequestHeader('Content-Length', String(blob.size));
+    xhr.setRequestHeader('X-Bz-Content-Sha1', 'do_not_verify');
+
+    if (onProgress) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const percent = Math.round((e.loaded / e.total) * 100);
+          onProgress(percent, e.loaded, e.total);
+        }
+      };
+    }
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const data = JSON.parse(xhr.responseText);
+          resolve(data);
+        } catch {
+          resolve({ fileName, success: true });
+        }
+      } else {
+        reject(new Error(`B2 upload failed: HTTP ${xhr.status} ${xhr.statusText} — ${xhr.responseText}`));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error('Network error during B2 video upload'));
+    xhr.ontimeout = () => reject(new Error('B2 video upload timed out'));
+
+    if (signal) {
+      signal.addEventListener('abort', () => xhr.abort());
+    }
+
+    xhr.send(blob);
+  });
+}
+
+/**
+ * Initiate Facebook publishing (Reel or Page Video) via worker ingest & B2 cleanup.
+ */
+export async function publishToFacebook(payload) {
+  return apiFetch('/api/facebook/publish', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+/**
+ * Get Facebook upload job history.
+ */
+export async function getFacebookJobs() {
+  return apiFetch('/api/facebook/jobs');
+}
+
+/**
+ * Get single Facebook job status.
+ */
+export async function getFacebookJob(id) {
+  return apiFetch(`/api/facebook/jobs/${id}`);
+}
+
+
 

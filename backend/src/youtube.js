@@ -72,7 +72,7 @@ export async function createResumableUploadSession(accessToken, metadata, videoI
     title: safeTitle,
     description: safeDescription,
     tags: cleanTags,
-    categoryId: metadata.categoryId || '22'
+    categoryId: String(metadata.categoryId || metadata.category || '22')
   };
 
   const status = {
@@ -82,8 +82,17 @@ export async function createResumableUploadSession(accessToken, metadata, videoI
 
   // If scheduled, set publishAt and override to private (YouTube requires private for scheduled)
   if (metadata.scheduledAt) {
-    status.privacyStatus = 'private';
-    status.publishAt = metadata.scheduledAt;
+    try {
+      const scheduledDate = new Date(metadata.scheduledAt);
+      if (!isNaN(scheduledDate.getTime()) && scheduledDate.getTime() > Date.now()) {
+        status.privacyStatus = 'private';
+        status.publishAt = scheduledDate.toISOString();
+      } else {
+        status.privacyStatus = metadata.visibility || 'private';
+      }
+    } catch {
+      status.privacyStatus = metadata.visibility || 'private';
+    }
   }
 
   const body = JSON.stringify({
@@ -140,8 +149,17 @@ export async function updateVideoMetadata(accessToken, videoId, metadata) {
   };
 
   if (metadata.scheduledAt) {
-    status.privacyStatus = 'private';
-    status.publishAt = metadata.scheduledAt;
+    try {
+      const scheduledDate = new Date(metadata.scheduledAt);
+      if (!isNaN(scheduledDate.getTime()) && scheduledDate.getTime() > Date.now()) {
+        status.privacyStatus = 'private';
+        status.publishAt = scheduledDate.toISOString();
+      } else {
+        status.privacyStatus = metadata.visibility || 'private';
+      }
+    } catch {
+      status.privacyStatus = metadata.visibility || 'private';
+    }
   }
 
   const cleanTags = normalizeYouTubeTags(metadata.tags);

@@ -30,6 +30,7 @@ export default function YouTubeScheduleModal({
   movieName = 'Movie',
   youtubeName,
   onConfirmUpload,
+  onUpload,
   isBatch = false
 }) {
   if (!isOpen || !clip) return null;
@@ -39,38 +40,45 @@ export default function YouTubeScheduleModal({
   const partStr = isZeroPad ? String(clipPartNumber).padStart(2, '0') : String(clipPartNumber);
   const activeYtName = youtubeName || ytSettings?.yt_name || movieName || 'Movie';
 
-  const initialTags = (clip.tagsOverride && clip.tagsOverride.length > 0)
-    ? parseTagsInput(clip.tagsOverride)
+  const computeTags = (c) => (c?.tagsOverride && c.tagsOverride.length > 0)
+    ? parseTagsInput(c.tagsOverride)
     : (Array.isArray(ytSettings?.yt_tags) && ytSettings.yt_tags.length > 0
         ? parseTagsInput(ytSettings.yt_tags)
         : ['shorts', 'viral', 'clips']);
-  const initialHashtagsStr = formatTagsAsHashtagString(initialTags) || '#Shorts #Viral';
 
-  const initialTitle = clip.titleOverride || (ytSettings.yt_title_template
+  const computeHashtags = (tagsList) => formatTagsAsHashtagString(tagsList) || '#Shorts #Viral';
+
+  const computeTitle = (c, tagsList) => c?.titleOverride || (ytSettings.yt_title_template
     ? ytSettings.yt_title_template
         .replace(/\{movie\}/gi, activeYtName)
         .replace(/\{part\}/gi, partStr)
-        .replace(/\{hashtags\}/gi, initialHashtagsStr)
-        .replace(/\{tags\}/gi, initialTags.join(', '))
-    : (clip.partTitle ? `${activeYtName} - ${clip.partTitle} | Part ${partStr} #Shorts` : `${activeYtName} - Part ${partStr} | #Shorts`));
+        .replace(/\{hashtags\}/gi, computeHashtags(tagsList))
+        .replace(/\{tags\}/gi, tagsList.join(', '))
+    : (c?.partTitle ? `${activeYtName} - ${c.partTitle} | Part ${partStr} #Shorts` : `${activeYtName} - Part ${partStr} | #Shorts`));
 
-  const initialDescription = clip.descriptionOverride || (() => {
+  const computeDescription = (c, tagsList) => {
+    if (c?.descriptionOverride) return c.descriptionOverride;
+    const ht = computeHashtags(tagsList);
     let desc = ytSettings.yt_description_template
       ? ytSettings.yt_description_template
           .replace(/\{movie\}/gi, activeYtName)
           .replace(/\{part\}/gi, partStr)
-          .replace(/\{hashtags\}/gi, initialHashtagsStr)
-          .replace(/\{tags\}/gi, initialTags.join(', '))
-      : `${activeYtName} - Part ${partStr}\n\n#Shorts\n\n${initialHashtagsStr}`;
+          .replace(/\{hashtags\}/gi, ht)
+          .replace(/\{tags\}/gi, tagsList.join(', '))
+      : `${activeYtName} - Part ${partStr}\n\n#Shorts\n\n${ht}`;
 
-    if (initialHashtagsStr) {
-      const missing = initialHashtagsStr.split(' ').filter(Boolean).filter(ht => !desc.toLowerCase().includes(ht.toLowerCase()));
+    if (ht) {
+      const missing = ht.split(' ').filter(Boolean).filter(h => !desc.toLowerCase().includes(h.toLowerCase()));
       if (missing.length > 0) {
         desc = `${desc.trim()}\n\n${missing.join(' ')}`;
       }
     }
     return desc;
-  })();
+  };
+
+  const initialTags = computeTags(clip);
+  const initialTitle = computeTitle(clip, initialTags);
+  const initialDescription = computeDescription(clip, initialTags);
 
   const [scheduleType, setScheduleType] = useState('schedule'); // 'schedule' | 'immediate'
   
@@ -89,6 +97,20 @@ export default function YouTubeScheduleModal({
   const [tags, setTags] = useState(initialTags);
   const [tagInput, setTagInput] = useState('');
   const [madeForKids, setMadeForKids] = useState(Boolean(ytSettings.yt_made_for_kids));
+
+  // Sync state if clip changes
+  useEffect(() => {
+    if (clip) {
+      const freshTags = computeTags(clip);
+      setTags(freshTags);
+      setTitle(computeTitle(clip, freshTags));
+      setDescription(computeDescription(clip, freshTags));
+      if (clip.scheduledAt) {
+        setScheduledDateTime(toDateTimeLocalString(new Date(clip.scheduledAt)));
+        setScheduleType('schedule');
+      }
+    }
+  }, [clip?.id]);
 
   // Quick Schedule Presets
   const applyPreset = (preset) => {
@@ -194,15 +216,18 @@ export default function YouTubeScheduleModal({
       }
     }
 
-    onConfirmUpload(clip, {
-      movieName: activeYtName,
-      titleOverride: title.trim() || initialTitle,
-      descriptionOverride: finalDescription,
-      tagsOverride: cleanTags,
-      visibilityOverride: scheduleType === 'schedule' ? 'private' : visibility,
-      scheduledAt: scheduledAtIso,
-      madeForKids
-    });
+    const confirmCallback = onConfirmUpload || onUpload;
+    if (confirmCallback) {
+      confirmCallback(clip, {
+        movieName: activeYtName,
+        titleOverride: title.trim() || initialTitle,
+        descriptionOverride: finalDescription,
+        tagsOverride: cleanTags,
+        visibilityOverride: scheduleType === 'schedule' ? 'private' : visibility,
+        scheduledAt: scheduledAtIso,
+        madeForKids
+      });
+    }
 
     onClose();
   };

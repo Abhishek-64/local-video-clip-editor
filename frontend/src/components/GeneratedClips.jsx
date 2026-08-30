@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import {
   Film, Download, Archive, CheckCircle2, Eye, X, CheckSquare, Square, Filter,
-  Youtube, ExternalLink, Upload, RotateCcw, Calendar, Clock, Sparkles
+  Youtube, ExternalLink, Upload, RotateCcw, Calendar, Clock, Sparkles, Share2,
+  RefreshCw
 } from 'lucide-react';
 import { formatTime } from '../utils/time';
 import { formatScheduledDateTime } from '../utils/scheduler';
@@ -21,7 +22,18 @@ export default function GeneratedClips({
   onUploadClip,
   onRetryUpload,
   isConnected = false,
-  ytSettings = {}
+  ytSettings = {},
+  // Facebook upload integration
+  isFbConnected = false,
+  fbAccount = null,
+  fbSettings = {},
+  onPublishFbClip,
+  onBatchPublishFb,
+  isPublishingFb = false,
+  fbPublishProgress = 0,
+  fbPublishStage = '',
+  fbPublishingClipId = null,
+  fbPublishedMap = {}
 }) {
   const [activePreviewClip, setActivePreviewClip] = useState(null);
   const [selectedClipIds, setSelectedClipIds] = useState(new Set());
@@ -81,6 +93,15 @@ export default function GeneratedClips({
     }
   };
 
+  // Batch Facebook Publish for Selected Clips
+  const handlePublishSelectedFb = () => {
+    const selectedClips = completedClips.filter((c) => selectedClipIds.has(c.id));
+    if (selectedClips.length === 0) return;
+    if (onBatchPublishFb) {
+      onBatchPublishFb(selectedClips);
+    }
+  };
+
   const selectedCount = selectedClipIds.size;
 
   // Helper: get YouTube upload chip for a clip
@@ -98,36 +119,29 @@ export default function GeneratedClips({
         );
       case 'uploading':
         return (
-          <span className="inline-flex items-center space-x-1 text-[10px] bg-blue-500/15 text-blue-400 border border-blue-500/25 px-1.5 py-0.5 rounded-full animate-pulse">
-            <Upload className="w-2.5 h-2.5" />
-            <span>⬆ {state.progress || 0}%</span>
+          <span className="inline-flex items-center space-x-1 text-[10px] bg-blue-500/20 text-blue-300 border border-blue-500/30 px-1.5 py-0.5 rounded-full animate-pulse">
+            <Upload className="w-2.5 h-2.5 animate-bounce" />
+            <span>{state.progress || 0}%</span>
           </span>
         );
       case 'uploaded':
         return (
-          <a
-            href={state.videoId ? `https://www.youtube.com/watch?v=${state.videoId}` : undefined}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={e => e.stopPropagation()}
-            className="inline-flex items-center space-x-1 text-[10px] bg-red-500/15 text-red-400 border border-red-500/25 px-1.5 py-0.5 rounded-full hover:bg-red-500/25 transition-colors"
-          >
-            <Youtube className="w-2.5 h-2.5" />
-            <span>✓ Uploaded</span>
-          </a>
+          <span className="inline-flex items-center space-x-1 text-[10px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 px-1.5 py-0.5 rounded-full font-semibold">
+            <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400" />
+            <span>Uploaded</span>
+          </span>
         );
       case 'scheduled':
-        const scheduledTime = state.scheduled_at || state.scheduledAt || clip.scheduledAt;
         return (
-          <span className="inline-flex items-center space-x-1 text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30 px-2 py-0.5 rounded-full font-medium">
+          <span className="inline-flex items-center space-x-1 text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30 px-1.5 py-0.5 rounded-full font-semibold">
             <Calendar className="w-2.5 h-2.5 text-purple-400" />
-            <span>Scheduled{scheduledTime ? `: ${formatScheduledDateTime(scheduledTime)}` : ''}</span>
+            <span>{state.scheduledAt ? formatScheduledDateTime(state.scheduledAt) : 'Scheduled'}</span>
           </span>
         );
       case 'upload_failed':
         return (
-          <span className="inline-flex items-center space-x-1 text-[10px] bg-rose-500/15 text-rose-400 border border-rose-500/25 px-1.5 py-0.5 rounded-full">
-            <span>Upload Failed</span>
+          <span className="inline-flex items-center space-x-1 text-[10px] bg-rose-500/15 text-rose-400 border border-rose-500/25 px-1.5 py-0.5 rounded-full font-semibold">
+            <span>Failed</span>
           </span>
         );
       default:
@@ -135,30 +149,66 @@ export default function GeneratedClips({
     }
   };
 
+  // Helper: get Facebook Reel published chip
+  const getFacebookChip = (clip) => {
+    const isCurrentlyPublishing = isPublishingFb && fbPublishingClipId === clip.id;
+    if (isCurrentlyPublishing) {
+      return (
+        <span className="inline-flex items-center space-x-1 text-[10px] bg-blue-500/20 text-blue-300 border border-blue-500/30 px-1.5 py-0.5 rounded-full animate-pulse font-semibold">
+          <RefreshCw className="w-2.5 h-2.5 animate-spin text-blue-400" />
+          <span>Publishing...</span>
+        </span>
+      );
+    }
+
+    const reelUrl = fbPublishedMap[clip.id];
+    if (reelUrl) {
+      return (
+        <a
+          href={reelUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="inline-flex items-center space-x-1 text-[10px] bg-blue-500/20 text-blue-300 border border-blue-500/30 hover:bg-blue-500/30 px-1.5 py-0.5 rounded-full font-semibold transition-colors"
+        >
+          <Share2 className="w-2.5 h-2.5 text-blue-400" />
+          <span>FB Reel ↗</span>
+        </a>
+      );
+    }
+
+    return null;
+  };
+
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 sm:p-5 shadow-lg space-y-4">
-      {/* Header & Quick Action Buttons */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-slate-800">
-        <div className="flex items-center space-x-2">
-          <Film className="w-5 h-5 text-emerald-400 shrink-0" />
+      {/* Header */}
+      <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
+        <div className="flex items-center space-x-2.5 sm:space-x-3">
+          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-500 flex items-center justify-center text-slate-950 font-bold shadow-md shadow-emerald-500/20 shrink-0">
+            <Film className="w-4 h-4 sm:w-5 sm:h-5 text-slate-900" />
+          </div>
           <div>
-            <h3 className="font-semibold text-xs sm:text-sm text-white">
-              Generated Clips ({completedClips.length})
+            <h3 className="text-base sm:text-lg font-bold text-white tracking-tight flex items-center space-x-2">
+              <span>Generated Video Clips</span>
+              <span className="text-xs font-mono font-semibold px-2 py-0.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full">
+                {completedClips.length} {completedClips.length === 1 ? 'Ready' : 'Ready'}
+              </span>
             </h3>
-            <p className="text-[11px] sm:text-xs text-slate-400">
-              Download clips or manually schedule &amp; upload to YouTube
+            <p className="text-xs text-slate-400 mt-0.5">
+              High-definition clips ready to download, schedule to YouTube, and publish to Facebook Reels.
             </p>
           </div>
         </div>
 
         {/* Action Buttons */}
-        <div className="grid grid-cols-1 sm:flex sm:items-center gap-2">
+        <div className="grid grid-cols-1 sm:flex sm:items-center gap-2 flex-wrap">
           {/* Download Selected Button */}
           {selectedCount > 0 && (
             <button
               onClick={handleDownloadSelectedZip}
               disabled={isZippingSelected}
-              className="px-3.5 py-2.5 sm:py-2 text-xs font-bold text-white bg-orange-500 hover:bg-orange-600 active:scale-98 rounded-xl shadow-md shadow-orange-500/20 flex items-center justify-center space-x-1.5 transition-all cursor-pointer disabled:opacity-50 touch-manipulation"
+              className="px-3.5 py-2 text-xs font-bold text-white bg-orange-500 hover:bg-orange-600 active:scale-98 rounded-xl shadow-md shadow-orange-500/20 flex items-center justify-center space-x-1.5 transition-all cursor-pointer disabled:opacity-50 touch-manipulation"
             >
               <Download className="w-4 h-4" />
               <span>
@@ -169,11 +219,23 @@ export default function GeneratedClips({
             </button>
           )}
 
+          {/* Facebook Batch Publish Selected Button */}
+          {selectedCount > 0 && isFbConnected && onBatchPublishFb && (
+            <button
+              onClick={handlePublishSelectedFb}
+              disabled={isPublishingFb}
+              className="px-3.5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 active:scale-98 rounded-xl shadow-md shadow-blue-500/20 flex items-center justify-center space-x-1.5 transition-all cursor-pointer disabled:opacity-50 touch-manipulation"
+            >
+              <Share2 className="w-4 h-4" />
+              <span>Publish Selected to Facebook ({selectedCount})</span>
+            </button>
+          )}
+
           {/* Download All Button */}
           <button
             onClick={onDownloadAllZip}
             disabled={isZipping}
-            className="px-4 py-2.5 sm:py-2 text-xs font-bold text-slate-900 bg-emerald-400 hover:bg-emerald-300 active:scale-98 rounded-xl shadow-md shadow-emerald-500/20 flex items-center justify-center space-x-2 transition-all cursor-pointer disabled:opacity-50 touch-manipulation"
+            className="px-4 py-2 text-xs font-bold text-slate-900 bg-emerald-400 hover:bg-emerald-300 active:scale-98 rounded-xl shadow-md shadow-emerald-500/20 flex items-center justify-center space-x-2 transition-all cursor-pointer disabled:opacity-50 touch-manipulation"
           >
             <Archive className="w-4 h-4" />
             <span>{isZipping ? `Creating ZIP (${zipProgress || 0}%)...` : `Download All (${completedClips.length}) ZIP`}</span>
@@ -198,7 +260,7 @@ export default function GeneratedClips({
 
           <span className="text-slate-600">&bull;</span>
           <span className="text-xs text-slate-400 font-mono">
-            {selectedCount} of {completedClips.length}
+            {selectedCount} of {completedClips.length} selected
           </span>
         </div>
 
@@ -222,8 +284,9 @@ export default function GeneratedClips({
         {completedClips.map((clip) => {
           const isSelected = selectedClipIds.has(clip.id);
           const uploadState = uploadJobs[clip.id];
-          const canUpload = isConnected && onUploadClip && !uploadState && clip.blob;
+          const canUploadYt = isConnected && onUploadClip && (!uploadState || uploadState.status === 'upload_cancelled' || uploadState.status === 'upload_failed') && clip.blob;
           const uploadFailed = uploadState?.status === 'upload_failed';
+          const canPublishFb = isFbConnected && onPublishFbClip && clip.blob;
 
           return (
             <div
@@ -248,25 +311,23 @@ export default function GeneratedClips({
                       {clip.name}
                     </span>
                   </div>
-                  <div className="flex items-center space-x-1.5 shrink-0">
+
+                  <div className="flex items-center space-x-1 shrink-0">
                     {getYouTubeChip(clip)}
-                    <span className="text-[10px] font-mono font-semibold px-1.5 py-0.5 bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 rounded shrink-0">
-                      {clip.format ? clip.format.toUpperCase() : 'MP4'}
-                    </span>
+                    {getFacebookChip(clip)}
                   </div>
                 </div>
 
-                <div className="text-[11px] text-slate-400 font-mono mt-1 pl-6">
-                  <span>{formatTime(clip.startTime)} &rarr; {formatTime(clip.endTime)}</span>
-                  <span className="mx-1.5">&bull;</span>
-                  <span>{formatTime(clip.endTime - clip.startTime)}</span>
+                <div className="flex items-center space-x-2 text-[11px] text-slate-400 font-mono mt-1">
+                  <span>{formatTime(clip.duration)}</span>
+                  <span>&bull;</span>
+                  <span>{clip.size ? `${(clip.size / (1024 * 1024)).toFixed(1)} MB` : '1080p'}</span>
                 </div>
 
-                {/* Upload progress bar */}
-                {uploadState?.status === 'uploading' && uploadState.progress != null && (
+                {uploadState && uploadState.status === 'uploading' && (
                   <div className="w-full bg-slate-800 h-1 rounded-full mt-2 overflow-hidden">
                     <div
-                      className="bg-gradient-to-r from-red-500 to-orange-400 h-full rounded-full transition-all duration-300"
+                      className="bg-red-500 h-full transition-all duration-300"
                       style={{ width: `${uploadState.progress}%` }}
                     />
                   </div>
@@ -298,14 +359,27 @@ export default function GeneratedClips({
                 </button>
 
                 {/* Schedule & Upload to YouTube */}
-                {canUpload && (
+                {canUploadYt && (
                   <button
                     onClick={() => setScheduleModalClip(clip)}
                     className="flex-1 py-1.5 text-xs font-semibold text-white bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 border border-red-500/40 rounded-lg flex items-center justify-center space-x-1 transition-all cursor-pointer touch-manipulation shadow-sm shadow-red-500/20"
-                    title="Set manual schedule date/time and upload to YouTube"
+                    title="Upload / Schedule to YouTube Shorts"
                   >
-                    <Calendar className="w-3.5 h-3.5" />
-                    <span>Schedule</span>
+                    <Youtube className="w-3.5 h-3.5" />
+                    <span>YouTube</span>
+                  </button>
+                )}
+
+                {/* Publish to Facebook Reels */}
+                {canPublishFb && (
+                  <button
+                    onClick={() => onPublishFbClip(clip)}
+                    disabled={isPublishingFb}
+                    className="flex-1 py-1.5 text-xs font-semibold text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 border border-blue-500/40 rounded-lg flex items-center justify-center space-x-1 transition-all cursor-pointer touch-manipulation shadow-sm shadow-blue-500/20 disabled:opacity-50"
+                    title="Publish directly to Facebook Reels"
+                  >
+                    <Share2 className="w-3.5 h-3.5" />
+                    <span>Facebook</span>
                   </button>
                 )}
 
@@ -348,33 +422,39 @@ export default function GeneratedClips({
               />
             </div>
 
-            <div className="flex justify-end pt-1">
+            <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-800">
               <button
-                onClick={() => {
-                  onDownloadClip(activePreviewClip);
-                  setActivePreviewClip(null);
-                }}
-                className="w-full sm:w-auto px-4 py-2 text-xs font-bold text-white bg-emerald-500 hover:bg-emerald-600 active:scale-98 rounded-xl flex items-center justify-center space-x-1.5 cursor-pointer touch-manipulation"
+                onClick={() => onDownloadClip(activePreviewClip)}
+                className="px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl transition-colors cursor-pointer touch-manipulation flex items-center space-x-1.5"
               >
                 <Download className="w-4 h-4" />
-                <span>Download Clip</span>
+                <span>Download MP4</span>
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Individual Clip YouTube Schedule & Metadata Modal */}
+      {/* YouTube Schedule Modal */}
       {scheduleModalClip && (
         <YouTubeScheduleModal
+          key={scheduleModalClip.id}
           isOpen={Boolean(scheduleModalClip)}
           onClose={() => setScheduleModalClip(null)}
           clip={scheduleModalClip}
+          movieName={youtubeName || movieName}
           ytSettings={ytSettings}
-          movieName={movieName}
-          youtubeName={youtubeName || ytSettings?.yt_name || movieName}
-          onConfirmUpload={(clipToUpload, overrides) => {
-            onUploadClip(clipToUpload, overrides);
+          onConfirmUpload={(clipToUpload, scheduleData) => {
+            if (onUploadClip) {
+              onUploadClip(clipToUpload, scheduleData);
+            }
+            setScheduleModalClip(null);
+          }}
+          onUpload={(clipToUpload, scheduleData) => {
+            if (onUploadClip) {
+              onUploadClip(clipToUpload, scheduleData);
+            }
+            setScheduleModalClip(null);
           }}
         />
       )}

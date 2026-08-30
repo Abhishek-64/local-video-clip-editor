@@ -50,14 +50,41 @@ import {
   getTemplateById,
   createTemplate,
   updateTemplate,
-  deleteTemplate
+  deleteTemplate,
+  getFacebookAccount,
+  upsertFacebookAccount,
+  updateFacebookPageSelection,
+  deleteFacebookAccount,
+  createFacebookUploadJob,
+  updateFacebookUploadJob,
+  getFacebookUploadJob,
+  getFacebookUploadJobs
 } from './db.js';
+
+import {
+  b2Authorize,
+  b2GetUploadUrl,
+  b2GetDownloadUrl,
+  b2DeleteFile
+} from './b2.js';
+
+import {
+  buildFacebookAuthUrl,
+  exchangeFacebookCodeForTokens,
+  fetchFacebookPages,
+  validateAndGetPageToken,
+  verifyPagePublishCapability,
+  publishFacebookReel,
+  publishFacebookPageVideo
+} from './facebook.js';
 
 import {
   generateRandomHex,
   generateSessionToken,
   hashPassword,
-  verifyPassword
+  verifyPassword,
+  encryptToken,
+  decryptToken
 } from './crypto.js';
 
 // ─── App Setup ────────────────────────────────────────────────────────────────
@@ -517,6 +544,661 @@ app.post('/api/youtube/disconnect', withUser, async (c) => {
   return c.json({ success: true });
 });
 
+// ─── Facebook OAuth & Pages (Meta Graph API v21.0) ───────────────────────────
+
+/**
+ * GET /api/facebook/connect
+ * Redirects to Facebook OAuth authorization page.
+ */
+/**
+ * GET /api/facebook/connect
+ * Redirects to Facebook OAuth authorization page.
+ */
+app.get('/api/facebook/connect', withUser, (c) => {
+  const userId = c.get('userId');
+  const frontendUrl = c.req.query('frontendUrl') || c.req.header('referer') || c.env.FRONTEND_URL || 'http://localhost:3000';
+  const isPopup = c.req.query('popup') === '1' || c.req.query('popup') === 'true';
+
+  console.log('[FB Worker] /api/facebook/connect requested:', { userId, frontendUrl, isPopup });
+
+  if (!c.env.FACEBOOK_APP_ID || !c.env.FACEBOOK_APP_SECRET) {
+    console.error('[FB Worker] FACEBOOK_APP_ID or FACEBOOK_APP_SECRET missing');
+    return c.json({
+      error: 'Facebook OAuth is not configured. Set FACEBOOK_APP_ID and FACEBOOK_APP_SECRET in your environment.'
+    }, 500);
+  }
+
+  const authUrl = buildFacebookAuthUrl(c.env, userId, frontendUrl, isPopup);
+  console.log('[FB Worker] Redirecting to Meta OAuth URL:', authUrl);
+  return c.redirect(authUrl);
+});
+
+/**
+ * GET /api/facebook/callback
+ * Facebook redirects here after user authorization.
+ */
+app.get('/api/facebook/callback', async (c) => {
+  const { code, state, error, error_description } = c.req.query();
+  let frontendUrl = (c.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, '');
+  let isPopup = false;
+  let userId;
+
+  console.log('[FB Worker] /api/facebook/callback received:', {
+    hasCode: !!code,
+    state,
+    error,
+    error_description
+  });
+
+  if (state) {
+    try {
+      const decoded = decodeState(state);
+      userId = decoded.userId;
+      if (decoded.frontendUrl) {
+        frontendUrl = decoded.frontendUrl.replace(/\/$/, '');
+      }
+      if (decoded.isPopup) {
+        isPopup = Boolean(decoded.isPopup);
+      }
+      console.log('[FB Worker] Decoded OAuth state:', { userId, frontendUrl, isPopup });
+    } catch (e) {
+      console.error('[FB Worker] Failed to decode OAuth state:', e.message);
+    }
+  }
+
+  const renderAuthHtml = (success, errorMsg = null) => {
+    const isHttps = frontendUrl.startsWith('https://');
+    if (userId) {
+      setCookie(c, '__vcuid', btoa(userId), {
+        httpOnly: true,
+        path: '/',
+        sameSite: 'Lax',
+        maxAge: 31536000,
+        secure: isHttps
+      });
+    }
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>${success ? 'Facebook Connected' : 'Facebook Connection Error'}</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #090d16;
+      color: #f8fafc;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 20px;
+      box-sizing: border-box;
+      text-align: center;
+    }
+    .card {
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 16px;
+      padding: 32px;
+      max-width: 440px;
+      width: 100%;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+    }
+    .icon {
+      width: 56px;
+      height: 56px;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 16px;
+      font-size: 28px;
+    }
+    .icon.success { background: rgba(24, 119, 242, 0.15); color: #1877f2; border: 1px solid rgba(24, 119, 242, 0.3); }
+    .icon.error { background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); }
+    h2 { margin: 0 0 8px; font-size: 20px; font-weight: 700; color: #ffffff; }
+    p { margin: 0 0 24px; color: #94a3b8; font-size: 14px; line-height: 1.5; word-break: break-word; }
+    .btn {
+      display: inline-block;
+      width: 100%;
+      padding: 12px;
+      background: #1877f2;
+      color: white;
+      text-decoration: none;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+      border: none;
+      box-sizing: border-box;
+      transition: opacity 0.2s;
+    }
+    .btn:hover { opacity: 0.9; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon ${success ? 'success' : 'error'}">
+      ${success ? '✓' : '✕'}
+    </div>
+    <h2>${success ? 'Facebook Connected!' : 'Connection Failed'}</h2>
+    <p>${success ? 'Your Facebook Page has been linked successfully. You can now close this window.' : (errorMsg || error_description || 'Unable to connect to Facebook.')}</p>
+    <button class="btn" onclick="window.close()">Close Window</button>
+  </div>
+  <script>
+    try {
+      const msg = {
+        type: 'FACEBOOK_AUTH_RESULT',
+        success: ${success},
+        error: ${JSON.stringify(errorMsg || error_description || null)}
+      };
+      if (window.opener) {
+        try { window.opener.postMessage(msg, '${frontendUrl}'); } catch(e){}
+        try { window.opener.postMessage(msg, '*'); } catch(e){}
+        setTimeout(() => window.close(), 1200);
+      } else {
+        setTimeout(() => { window.location.href = '${frontendUrl}'; }, 1500);
+      }
+    } catch(e) {
+      setTimeout(() => { window.location.href = '${frontendUrl}'; }, 1500);
+    }
+  </script>
+</body>
+</html>`;
+    return c.html(html);
+  };
+
+  if (error) {
+    console.error('[FB Worker] Meta returned error in callback:', error, error_description);
+    return renderAuthHtml(false, error_description || error);
+  }
+
+  if (!code) {
+    console.error('[FB Worker] No authorization code received');
+    return renderAuthHtml(false, 'No authorization code received.');
+  }
+
+  try {
+    const secretKey = c.env.ENCRYPTION_KEY || c.env.FACEBOOK_APP_SECRET || '7a279df54155e4f8f70991df0a4e9c9c';
+    console.log('[FB Worker] Exchanging authorization code for long-lived tokens...');
+    const { userAccessToken } = await exchangeFacebookCodeForTokens(c.env, code);
+    console.log('[FB Worker] Tokens received. Fetching user and managed pages from Meta...');
+    const { fbUser, pages } = await fetchFacebookPages(c.env, userAccessToken);
+
+    console.log('[FB Worker] Pages found count:', pages?.length, pages?.map(p => ({ id: p.page_id, name: p.page_name })));
+
+    // Encrypt sensitive tokens server-side before storing
+    const encryptedUserToken = await encryptToken(userAccessToken, secretKey);
+    const encryptedPages = await Promise.all(
+      (pages || []).map(async (p) => ({
+        page_id: p.page_id,
+        page_name: p.page_name,
+        page_category: p.page_category,
+        page_thumbnail: p.page_thumbnail,
+        page_access_token: await encryptToken(p.page_access_token, secretKey),
+        tasks: p.tasks || []
+      }))
+    );
+
+    const hasPages = encryptedPages && encryptedPages.length > 0;
+    const primaryPage = hasPages ? encryptedPages[0] : {
+      page_id: '',
+      page_name: '',
+      page_category: '',
+      page_thumbnail: null,
+      page_access_token: ''
+    };
+
+    console.log('[FB Worker] Saving Facebook Account to D1 database for userId:', userId, 'Primary Page:', primaryPage.page_name || '(None yet)');
+    await upsertFacebookAccount(c.env.DB, userId, {
+      fb_user_id: fbUser?.id || null,
+      fb_user_name: fbUser?.name || null,
+      page_id: primaryPage.page_id,
+      page_name: primaryPage.page_name,
+      page_category: primaryPage.page_category,
+      page_thumbnail: primaryPage.page_thumbnail,
+      page_access_token: primaryPage.page_access_token,
+      user_access_token: encryptedUserToken,
+      available_pages: encryptedPages
+    });
+
+    console.log('[FB Worker] ✓ Upsert successful. Rendering success page.');
+    return renderAuthHtml(true);
+  } catch (err) {
+    console.error('[FB Worker] Callback processing failed:', err.stack || err.message);
+    return renderAuthHtml(false, err.message);
+  }
+});
+
+/**
+ * GET /api/facebook/account
+ * Returns current connected page and user auth state. Never returns sensitive tokens.
+ */
+app.get('/api/facebook/account', withUser, async (c) => {
+  const userId = c.get('userId');
+  const account = await getFacebookAccount(c.env.DB, userId);
+
+  if (!account) {
+    return c.json({
+      connected: false,
+      isUserConnected: false,
+      isPageConnected: false,
+      facebook: null,
+      account: null,
+      availablePages: []
+    });
+  }
+
+  let availablePages = [];
+  try {
+    availablePages = typeof account.available_pages === 'string'
+      ? JSON.parse(account.available_pages || '[]')
+      : (account.available_pages || []);
+  } catch {}
+
+  // Strip all sensitive tokens from client response
+  const sanitizedPages = availablePages.map(p => ({
+    page_id: p.page_id,
+    page_name: p.page_name,
+    page_category: p.page_category,
+    page_thumbnail: p.page_thumbnail
+  }));
+
+  const hasPage = Boolean(account.page_id && account.page_name && account.page_access_token);
+  const hasUser = Boolean(account.user_access_token || account.fb_user_id);
+
+  return c.json({
+    connected: hasPage,
+    isUserConnected: hasUser,
+    isPageConnected: hasPage,
+    facebook: hasPage ? {
+      page_id: account.page_id,
+      page_name: account.page_name
+    } : null,
+    account: {
+      id: account.id,
+      fb_user_id: account.fb_user_id,
+      fb_user_name: account.fb_user_name,
+      page_id: account.page_id || null,
+      page_name: account.page_name || null,
+      page_category: account.page_category || null,
+      page_thumbnail: account.page_thumbnail || null,
+      created_at: account.created_at
+    },
+    availablePages: sanitizedPages
+  });
+});
+
+/**
+ * GET /api/facebook/debug-page
+ * Returns safe diagnostic info without exposing any token.
+ */
+app.get('/api/facebook/debug-page', withUser, async (c) => {
+  const userId = c.get('userId');
+  const account = await getFacebookAccount(c.env.DB, userId);
+
+  if (!account || !account.page_id) {
+    return c.json({
+      connected: false,
+      page_id: null,
+      page_name: null,
+      has_page_access_token: false,
+      can_publish: false
+    });
+  }
+
+  const secretKey = c.env.ENCRYPTION_KEY || c.env.FACEBOOK_APP_SECRET || '7a279df54155e4f8f70991df0a4e9c9c';
+  const decryptedPageToken = await decryptToken(account.page_access_token, secretKey);
+
+  const diag = await verifyPagePublishCapability(c.env, decryptedPageToken, account.page_id);
+
+  return c.json({
+    connected: diag.connected,
+    page_id: account.page_id,
+    page_name: diag.page_name || account.page_name,
+    has_page_access_token: Boolean(decryptedPageToken),
+    can_publish: diag.can_publish
+  });
+});
+
+/**
+ * POST /api/facebook/connect-page-id
+ * Validates that submitted Page ID belongs to the authenticated user and stores verified Meta Page token.
+ */
+app.post('/api/facebook/connect-page-id', withUser, async (c) => {
+  const userId = c.get('userId');
+  let body = {};
+  try {
+    body = await c.req.json();
+  } catch {}
+
+  const pageId = body.page_id || body.pageId;
+
+  if (!pageId || !String(pageId).trim()) {
+    return c.json({ success: false, error: 'Facebook Page ID is required.' }, 400);
+  }
+
+  const account = await getFacebookAccount(c.env.DB, userId);
+  if (!account || !account.user_access_token) {
+    return c.json({
+      success: false,
+      error: 'Please authenticate / sign in with Facebook first before connecting a Page ID.'
+    }, 401);
+  }
+
+  const secretKey = c.env.ENCRYPTION_KEY || c.env.FACEBOOK_APP_SECRET || '7a279df54155e4f8f70991df0a4e9c9c';
+  const decryptedUserToken = await decryptToken(account.user_access_token, secretKey);
+
+  try {
+    console.log('[FB Worker] Validating Facebook Page ID with Meta:', pageId, 'for userId:', userId);
+    const pageData = await validateAndGetPageToken(
+      c.env,
+      decryptedUserToken,
+      pageId
+    );
+
+    const encryptedPageToken = await encryptToken(pageData.page_access_token, secretKey);
+
+    // Merge into available_pages
+    let availablePages = [];
+    try {
+      availablePages = typeof account.available_pages === 'string'
+        ? JSON.parse(account.available_pages || '[]')
+        : (account.available_pages || []);
+    } catch {}
+
+    const storedPageObj = {
+      page_id: pageData.page_id,
+      page_name: pageData.page_name,
+      page_category: pageData.page_category,
+      page_thumbnail: pageData.page_thumbnail,
+      page_access_token: encryptedPageToken,
+      tasks: pageData.tasks || []
+    };
+
+    const existingIdx = availablePages.findIndex(p => p.page_id === pageData.page_id);
+    if (existingIdx >= 0) {
+      availablePages[existingIdx] = storedPageObj;
+    } else {
+      availablePages.push(storedPageObj);
+    }
+
+    const updatedAccount = await upsertFacebookAccount(c.env.DB, userId, {
+      fb_user_id: account.fb_user_id,
+      fb_user_name: account.fb_user_name,
+      page_id: pageData.page_id,
+      page_name: pageData.page_name,
+      page_category: pageData.page_category,
+      page_thumbnail: pageData.page_thumbnail,
+      page_access_token: encryptedPageToken,
+      user_access_token: account.user_access_token,
+      available_pages: availablePages
+    });
+
+    return c.json({
+      success: true,
+      connected: true,
+      facebook: {
+        page_id: pageData.page_id,
+        page_name: pageData.page_name
+      },
+      account: {
+        id: updatedAccount.id,
+        fb_user_id: updatedAccount.fb_user_id,
+        fb_user_name: updatedAccount.fb_user_name,
+        page_id: updatedAccount.page_id,
+        page_name: updatedAccount.page_name,
+        page_category: updatedAccount.page_category,
+        page_thumbnail: updatedAccount.page_thumbnail,
+        created_at: updatedAccount.created_at
+      }
+    });
+  } catch (err) {
+    console.error('[FB Worker] Failed to connect Page ID:', err.message);
+    return c.json({
+      success: false,
+      error: err.message || 'This Facebook Page is not accessible by the connected Facebook account.'
+    }, err.status || 400);
+  }
+});
+
+/**
+ * POST /api/facebook/select-page
+ * Switch the active Facebook Page from available pages list.
+ */
+app.post('/api/facebook/select-page', withUser, async (c) => {
+  const userId = c.get('userId');
+  let body = {};
+  try {
+    body = await c.req.json();
+  } catch {}
+
+  const targetPageId = body.page_id;
+  if (!targetPageId) {
+    return c.json({ error: 'page_id is required' }, 400);
+  }
+
+  const account = await getFacebookAccount(c.env.DB, userId);
+  if (!account) {
+    return c.json({ error: 'No Facebook account connected' }, 404);
+  }
+
+  let availablePages = [];
+  try {
+    availablePages = typeof account.available_pages === 'string'
+      ? JSON.parse(account.available_pages || '[]')
+      : (account.available_pages || []);
+  } catch {}
+
+  const target = availablePages.find(p => p.page_id === targetPageId);
+  if (!target) {
+    return c.json({ error: 'Selected page not found in your managed pages list' }, 404);
+  }
+
+  const updated = await updateFacebookPageSelection(c.env.DB, userId, target);
+  return c.json({
+    success: true,
+    connected: true,
+    facebook: {
+      page_id: updated.page_id,
+      page_name: updated.page_name
+    }
+  });
+});
+
+/**
+ * POST /api/facebook/disconnect
+ * Disconnect Facebook account from D1.
+ */
+app.post('/api/facebook/disconnect', withUser, async (c) => {
+  const userId = c.get('userId');
+  await deleteFacebookAccount(c.env.DB, userId);
+  return c.json({ success: true });
+});
+
+// ─── Backblaze B2 Storage Target ─────────────────────────────────────────────
+
+/**
+ * POST /api/facebook/b2/upload-url
+ * Get presigned B2 upload URL and token.
+ */
+app.post('/api/facebook/b2/upload-url', withUser, async (c) => {
+  try {
+    const target = await b2GetUploadUrl(c.env);
+    return c.json({
+      success: true,
+      uploadUrl: target.uploadUrl,
+      authorizationToken: target.authorizationToken
+    });
+  } catch (err) {
+    console.error('B2 upload url error:', err);
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+// ─── Facebook Publishing & Reels Ingestion ────────────────────────────────────
+
+/**
+ * POST /api/facebook/publish
+ * Ingest from temporary B2 file -> upload to Meta Graph API -> cleanup B2 -> record job in D1.
+ */
+app.post('/api/facebook/publish', withUser, async (c) => {
+  const userId = c.get('userId');
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Invalid JSON body' }, 400);
+  }
+
+  const {
+    contentType = 'reel', // 'reel' | 'video'
+    b2FileId,
+    b2FileName,
+    caption = '',
+    title = '',
+    description = '',
+    hashtags = [],
+    scheduledAt = null,
+    pageId = null
+  } = body;
+
+  if (!b2FileId || !b2FileName) {
+    return c.json({ error: 'b2FileId and b2FileName are required for upload ingest.' }, 400);
+  }
+
+  const account = await getFacebookAccount(c.env.DB, userId);
+  if (!account || !account.page_access_token) {
+    return c.json({ error: 'Facebook Page is not connected. Please connect your Facebook account first.' }, 400);
+  }
+
+  const secretKey = c.env.ENCRYPTION_KEY || c.env.FACEBOOK_APP_SECRET || '7a279df54155e4f8f70991df0a4e9c9c';
+  const activePageId = pageId || account.page_id;
+  let encryptedPageToken = account.page_access_token;
+
+  // If specific page requested, check available pages
+  if (pageId && pageId !== account.page_id) {
+    try {
+      const pages = JSON.parse(account.available_pages || '[]');
+      const match = pages.find(p => p.page_id === pageId);
+      if (match && match.page_access_token) {
+        encryptedPageToken = match.page_access_token;
+      }
+    } catch {}
+  }
+
+  const activePageToken = await decryptToken(encryptedPageToken, secretKey);
+  if (!activePageToken) {
+    return c.json({ error: 'Facebook Page Access Token could not be decrypted. Please reconnect your Page.' }, 400);
+  }
+
+  // Create initial D1 job record
+  const job = await createFacebookUploadJob(c.env.DB, {
+    user_id: userId,
+    facebook_account_id: account.id,
+    page_id: activePageId,
+    content_type: contentType,
+    title,
+    caption,
+    description,
+    hashtags,
+    scheduled_at: scheduledAt,
+    status: 'processing',
+    b2_file_id: b2FileId,
+    b2_file_name: b2FileName
+  });
+
+  try {
+    // 1. Generate authorized download link from B2
+    const b2DownloadUrl = await b2GetDownloadUrl(c.env, b2FileName, 3600);
+
+    // Format full caption including hashtags
+    const hashtagsStr = Array.isArray(hashtags) && hashtags.length > 0
+      ? hashtags.map(t => `#${t.replace(/^#+/, '')}`).join(' ')
+      : '';
+    const fullCaption = `${caption ? caption.trim() : ''}${hashtagsStr ? (caption ? '\n\n' : '') + hashtagsStr : ''}`;
+
+    let publishResult;
+    if (contentType === 'reel') {
+      publishResult = await publishFacebookReel(c.env, activePageToken, activePageId, {
+        b2DownloadUrl,
+        caption: fullCaption,
+        title,
+        scheduledAt
+      });
+    } else {
+      publishResult = await publishFacebookPageVideo(c.env, activePageToken, activePageId, {
+        b2DownloadUrl,
+        title,
+        description: fullCaption || description,
+        scheduledAt
+      });
+    }
+
+    // 2. Immediately cleanup temporary file from Backblaze B2
+    await b2DeleteFile(c.env, b2FileId, b2FileName);
+
+    // 3. Update job in D1
+    const updatedJob = await updateFacebookUploadJob(c.env.DB, job.id, {
+      status: publishResult.status || 'published',
+      facebook_video_id: publishResult.videoId,
+      facebook_post_url: publishResult.postUrl,
+      published_at: scheduledAt ? null : new Date().toISOString()
+    });
+
+    return c.json({
+      success: true,
+      video_id: publishResult.videoId,
+      page_id: activePageId,
+      status: publishResult.status,
+      postUrl: publishResult.postUrl
+    });
+  } catch (err) {
+    console.error('Facebook publish error:', err);
+
+    // Attempt B2 cleanup on error as well
+    try {
+      await b2DeleteFile(c.env, b2FileId, b2FileName);
+    } catch {}
+
+    await updateFacebookUploadJob(c.env.DB, job.id, {
+      status: 'failed',
+      error_message: err.message
+    });
+
+    return c.json({
+      success: false,
+      error: `Facebook upload failed: ${err.message}`,
+      jobId: job.id
+    }, 500);
+  }
+});
+
+/**
+ * GET /api/facebook/jobs
+ * Returns Facebook upload job history for current user.
+ */
+app.get('/api/facebook/jobs', withUser, async (c) => {
+  const userId = c.get('userId');
+  const jobs = await getFacebookUploadJobs(c.env.DB, userId);
+  return c.json(jobs);
+});
+
+/**
+ * GET /api/facebook/jobs/:id
+ * Single Facebook job status.
+ */
+app.get('/api/facebook/jobs/:id', withUser, async (c) => {
+  const id = c.req.param('id');
+  const job = await getFacebookUploadJob(c.env.DB, id);
+  if (!job) return c.json({ error: 'Job not found' }, 404);
+  return c.json(job);
+});
+
+
 
 // ─── Upload Jobs ──────────────────────────────────────────────────────────────
 
@@ -571,7 +1253,7 @@ app.post('/api/uploads/metadata', withUser, async (c) => {
     description: body.description,
     tags: JSON.stringify(cleanTags),
     visibility: body.visibility || 'private',
-    category: body.category || '22',
+    category: String(body.category || body.categoryId || body.category_id || '22'),
     made_for_kids: body.madeForKids || false,
     notify_subscribers: body.notifySubscribers !== false,
     scheduled_at: body.scheduledAt || null
@@ -592,7 +1274,7 @@ app.post('/api/uploads/metadata', withUser, async (c) => {
         description: body.description,
         tags: cleanTags,
         visibility: body.visibility || 'private',
-        categoryId: body.category || '22',
+        categoryId: String(body.category || body.categoryId || body.category_id || '22'),
         madeForKids: body.madeForKids || false,
         scheduledAt: body.scheduledAt || null
       },
@@ -755,6 +1437,7 @@ app.post('/api/templates', withUser, async (c) => {
     description: body.description,
     text_data: body.text_data,
     youtube_data: body.youtube_data,
+    facebook_data: body.facebook_data,
     logo_data: body.logo_data
   });
 

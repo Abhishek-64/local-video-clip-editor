@@ -1,5 +1,7 @@
 import React, { useRef, useState } from 'react';
-import { UploadCloud, FileVideo, AlertCircle, CheckCircle2, Sparkles, Zap, Mic, Film } from 'lucide-react';
+import {
+  UploadCloud, FileVideo, AlertCircle, CheckCircle2
+} from 'lucide-react';
 import { detectVideoQuality, detectVideoFps, detectAudioAndVoice } from '../utils/mediaDetector';
 
 export default function VideoUploader({ onVideoSelect, currentVideo }) {
@@ -99,7 +101,7 @@ export default function VideoUploader({ onVideoSelect, currentVideo }) {
   };
 
   return (
-    <div className="w-full">
+    <div className="w-full relative">
       <input
         ref={fileInputRef}
         type="file"
@@ -113,26 +115,31 @@ export default function VideoUploader({ onVideoSelect, currentVideo }) {
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
-          onClick={() => fileInputRef.current?.click()}
-          className={`border-2 border-dashed rounded-2xl p-5 sm:p-10 text-center cursor-pointer transition-all duration-200 touch-manipulation ${
+          className={`border-2 border-dashed rounded-2xl p-5 sm:p-8 text-center transition-all duration-200 ${
             isDragging
               ? 'border-orange-500 bg-orange-500/10 scale-[1.01]'
-              : 'border-slate-700 bg-slate-900/60 hover:bg-slate-900 hover:border-slate-600'
+              : 'border-slate-700 bg-slate-900/60 hover:bg-slate-900/90 hover:border-slate-600'
           }`}
         >
-          <div className="mx-auto w-12 h-12 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-br from-orange-500/20 to-amber-500/20 border border-orange-500/30 flex items-center justify-center mb-3 sm:mb-4 text-orange-400">
-            <UploadCloud className="w-6 h-6 sm:w-8 sm:h-8" />
+          <div className="mx-auto w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-gradient-to-br from-orange-500/20 to-amber-500/20 border border-orange-500/30 flex items-center justify-center mb-3 sm:mb-4 text-orange-400 shadow-inner">
+            <UploadCloud className="w-6 h-6 sm:w-7 sm:h-7" />
           </div>
-          <h3 className="text-base sm:text-lg font-semibold text-white mb-1">
+          <h3 className="text-base sm:text-lg font-bold text-white mb-1">
             Choose a video or drag &amp; drop here
           </h3>
           <p className="text-xs sm:text-sm text-slate-400 max-w-md mx-auto mb-4 leading-relaxed">
             Supports MP4, MOV, WebM, MKV, AVI. Auto-detects Quality, Voice/Audio, and FPS automatically.
           </p>
 
-          <div className="inline-flex items-center space-x-2 px-4 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-medium rounded-xl text-xs sm:text-sm shadow-lg shadow-orange-500/20 transition-all touch-manipulation">
-            <FileVideo className="w-4 h-4" />
-            <span>{isAnalyzing ? 'Analyzing Video...' : 'Select Local Video'}</span>
+          <div className="flex items-center justify-center">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="inline-flex items-center space-x-2 px-5 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-medium rounded-xl text-xs sm:text-sm shadow-lg shadow-orange-500/20 transition-all touch-manipulation cursor-pointer active:scale-95"
+            >
+              <FileVideo className="w-4 h-4" />
+              <span>{isAnalyzing ? 'Analyzing Video...' : 'Select Local Video'}</span>
+            </button>
           </div>
 
           {error && (
@@ -159,7 +166,7 @@ export default function VideoUploader({ onVideoSelect, currentVideo }) {
                   <span>{formatFileSize(currentVideo.size)}</span>
                   <span>&bull;</span>
                   <span className="text-emerald-400 hidden xs:inline-flex items-center">
-                    <CheckCircle2 className="w-3 h-3 mr-1 inline" /> Loaded Locally
+                    <CheckCircle2 className="w-3 h-3 mr-1 inline" /> Ready
                   </span>
                 </div>
               </div>

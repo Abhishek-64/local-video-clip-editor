@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Crop, Image as ImageIcon, Type, Sparkles, Volume2, SlidersHorizontal, CheckCheck, Youtube, Scissors } from 'lucide-react';
+import { Crop, Image as ImageIcon, Type, Sparkles, Volume2, SlidersHorizontal, CheckCheck, Youtube, Scissors, Share2 } from 'lucide-react';
 import CropEditor from './CropEditor';
 import BackgroundEditor from './BackgroundEditor';
 import TextEditor from './TextEditor';
@@ -8,6 +8,7 @@ import EffectsPanel from './EffectsPanel';
 import AudioPanel from './AudioPanel';
 import ExportPanel from './ExportPanel';
 import YouTubePanel from './YouTubePanel';
+import FacebookPanel from './FacebookPanel';
 import SplitCutEditor from './SplitCutEditor';
 
 export default function EditorTabs({
@@ -46,6 +47,7 @@ export default function EditorTabs({
   onGenerateBatchKept,
   onExportSinglePart,
   movieName,
+  completedClips = [],
   // YouTube props
   ytAccount,
   isConnected,
@@ -60,9 +62,41 @@ export default function EditorTabs({
   isAuthenticated = false,
   onOpenAuth,
   pipelineStartTime,
-  setPipelineStartTime
+  setPipelineStartTime,
+  // Facebook props
+  fbAccount,
+  availablePages = [],
+  isFbConnected = false,
+  isFbUserConnected = false,
+  isFbPageConnected = false,
+  isLoadingFbAccount = false,
+  fbAccountError = null,
+  connectFacebook,
+  connectFbPageById,
+  isConnectingFbPage = false,
+  fbPageConnectError = null,
+  setFbPageConnectError,
+  switchPage,
+  disconnectFacebook,
+  refreshFbAccount,
+  fbSettings,
+  updateFbSettings,
+  renderFbTemplate,
+  publishToFacebookPipeline,
+  isPublishingFb = false,
+  publishFbProgress = 0,
+  publishFbStage = '',
+  publishFbError = null,
+  lastPublishedFbPost = null,
+  activeTab: controlledActiveTab,
+  onTabChange
 }) {
-  const [activeTab, setActiveTab] = useState('split-cut');
+  const [internalActiveTab, setInternalActiveTab] = useState('split-cut');
+  const activeTab = controlledActiveTab !== undefined ? controlledActiveTab : internalActiveTab;
+  const setActiveTab = (tabId) => {
+    if (onTabChange) onTabChange(tabId);
+    setInternalActiveTab(tabId);
+  };
 
   const cutSectionsCount = (customParts || []).filter(p => p.isDeleted).length;
 
@@ -75,7 +109,8 @@ export default function EditorTabs({
     { id: 'effects', label: 'Effects', icon: Sparkles },
     { id: 'audio', label: 'Audio', icon: Volume2 },
     { id: 'export', label: 'Export', icon: SlidersHorizontal },
-    { id: 'youtube', label: 'YouTube', icon: Youtube }
+    { id: 'youtube', label: 'YouTube', icon: Youtube },
+    { id: 'facebook', label: 'Facebook', icon: Share2 }
   ];
 
   return (
@@ -100,7 +135,11 @@ export default function EditorTabs({
               >
                 <Icon className={`w-3.5 h-3.5 shrink-0 ${
                   isActive
-                    ? t.id === 'youtube' ? 'text-red-400' : 'text-orange-400'
+                    ? t.id === 'youtube'
+                      ? 'text-red-400'
+                      : t.id === 'facebook'
+                      ? 'text-blue-400'
+                      : 'text-orange-400'
                     : 'text-slate-400'
                 }`} />
                 <span>{t.label}</span>
@@ -112,6 +151,9 @@ export default function EditorTabs({
                 {/* Connected indicator dot */}
                 {t.id === 'youtube' && isConnected && (
                   <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full shrink-0" />
+                )}
+                {t.id === 'facebook' && isFbConnected && (
+                  <span className="w-1.5 h-1.5 bg-blue-400 rounded-full shrink-0" />
                 )}
               </button>
             );
@@ -231,6 +273,44 @@ export default function EditorTabs({
             setPipelineStartTime={setPipelineStartTime}
             customParts={customParts}
             textSettings={textSettings}
+            onSwitchToPlatform={setActiveTab}
+          />
+        )}
+
+        {activeTab === 'facebook' && (
+          <FacebookPanel
+            fbAccount={fbAccount}
+            availablePages={availablePages}
+            isConnected={isFbConnected}
+            isUserConnected={isFbUserConnected}
+            isPageConnected={isFbPageConnected}
+            isLoadingAccount={isLoadingFbAccount}
+            accountError={fbAccountError}
+            connectFacebook={connectFacebook}
+            connectPageById={connectFbPageById}
+            isConnectingPage={isConnectingFbPage}
+            pageConnectError={fbPageConnectError}
+            setPageConnectError={setFbPageConnectError}
+            switchPage={switchPage}
+            disconnectFacebook={disconnectFacebook}
+            refreshFbAccount={refreshFbAccount}
+            fbSettings={fbSettings}
+            updateFbSettings={updateFbSettings}
+            renderFbTemplate={renderFbTemplate}
+            publishToFacebookPipeline={publishToFacebookPipeline}
+            isPublishing={isPublishingFb}
+            publishProgress={publishFbProgress}
+            publishStage={publishFbStage}
+            publishError={publishFbError}
+            lastPublishedPost={lastPublishedFbPost}
+            apiAvailable={apiAvailable}
+            isAuthenticated={isAuthenticated}
+            onOpenAuth={onOpenAuth}
+            videoData={videoData}
+            customParts={customParts}
+            completedClips={completedClips}
+            textSettings={textSettings}
+            onSwitchToPlatform={setActiveTab}
           />
         )}
       </div>

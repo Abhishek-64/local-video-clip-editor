@@ -16,6 +16,7 @@ import { cleanVideoFilename } from './utils/titleCleaner';
 import { useProcessingQueue } from './hooks/useProcessingQueue';
 import { useYouTube } from './hooks/useYouTube';
 import { useUploadQueue } from './hooks/useUploadQueue';
+import { useFacebook } from './hooks/useFacebook';
 import { useAuth } from './hooks/useAuth';
 import { useTemplates } from './hooks/useTemplates';
 import { Check, Info, X, Film, Palette, Layers, Sparkles } from 'lucide-react';
@@ -27,6 +28,14 @@ export default function App() {
 
   // Mobile Active View: 'preview' (Preview + Timeline), 'style' (EditorTabs), 'queue' (Queue + Output)
   const [mobileView, setMobileView] = useState('preview');
+
+  // Active Tab in EditorTabs
+  const [activeEditorTab, setActiveEditorTab] = useState('split-cut');
+
+  const handleNavigateTab = (tabId) => {
+    setActiveEditorTab(tabId);
+    setMobileView('style');
+  };
 
   // Timeline / Range / Parts State
   const [startTime, setStartTime] = useState(0);
@@ -221,6 +230,34 @@ export default function App() {
     movieName: ytSettings?.yt_name || textSettings.movieName
   });
 
+  // ── Facebook Hook (Meta Graph API v21.0 & B2 Storage) ─────────────────────────
+  const {
+    fbAccount,
+    availablePages: fbAvailablePages,
+    isConnected: isFbConnected,
+    isUserConnected: isFbUserConnected,
+    isPageConnected: isFbPageConnected,
+    isLoadingAccount: isLoadingFbAccount,
+    accountError: fbAccountError,
+    connectFacebook,
+    connectPageById: connectFbPageById,
+    isConnectingPage: isConnectingFbPage,
+    pageConnectError: fbPageConnectError,
+    setPageConnectError: setFbPageConnectError,
+    switchPage: switchFbPage,
+    disconnectFacebook,
+    refreshFbAccount,
+    fbSettings,
+    updateFbSettings,
+    renderFbTemplate,
+    publishToFacebookPipeline,
+    isPublishing: isPublishingFb,
+    publishProgress: publishFbProgress,
+    publishStage: publishFbStage,
+    publishError: publishFbError,
+    lastPublishedPost: lastPublishedFbPost
+  } = useFacebook({ isAuthenticated: isUserLoggedIn });
+
   // ── Templates / Presets Hook (Cross-Section Multi-Configuration) ──────────────
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
   const {
@@ -236,6 +273,7 @@ export default function App() {
     try {
       const textConfig = typeof template.text_data === 'string' ? JSON.parse(template.text_data || '{}') : (template.text_data || {});
       const ytConfig = typeof template.youtube_data === 'string' ? JSON.parse(template.youtube_data || '{}') : (template.youtube_data || {});
+      const fbConfig = typeof template.facebook_data === 'string' ? JSON.parse(template.facebook_data || '{}') : (template.facebook_data || template.fb_data || {});
       const logoConfig = typeof template.logo_data === 'string' ? JSON.parse(template.logo_data || '{}') : (template.logo_data || {});
 
       if (textConfig && Object.keys(textConfig).length > 0) {
@@ -244,17 +282,87 @@ export default function App() {
       if (ytConfig && Object.keys(ytConfig).length > 0) {
         updateYtSettings(ytConfig);
       }
+      if (fbConfig && Object.keys(fbConfig).length > 0) {
+        updateFbSettings(fbConfig);
+      }
       if (logoConfig && Object.keys(logoConfig).length > 0) {
-        setLogoSettings(prev => ({ ...prev, ...logoConfig }));
+        const logoSrc = logoConfig.dataUrl || (logoConfig.url && !logoConfig.url.startsWith('blob:') ? logoConfig.url : null);
+        setLogoSettings(prev => ({
+          ...prev,
+          ...logoConfig,
+          url: logoSrc || prev.url,
+          dataUrl: logoConfig.dataUrl || prev.dataUrl,
+          enabled: Boolean(logoConfig.enabled && (logoSrc || prev.url || prev.dataUrl))
+        }));
       }
 
-      showToast(`Template "${template.name}" applied across Text, YouTube & Logo!`, 'success');
+      showToast(`Template "${template.name}" applied across all sections!`, 'success');
     } catch (e) {
       console.error('Failed to apply template:', e);
       showToast('Error applying template.', 'error');
     }
   };
 
+  // ── Facebook Direct & Batch Publishing Integration ───────────────────────────
+  const [fbPublishedMap, setFbPublishedMap] = useState({});
+  const [fbPublishingClipId, setFbPublishingClipId] = useState(null);
+
+  const handlePublishFbClip = async (clip) => {
+    if (!clip || !clip.blob) {
+      showToast('Clip video data not ready for publishing.', 'error');
+      return;
+    }
+    setFbPublishingClipId(clip.id);
+    try {
+      const partNum = clip.partNumber || 1;
+      const movie = fbSettings?.fb_name || textSettings.movieName || 'My Movie';
+      const isZeroPad = fbSettings?.fb_zero_pad !== false;
+      const title = renderFbTemplate
+        ? renderFbTemplate(fbSettings?.fb_title_template || '{movie} - Part {part} | #Reels', {
+            movieName: movie,
+            partNumber: partNum,
+            zeroPad: isZeroPad,
+            tags: fbSettings?.fb_tags || []
+          })
+        : `${movie} - Part ${partNum} | #Reels`;
+
+      const caption = renderFbTemplate
+        ? renderFbTemplate(fbSettings?.fb_caption_template || '{movie} - Part {part}\n\n#Reels #Shorts\n\n{hashtags}', {
+            movieName: movie,
+            partNumber: partNum,
+            zeroPad: isZeroPad,
+            tags: fbSettings?.fb_tags || []
+          })
+        : `${movie} - Part ${partNum}\n\n#Reels #Shorts`;
+
+      const res = await publishToFacebookPipeline(clip.blob, {
+        fileName: `${movie.replace(/[\\/:*?"<>|]/g, '_')}_Part_${partNum}.mp4`,
+        title,
+        caption,
+        hashtags: fbSettings?.fb_tags || [],
+        contentType: fbSettings?.fb_content_type || 'reel'
+      });
+      const publishedUrl = res?.postUrl || res?.permalink_url || (res?.videoId ? `https://www.facebook.com/reel/${res.videoId}` : null);
+      if (publishedUrl) {
+        setFbPublishedMap(prev => ({ ...prev, [clip.id]: publishedUrl }));
+        showToast(`Published Part ${partNum} to Facebook Reels!`, 'success');
+      } else {
+        showToast(`Part ${partNum} sent to Facebook!`, 'success');
+      }
+    } catch (err) {
+      console.error('Facebook publish error:', err);
+      showToast(`Facebook publish failed: ${err.message}`, 'error');
+    } finally {
+      setFbPublishingClipId(null);
+    }
+  };
+
+  const handleBatchPublishFb = async (clipsToPublish) => {
+    if (!clipsToPublish || clipsToPublish.length === 0) return;
+    for (const clip of clipsToPublish) {
+      await handlePublishFbClip(clip);
+    }
+  };
 
   // ── Handle Video Loading and Auto-Detection ───────────────────────────────────
   const handleVideoSelect = (data) => {
@@ -263,16 +371,31 @@ export default function App() {
     setEndTime(data.duration);
     setCurrentTime(0);
 
-    // Auto-populate movie name from filename (cleaned)
-    const baseName = cleanVideoFilename(data.file.name);
+    // Auto-populate movie name from demo preset or filename (cleaned)
+    const baseName = data.preset?.movieName || cleanVideoFilename(data.file.name);
     setTextSettings((prev) => ({
       ...prev,
       movieName: baseName
     }));
+
     updateYtSettings({
       yt_name: baseName,
-      yt_start_part: 1
+      yt_start_part: 1,
+      ...(data.preset?.tags ? { yt_tags: data.preset.tags } : {})
     });
+
+    if (data.preset) {
+      updateFbSettings({
+        fb_name: baseName,
+        fb_tags: data.preset.tags || ['reels', 'shorts', 'viral'],
+        fb_caption_template: data.preset.captionTemplate || '{movie} - Part {part}\n\n#Reels #Shorts\n\n{hashtags}',
+        fb_title_template: data.preset.titleTemplate || '{movie} - Part {part} | #Reels'
+      });
+
+      if (data.preset.defaultParts && data.preset.defaultParts.length > 0) {
+        setCustomParts(data.preset.defaultParts);
+      }
+    }
 
     // Auto configure smart export profile based on detected media
     if (data.detectedQuality || data.detectedFps) {
@@ -283,7 +406,11 @@ export default function App() {
       }));
     }
 
-    showToast(`Loaded "${data.file.name}" (${Math.round(data.duration)}s) successfully!`, 'success');
+    if (data.preset) {
+      showToast(`⚡ Loaded Demo Video: "${data.preset.title}" with 3 split parts & social templates!`, 'success');
+    } else {
+      showToast(`Loaded "${data.file.name}" (${Math.round(data.duration)}s) successfully!`, 'success');
+    }
   };
 
   // ── Split & Cut Actions for Player & Hotkeys ──────────────────────────────
@@ -751,6 +878,11 @@ export default function App() {
         onOpenTemplates={() => setIsTemplateModalOpen(true)}
         templatesCount={templates.length}
         ytAccount={ytAccount}
+        fbAccount={fbAccount}
+        isYtConnected={isConnected}
+        isFbConnected={isFbConnected}
+        activeTab={activeEditorTab}
+        onNavigateTab={handleNavigateTab}
       />
 
       {/* Main Application Container */}
@@ -897,6 +1029,34 @@ export default function App() {
                   onOpenAuth={openAuthModal}
                   pipelineStartTime={pipelineStartTime}
                   setPipelineStartTime={setPipelineStartTime}
+                  completedClips={completedClips}
+                  // Facebook props
+                  fbAccount={fbAccount}
+                  availablePages={fbAvailablePages}
+                  isFbConnected={isFbConnected}
+                  isFbUserConnected={isFbUserConnected}
+                  isFbPageConnected={isFbPageConnected}
+                  isLoadingFbAccount={isLoadingFbAccount}
+                  fbAccountError={fbAccountError}
+                  connectFacebook={connectFacebook}
+                  connectFbPageById={connectFbPageById}
+                  isConnectingFbPage={isConnectingFbPage}
+                  fbPageConnectError={fbPageConnectError}
+                  setFbPageConnectError={setFbPageConnectError}
+                  switchPage={switchFbPage}
+                  disconnectFacebook={disconnectFacebook}
+                  refreshFbAccount={refreshFbAccount}
+                  fbSettings={fbSettings}
+                  updateFbSettings={updateFbSettings}
+                  renderFbTemplate={renderFbTemplate}
+                  publishToFacebookPipeline={publishToFacebookPipeline}
+                  isPublishingFb={isPublishingFb}
+                  publishFbProgress={publishFbProgress}
+                  publishFbStage={publishFbStage}
+                  publishFbError={publishFbError}
+                  lastPublishedFbPost={lastPublishedFbPost}
+                  activeTab={activeEditorTab}
+                  onTabChange={setActiveEditorTab}
                 />
               </div>
             </div>
@@ -924,6 +1084,16 @@ export default function App() {
                 isAuthenticated={isUserLoggedIn}
                 onOpenAuth={openAuthModal}
                 connectYouTube={connectYouTube}
+                // Facebook Reels upload integration
+                isFbConnected={isFbConnected}
+                fbAccount={fbAccount}
+                fbSettings={fbSettings}
+                onPublishFbClip={handlePublishFbClip}
+                isPublishingFb={isPublishingFb}
+                fbPublishProgress={publishFbProgress}
+                fbPublishStage={publishFbStage}
+                fbPublishingClipId={fbPublishingClipId}
+                fbPublishedMap={fbPublishedMap}
               />
 
               <GeneratedClips
@@ -940,6 +1110,17 @@ export default function App() {
                 onRetryUpload={handleRetryUpload}
                 isConnected={isConnected}
                 ytSettings={ytSettings}
+                // Facebook Reels upload integration
+                isFbConnected={isFbConnected}
+                fbAccount={fbAccount}
+                fbSettings={fbSettings}
+                onPublishFbClip={handlePublishFbClip}
+                onBatchPublishFb={handleBatchPublishFb}
+                isPublishingFb={isPublishingFb}
+                fbPublishProgress={publishFbProgress}
+                fbPublishStage={publishFbStage}
+                fbPublishingClipId={fbPublishingClipId}
+                fbPublishedMap={fbPublishedMap}
               />
 
               {/* YouTube Upload History (only shown when there are history records) */}
@@ -1030,6 +1211,7 @@ export default function App() {
         onDeleteTemplate={removeTemplate}
         currentTextSettings={textSettings}
         currentYtSettings={ytSettings}
+        currentFbSettings={fbSettings}
         currentLogoSettings={logoSettings}
       />
     </div>

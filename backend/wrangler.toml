@@ -13,6 +13,11 @@ migrations_dir = "migrations"
 GOOGLE_CLIENT_ID = "602559584843-l6c118m3cg9ff91u79p3r5gfhjkkadie.apps.googleusercontent.com"
 APP_URL = "https://local-video-clip-editor-worker.varmaabhishek97.workers.dev"
 FRONTEND_URL = "https://local-video-clip-editor.varmaabhishek97.workers.dev"
+FACEBOOK_APP_ID = "1837775677343013"
+META_GRAPH_API_VERSION = "v26.0"
+B2_BUCKET_NAME = "videoclip-reels-3c4861c9d0db"
+B2_BUCKET_ID = "53bc741806513c89ad000d1b"
+
 
 [dev]
 port = 8787

@@ -13,7 +13,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Youtube, CheckCircle2, XCircle, Link, Unlink, Settings2,
   Clock, Calendar, Tag, Eye, Zap, Info, RefreshCw,
-  Sparkles, Lock, Sliders, ChevronDown, Film, Copy
+  Sparkles, Lock, Sliders, ChevronDown, Film, Copy, Share2, Video
 } from 'lucide-react';
 
 import {
@@ -63,7 +63,8 @@ export default function YouTubePanel({
   pipelineStartTime,
   setPipelineStartTime,
   customParts = [],
-  textSettings = {}
+  textSettings = {},
+  onSwitchToPlatform
 }) {
   const [tagInput, setTagInput] = useState('');
   const scheduleMode = ytSettings?.yt_default_upload || 'manual';
@@ -252,7 +253,7 @@ export default function YouTubePanel({
   }
 
   return (
-    <div className="space-y-4 sm:space-y-5">
+    <div className="space-y-4 sm:space-y-5 animate-fadeIn">
       {/* ── 1. CONNECTION STATUS ─────────────────────────────────── */}
       <div className={`border rounded-2xl p-3.5 sm:p-4 space-y-3 shadow-lg ${
         isConnected
@@ -330,6 +331,54 @@ export default function YouTubePanel({
       {/* Only show full pipeline and settings when connected */}
       {isConnected && (
         <>
+          {/* ── CONTENT TYPE SELECTOR ── */}
+          <div className="space-y-2">
+            <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">
+              Choose YouTube Content Type
+            </label>
+            <div className="grid grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                onClick={() => updateYtSettings({ yt_content_type: 'shorts' })}
+                className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex items-center space-x-3 ${
+                  (ytSettings?.yt_content_type || 'shorts') === 'shorts'
+                    ? 'bg-red-500/15 border-red-500 text-white shadow-md shadow-red-500/10'
+                    : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                }`}
+              >
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                  (ytSettings?.yt_content_type || 'shorts') === 'shorts' ? 'bg-red-500 text-white' : 'bg-slate-800 text-slate-400'
+                }`}>
+                  <Film className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-xs font-bold block truncate">YouTube Shorts</span>
+                  <span className="text-[10px] text-slate-400 block truncate">9:16 Vertical Short-Form</span>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => updateYtSettings({ yt_content_type: 'video' })}
+                className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex items-center space-x-3 ${
+                  ytSettings?.yt_content_type === 'video'
+                    ? 'bg-red-500/15 border-red-500 text-white shadow-md shadow-red-500/10'
+                    : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                }`}
+              >
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                  ytSettings?.yt_content_type === 'video' ? 'bg-red-500 text-white' : 'bg-slate-800 text-slate-400'
+                }`}>
+                  <Video className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-xs font-bold block truncate">Standard Video</span>
+                  <span className="text-[10px] text-slate-400 block truncate">Standard Landscape Feed</span>
+                </div>
+              </button>
+            </div>
+          </div>
+
           {/* ── 2. AUTOMATED SCHEDULE PIPELINE ───────────────────── */}
           <div className="space-y-3.5 bg-slate-950/80 border border-purple-500/30 rounded-2xl p-4 shadow-lg">
             <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-800">
@@ -485,6 +534,18 @@ export default function YouTubePanel({
                     ))}
                   </div>
                 </div>
+              </div>
+            )}
+
+            {scheduleMode === 'manual' && (
+              <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 space-y-1.5 animate-fadeIn">
+                <div className="flex items-center space-x-2 text-amber-400">
+                  <Info className="w-4 h-4 shrink-0" />
+                  <span className="text-xs font-bold">Manual Upload Mode Active</span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Exported clips will <strong className="text-slate-300">not</strong> be automatically queued or scheduled for upload. You can download clips, preview them, or manually upload/schedule them with custom titles and release dates from the <strong className="text-slate-300">Generated Clips</strong> panel.
+                </p>
               </div>
             )}
           </div>

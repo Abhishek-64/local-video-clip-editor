@@ -738,7 +738,8 @@ export default function VideoPreview({
 
   // Compute Logo overlay position style
   const getLogoOverlayStyle = () => {
-    if (!logoSettings || !logoSettings.url) return {};
+    const logoSrc = logoSettings?.dataUrl || logoSettings?.url;
+    if (!logoSettings || !logoSrc) return {};
 
     const previewLogoWidth = previewMode === 'vertical'
       ? Math.max(20, Math.round((logoSettings.size || 60) * (236 / 540)))
@@ -1011,7 +1012,7 @@ export default function VideoPreview({
               })}
 
               {/* ── DRAGGABLE LOGO OVERLAY ── */}
-              {logoSettings?.enabled && logoSettings?.url && (
+              {logoSettings?.enabled && (logoSettings?.dataUrl || logoSettings?.url) && (
                 <div
                   style={getLogoOverlayStyle()}
                   onMouseDown={handleLogoMouseDown}
@@ -1023,7 +1024,17 @@ export default function VideoPreview({
                   }`}
                   title="Click and drag anywhere on screen to reposition logo"
                 >
-                  <img src={logoSettings.url} alt="Logo" className="w-full h-auto object-contain pointer-events-none" />
+                  <img
+                    src={logoSettings.dataUrl || logoSettings.url}
+                    alt=""
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                      if (e.currentTarget.parentElement) {
+                        e.currentTarget.parentElement.style.display = 'none';
+                      }
+                    }}
+                    className="w-full h-auto object-contain pointer-events-none"
+                  />
 
                   <div className="absolute -top-5 left-1/2 -translate-x-1/2 opacity-0 group-hover/logo:opacity-100 transition-opacity bg-black/80 text-emerald-300 text-[9px] px-2 py-0.5 rounded-full border border-emerald-500/40 pointer-events-none flex items-center space-x-1 font-mono whitespace-nowrap shadow-lg">
                     <GripVertical className="w-2.5 h-2.5" />
@@ -1169,14 +1180,24 @@ export default function VideoPreview({
               })}
 
               {/* Logo in Framing view */}
-              {logoSettings?.enabled && logoSettings?.url && (
+              {logoSettings?.enabled && (logoSettings?.dataUrl || logoSettings?.url) && (
                 <div
                   style={getLogoOverlayStyle()}
                   onMouseDown={handleLogoMouseDown}
                   onTouchStart={handleLogoTouchStart}
                   className="hover:ring-1 hover:ring-emerald-400/60 rounded touch-manipulation"
                 >
-                  <img src={logoSettings.url} alt="Logo" className="w-full h-auto object-contain pointer-events-none" />
+                  <img
+                    src={logoSettings.dataUrl || logoSettings.url}
+                    alt=""
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                      if (e.currentTarget.parentElement) {
+                        e.currentTarget.parentElement.style.display = 'none';
+                      }
+                    }}
+                    className="w-full h-auto object-contain pointer-events-none"
+                  />
                 </div>
               )}
 

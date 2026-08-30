@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   PlayCircle, Download, CheckCircle2, Clock, XCircle, AlertCircle, Trash2,
   StopCircle, RefreshCw, Hash, Sliders, Youtube, ExternalLink, Upload,
   Calendar, RotateCcw, Sparkles, Send, Check, ChevronDown, ChevronUp, Edit3,
-  Globe, Lock, ShieldCheck, Zap
+  Globe, Lock, ShieldCheck, Zap, Share2
 } from 'lucide-react';
 import { formatTime } from '../utils/time';
 import {
@@ -33,7 +33,17 @@ export default function ProcessingQueue({
   ytSettings = {},
   isAuthenticated = false,
   onOpenAuth,
-  connectYouTube
+  connectYouTube,
+  // Facebook upload state
+  isFbConnected = false,
+  fbAccount = null,
+  fbSettings = {},
+  onPublishFbClip,
+  isPublishingFb = false,
+  fbPublishProgress = 0,
+  fbPublishStage = '',
+  fbPublishingClipId = null,
+  fbPublishedMap = {}
 }) {
   // Option: 'all' | 'first-n' | 'range'
   const [generateOption, setGenerateOption] = useState('all');
@@ -41,11 +51,21 @@ export default function ProcessingQueue({
   const [rangeStart, setRangeStart] = useState(1);
   const [rangeEnd, setRangeEnd] = useState(Math.min(3, totalPossibleParts));
 
+  // Target platform checkboxes for generation (defaults to true ONLY if auto-schedule mode is active in settings)
+  const isAutoModeActive = isConnected && ytSettings?.yt_default_upload === 'auto';
+  const [autoUploadYouTube, setAutoUploadYouTube] = useState(() => isAutoModeActive);
+  const [autoPublishFacebook, setAutoPublishFacebook] = useState(isFbConnected);
+
+  // Sync YouTube checkbox when YouTube settings or connection changes
+  useEffect(() => {
+    setAutoUploadYouTube(Boolean(isConnected && ytSettings?.yt_default_upload === 'auto'));
+  }, [isConnected, ytSettings?.yt_default_upload]);
+
   // Modal for editing an individual clip's scheduled publish time
   const [editingJob, setEditingJob] = useState(null);
   const [editScheduledTime, setEditScheduledTime] = useState('');
 
-  const isAutoUploadActive = isConnected && ytSettings?.yt_default_upload === 'auto';
+  const isAutoUploadActive = Boolean(isConnected && autoUploadYouTube);
   const scheduleInterval = ytSettings?.schedule_interval || '1hour';
 
   const handleTriggerGenerate = () => {
@@ -55,6 +75,7 @@ export default function ProcessingQueue({
       start: rangeStart,
       end: rangeEnd,
       autoSchedule: isAutoUploadActive,
+      autoPublishFacebook: autoPublishFacebook && isFbConnected,
       scheduleStartTime: pipelineStartTime,
       scheduleInterval: scheduleInterval
     });
@@ -81,6 +102,32 @@ export default function ProcessingQueue({
 
   const getStatusBadge = (status, progress, job) => {
     const uploadState = uploadJobs[job?.id];
+    const fbPublishedUrl = fbPublishedMap[job?.id];
+    const isCurrentlyPublishingFb = isPublishingFb && fbPublishingClipId === job?.id;
+
+    if (isCurrentlyPublishingFb) {
+      return (
+        <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-blue-500/20 text-blue-300 border border-blue-500/30 animate-pulse shrink-0">
+          <RefreshCw className="w-3 h-3 mr-1 animate-spin" />
+          FB Reels Ingesting...
+        </span>
+      );
+    }
+
+    if (fbPublishedUrl) {
+      return (
+        <a
+          href={fbPublishedUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-blue-500/20 text-blue-300 border border-blue-500/30 hover:bg-blue-500/30 transition-colors shrink-0"
+        >
+          <Share2 className="w-3 h-3 mr-1 text-blue-400" />
+          <span>Facebook Reel ↗</span>
+        </a>
+      );
+    }
 
     if (uploadState) {
       switch (uploadState.status) {
@@ -159,24 +206,18 @@ export default function ProcessingQueue({
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 sm:p-5 shadow-lg space-y-4">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-2.5 pb-3 border-b border-slate-800">
+      <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
         <div>
-          <h3 className="font-semibold text-xs sm:text-sm text-white flex items-center space-x-2">
-            <span>Batch Processing Queue</span>
+          <h3 className="text-base sm:text-lg font-bold text-white tracking-tight flex items-center space-x-2">
+            <span>Export &amp; Social Queue</span>
             {queue.length > 0 && (
-              <span className="px-2 py-0.5 text-[10px] bg-orange-500/20 text-orange-300 font-mono rounded-full font-bold border border-orange-500/30">
-                {queue.length} Active Job{queue.length > 1 ? 's' : ''}
-              </span>
-            )}
-            {isAutoUploadActive && (
-              <span className="px-2 py-0.5 text-[10px] bg-purple-500/20 text-purple-300 font-mono rounded-full font-bold border border-purple-500/30 flex items-center space-x-1">
-                <Zap className="w-3 h-3 text-purple-400" />
-                <span>YouTube {scheduleInterval} Pipeline</span>
+              <span className="text-xs font-mono font-semibold px-2 py-0.5 bg-orange-500/20 text-orange-400 border border-orange-500/30 rounded-full">
+                {queue.length} {queue.length === 1 ? 'Job' : 'Jobs'}
               </span>
             )}
           </h3>
-          <p className="text-[11px] sm:text-xs text-slate-400">
-            Automate video export and manage rendering queue
+          <p className="text-xs text-slate-400 mt-0.5">
+            Render video cuts in high quality and publish directly to YouTube &amp; Facebook.
           </p>
         </div>
 
@@ -239,8 +280,7 @@ export default function ProcessingQueue({
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-2 border-t border-slate-900">
           {generateOption === 'all' && (
             <span className="text-xs text-slate-400">
-              Will generate all <strong className="text-amber-400 font-mono">{totalPossibleParts}</strong> active clips
-              {isAutoUploadActive ? ` with automated YouTube ${formatIntervalLabel(scheduleInterval)} schedule pipeline` : ''}.
+              Will generate all <strong className="text-amber-400 font-mono">{totalPossibleParts}</strong> active clips.
             </span>
           )}
 
@@ -258,85 +298,111 @@ export default function ProcessingQueue({
                 />
                 <span className="text-xs text-slate-400">of {totalPossibleParts} parts</span>
               </div>
-
-              {/* Quick count chips */}
-              <div className="flex items-center space-x-1">
-                {[1, 2, 3, 5].filter((n) => n <= totalPossibleParts).map((n) => (
-                  <button
-                    key={n}
-                    onClick={() => setFirstNCount(n)}
-                    className={`px-2 py-0.5 text-[11px] rounded border cursor-pointer touch-manipulation ${
-                      firstNCount === n
-                        ? 'bg-orange-500/20 border-orange-500 text-orange-300 font-bold'
-                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    {n}
-                  </button>
-                ))}
-              </div>
             </div>
           )}
 
           {generateOption === 'range' && (
-            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300">
-              <span>From:</span>
-              <input
-                type="number"
-                min="1"
-                max={totalPossibleParts}
-                value={rangeStart}
-                onChange={(e) => setRangeStart(Math.max(1, Math.min(totalPossibleParts, parseInt(e.target.value) || 1)))}
-                className="w-12 bg-slate-900 border border-slate-700 text-white font-mono text-xs px-2 py-1 rounded-lg text-center font-bold focus:border-orange-500 focus:outline-none"
-              />
-              <span>to:</span>
-              <input
-                type="number"
-                min={rangeStart}
-                max={totalPossibleParts}
-                value={rangeEnd}
-                onChange={(e) => setRangeEnd(Math.max(rangeStart, Math.min(totalPossibleParts, parseInt(e.target.value) || rangeStart)))}
-                className="w-12 bg-slate-900 border border-slate-700 text-white font-mono text-xs px-2 py-1 rounded-lg text-center font-bold focus:border-orange-500 focus:outline-none"
-              />
-              <span className="text-slate-400">({Math.max(0, rangeEnd - rangeStart + 1)} parts)</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-slate-300">Parts range:</span>
+              <div className="flex items-center space-x-1.5 font-mono text-xs">
+                <input
+                  type="number"
+                  min="1"
+                  max={totalPossibleParts}
+                  value={rangeStart}
+                  onChange={(e) => setRangeStart(Math.max(1, Math.min(totalPossibleParts, parseInt(e.target.value) || 1)))}
+                  className="w-14 bg-slate-900 border border-slate-700 text-white px-2 py-1 rounded-lg text-center font-bold focus:border-orange-500 focus:outline-none"
+                />
+                <span className="text-slate-500">&rarr;</span>
+                <input
+                  type="number"
+                  min={rangeStart}
+                  max={totalPossibleParts}
+                  value={rangeEnd}
+                  onChange={(e) => setRangeEnd(Math.max(rangeStart, Math.min(totalPossibleParts, parseInt(e.target.value) || totalPossibleParts)))}
+                  className="w-14 bg-slate-900 border border-slate-700 text-white px-2 py-1 rounded-lg text-center font-bold focus:border-orange-500 focus:outline-none"
+                />
+                <span className="text-xs text-slate-400 font-sans">of {totalPossibleParts}</span>
+              </div>
             </div>
           )}
+        </div>
 
-          {/* Big Action Button */}
+        {/* Multi-Platform Publish Target Options */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-900">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+              Upload Platforms:
+            </span>
+
+            {/* YouTube Checkbox */}
+            <label className={`inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg border text-xs cursor-pointer select-none transition-all ${
+              autoUploadYouTube && isConnected
+                ? 'bg-red-500/15 border-red-500/40 text-red-300 font-bold'
+                : 'bg-slate-900 border-slate-800 text-slate-400'
+            }`}>
+              <input
+                type="checkbox"
+                checked={autoUploadYouTube && isConnected}
+                disabled={!isConnected}
+                onChange={(e) => setAutoUploadYouTube(e.target.checked)}
+                className="rounded bg-slate-950 border-slate-700 text-red-500"
+              />
+              <Youtube className="w-3.5 h-3.5 text-red-500" />
+              <span>
+                {isConnected
+                  ? (autoUploadYouTube ? '⚡ Auto-Schedule YouTube' : 'YouTube (Manual Mode)')
+                  : 'YouTube (Disconnected)'}
+              </span>
+            </label>
+
+            {/* Facebook Checkbox */}
+            <label className={`inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg border text-xs cursor-pointer select-none transition-all ${
+              autoPublishFacebook && isFbConnected
+                ? 'bg-blue-500/15 border-blue-500/40 text-blue-300 font-bold'
+                : 'bg-slate-900 border-slate-800 text-slate-400'
+            }`}>
+              <input
+                type="checkbox"
+                checked={autoPublishFacebook && isFbConnected}
+                disabled={!isFbConnected}
+                onChange={(e) => setAutoPublishFacebook(e.target.checked)}
+                className="rounded bg-slate-950 border-slate-700 text-blue-400"
+              />
+              <Share2 className="w-3.5 h-3.5 text-blue-400" />
+              <span>Facebook Reels {isFbConnected ? '✓' : '(Disconnected)'}</span>
+            </label>
+          </div>
+
           <button
             onClick={handleTriggerGenerate}
             disabled={isProcessing}
-            className="w-full sm:w-auto sm:ml-auto px-5 py-3 sm:py-2.5 text-xs font-bold uppercase tracking-wider text-white bg-gradient-to-r from-orange-500 via-amber-500 to-orange-500 hover:from-orange-600 hover:to-amber-600 active:scale-98 rounded-xl shadow-lg shadow-orange-500/20 transition-all cursor-pointer flex items-center justify-center space-x-2 disabled:opacity-50 touch-manipulation"
+            className="w-full sm:w-auto px-5 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 active:scale-98 disabled:opacity-50 text-white font-bold text-xs sm:text-sm rounded-xl shadow-lg shadow-orange-500/25 flex items-center justify-center space-x-2 transition-all cursor-pointer touch-manipulation"
           >
-            <PlayCircle className="w-4 h-4 shrink-0" />
-            <span>
-              {generateOption === 'all'
-                ? `Generate All (${totalPossibleParts} Clips)`
-                : generateOption === 'first-n'
-                ? `Generate First ${firstNCount} Clip(s)`
-                : `Generate Parts ${rangeStart}–${rangeEnd}`}
-            </span>
+            {isProcessing ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                <span>Processing Queue...</span>
+              </>
+            ) : (
+              <>
+                <PlayCircle className="w-4 h-4" />
+                <span>Generate Clips</span>
+              </>
+            )}
           </button>
         </div>
       </div>
 
-      {/* Queue List Table */}
-      {queue.length === 0 ? (
-        <div className="text-center py-6 bg-slate-950/40 rounded-xl border border-slate-800/80">
-          <Clock className="w-6 h-6 sm:w-7 sm:h-7 text-slate-600 mx-auto mb-1.5" />
-          <p className="text-xs font-medium text-slate-400">No clips currently running</p>
-          <p className="text-[11px] text-slate-500 mt-0.5">
-            Click the orange button above to queue and export clips
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+      {/* Queue Jobs List */}
+      {queue.length > 0 && (
+        <div className="space-y-2.5 max-h-[60vh] overflow-y-auto pr-1">
           {queue.map((job) => {
             const uploadState = uploadJobs[job.id];
-            const isUploading = uploadState?.status === 'uploading' || uploadState?.status === 'queued';
+            const isUploading = uploadState?.status === 'uploading';
+            const scheduledAt = job.scheduledAt || uploadState?.scheduledAt;
             const uploadFailed = uploadState?.status === 'upload_failed';
-            const uploaded = uploadState?.status === 'uploaded' || uploadState?.status === 'scheduled';
-            const scheduledAt = uploadState?.scheduledAt || job.scheduledAt;
+            const isFbPublishing = isPublishingFb && fbPublishingClipId === job.id;
 
             return (
               <div
@@ -371,17 +437,19 @@ export default function ProcessingQueue({
                     <span>{formatTime(job.duration)}</span>
                   </div>
 
-                  {/* Progress Bar for Rendering or Uploading */}
-                  {(job.status === 'processing' || isUploading) && (
+                  {/* Progress Bar for Rendering, YouTube, or Facebook */}
+                  {(job.status === 'processing' || isUploading || isFbPublishing) && (
                     <div className="w-full bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
                       <div
                         className={`h-full transition-all duration-300 ${
-                          isUploading
-                            ? 'bg-gradient-to-r from-blue-500 to-indigo-400'
+                          isFbPublishing
+                            ? 'bg-gradient-to-r from-blue-500 to-sky-400'
+                            : isUploading
+                            ? 'bg-gradient-to-r from-red-500 to-rose-400'
                             : 'bg-gradient-to-r from-amber-500 to-orange-400'
                         }`}
                         style={{
-                          width: `${isUploading ? (uploadState.progress || 0) : (job.progress || 0)}%`
+                          width: `${isFbPublishing ? (fbPublishProgress || 50) : isUploading ? (uploadState.progress || 0) : (job.progress || 0)}%`
                         }}
                       />
                     </div>
@@ -393,7 +461,7 @@ export default function ProcessingQueue({
                 </div>
 
                 {/* Actions */}
-                <div className="flex items-center space-x-1.5 shrink-0">
+                <div className="flex items-center space-x-1.5 shrink-0 flex-wrap gap-1">
                   {job.status === 'waiting' && (
                     <button
                       onClick={() => onCancelJob(job.id)}
@@ -433,13 +501,25 @@ export default function ProcessingQueue({
                   )}
 
                   {/* YouTube Upload Action */}
-                  {job.status === 'completed' && isConnected && !uploadState && (
+                  {job.status === 'completed' && isConnected && !uploadState && onUploadClip && (
                     <button
                       onClick={() => onUploadClip(job)}
                       className="px-2.5 py-1 bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 text-red-300 rounded-lg text-xs font-semibold flex items-center space-x-1 transition-colors cursor-pointer touch-manipulation"
                     >
                       <Youtube className="w-3.5 h-3.5" />
-                      <span>Upload</span>
+                      <span>YouTube</span>
+                    </button>
+                  )}
+
+                  {/* Facebook Reels Upload Action */}
+                  {job.status === 'completed' && isFbConnected && onPublishFbClip && (
+                    <button
+                      onClick={() => onPublishFbClip(job)}
+                      disabled={isPublishingFb}
+                      className="px-2.5 py-1 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-300 rounded-lg text-xs font-semibold flex items-center space-x-1 transition-colors cursor-pointer touch-manipulation disabled:opacity-50"
+                    >
+                      <Share2 className="w-3.5 h-3.5" />
+                      <span>Facebook</span>
                     </button>
                   )}
 
@@ -459,15 +539,15 @@ export default function ProcessingQueue({
         </div>
       )}
 
-      {/* Edit Individual Clip Schedule Modal */}
+      {/* Edit Scheduled Publish Time Modal */}
       {editingJob && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-sm w-full p-4 space-y-3.5 shadow-2xl">
-            <div className="flex items-center justify-between">
-              <h4 className="text-xs font-bold text-white flex items-center space-x-1.5">
-                <Calendar className="w-4 h-4 text-purple-400" />
-                <span>Edit Scheduled Publish Time</span>
-              </h4>
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl animate-scaleUp">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center space-x-2 text-purple-400">
+                <Calendar className="w-5 h-5" />
+                <h4 className="font-bold text-sm text-white">Adjust Scheduled Release Time</h4>
+              </div>
               <button
                 onClick={() => setEditingJob(null)}
                 className="text-slate-400 hover:text-white cursor-pointer"
@@ -476,27 +556,29 @@ export default function ProcessingQueue({
               </button>
             </div>
 
-            <p className="text-[11px] text-slate-400">
-              Set the exact date and time this clip should automatically publish on YouTube:
-            </p>
-
-            <input
-              type="datetime-local"
-              value={editScheduledTime}
-              onChange={(e) => setEditScheduledTime(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 text-white text-xs font-mono px-3 py-2 rounded-xl focus:border-purple-500 focus:outline-none"
-            />
+            <div className="space-y-2">
+              <p className="text-xs text-slate-300 font-semibold">{editingJob.name}</p>
+              <p className="text-xs text-slate-400">
+                Choose the exact date and local time when this clip will automatically go public on YouTube.
+              </p>
+              <input
+                type="datetime-local"
+                value={editScheduledTime}
+                onChange={(e) => setEditScheduledTime(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700 focus:border-purple-500 text-white text-xs px-3 py-2 rounded-xl outline-none font-mono mt-2"
+              />
+            </div>
 
             <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-800">
               <button
                 onClick={() => setEditingJob(null)}
-                className="px-3 py-1.5 text-xs text-slate-400 hover:text-white rounded-lg cursor-pointer"
+                className="px-3.5 py-1.5 text-xs text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-xl transition-colors cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSaveIndividualSchedule}
-                className="px-3.5 py-1.5 text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white rounded-lg shadow-md cursor-pointer"
+                className="px-4 py-1.5 text-xs font-bold text-white bg-purple-600 hover:bg-purple-500 rounded-xl transition-all shadow-md shadow-purple-600/20 cursor-pointer"
               >
                 Save Schedule
               </button>

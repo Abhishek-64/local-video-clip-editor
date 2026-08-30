@@ -18,24 +18,29 @@ export default function LogoEditor({
     const files = e.target.files;
     if (files && files.length > 0) {
       const file = files[0];
-      const url = URL.createObjectURL(file);
-      onChange({
-        ...logoSettings,
-        file,
-        url,
-        enabled: true
-      });
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const dataUrl = event.target.result;
+        onChange({
+          ...logoSettings,
+          file,
+          fileName: file.name,
+          url: dataUrl,
+          dataUrl: dataUrl,
+          enabled: true
+        });
+      };
+      reader.readAsDataURL(file);
     }
   };
 
   const clearLogo = () => {
-    if (logoSettings.url) {
-      URL.revokeObjectURL(logoSettings.url);
-    }
     onChange({
       ...logoSettings,
       file: null,
+      fileName: null,
       url: null,
+      dataUrl: null,
       enabled: false
     });
   };

@@ -287,8 +287,10 @@ export function useUploadQueue({
     // Filter completed clips that haven't been queued for upload yet
     const newClips = completedClips.filter(clip => {
       if (processedExportIdsRef.current.has(clip.id) || !clip.blob) return false;
-      // Auto upload if clip has autoUpload enabled, scheduledAt set, or ytSettings.yt_default_upload === 'auto'
-      const shouldAutoUpload = clip.autoUpload === true || (clip.autoUpload !== false && (clip.scheduledAt || ytSettings.yt_default_upload === 'auto'));
+      // Auto upload ONLY if explicitly enabled on the clip (clip.autoUpload === true)
+      // or if global YouTube mode is set to 'auto' and clip.autoUpload is not explicitly false
+      const isAutoMode = ytSettings?.yt_default_upload === 'auto';
+      const shouldAutoUpload = clip.autoUpload === true || (isAutoMode && clip.autoUpload !== false);
       return shouldAutoUpload;
     });
 
@@ -314,7 +316,7 @@ export function useUploadQueue({
     if (newClips.length > 0) {
       processNextUpload();
     }
-  }, [completedClips, apiAvailable, isConnected, ytSettings.yt_default_upload, processNextUpload]);
+  }, [completedClips, apiAvailable, isConnected, ytSettings?.yt_default_upload, processNextUpload]);
 
   // ── Manual upload trigger ─────────────────────────────────────────────────────
 

@@ -1,5 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ShieldCheck, Film, Sparkles, User, LogOut, Youtube, ChevronDown, CheckCircle2, Database, LayoutTemplate, Bookmark } from 'lucide-react';
+import {
+  ShieldCheck, Film, Sparkles, User, LogOut, Youtube, ChevronDown,
+  CheckCircle2, Database, LayoutTemplate, Bookmark, Share2
+} from 'lucide-react';
 
 export default function Header({
   onReset,
@@ -11,7 +14,12 @@ export default function Header({
   onOpenStorage,
   onOpenTemplates,
   templatesCount = 0,
-  ytAccount
+  ytAccount,
+  fbAccount,
+  isYtConnected = false,
+  isFbConnected = false,
+  activeTab = 'split-cut',
+  onNavigateTab
 }) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
@@ -47,8 +55,8 @@ export default function Header({
           </div>
         </div>
 
-        {/* Header Right Actions */}
-        <div className="flex items-center space-x-1.5 sm:space-x-3 shrink-0">
+        {/* Header Center / Right Actions */}
+        <div className="flex items-center space-x-1.5 sm:space-x-2.5 shrink-0">
           {/* Templates / Presets Button */}
           <button
             onClick={onOpenTemplates}
@@ -56,7 +64,7 @@ export default function Header({
             title="Manage saved video section templates"
           >
             <LayoutTemplate className="w-3.5 h-3.5 text-orange-400" />
-            <span className="hidden sm:inline">Templates</span>
+            <span className="hidden md:inline">Templates</span>
             {templatesCount > 0 && (
               <span className="px-1.5 py-0.2 bg-orange-500/30 text-orange-200 rounded-full text-[10px] font-mono">
                 {templatesCount}
@@ -126,6 +134,31 @@ export default function Header({
                           <p className="text-[10px] text-emerald-400 flex items-center space-x-1">
                             <CheckCircle2 className="w-2.5 h-2.5 inline" />
                             <span>YouTube Connected</span>
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {fbAccount && (
+                    <div className="px-3.5 py-2.5 bg-slate-950/40 border-b border-slate-800/60">
+                      <div className="flex items-center space-x-2">
+                        {fbAccount.page_thumbnail ? (
+                          <img
+                            src={fbAccount.page_thumbnail}
+                            alt=""
+                            className="w-6 h-6 rounded-lg border border-slate-700 shrink-0"
+                          />
+                        ) : (
+                          <Share2 className="w-5 h-5 text-blue-400 shrink-0" />
+                        )}
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-semibold text-slate-200 truncate">
+                            {fbAccount.page_name}
+                          </p>
+                          <p className="text-[10px] text-blue-400 flex items-center space-x-1">
+                            <CheckCircle2 className="w-2.5 h-2.5 inline" />
+                            <span>Facebook Connected</span>
                           </p>
                         </div>
                       </div>

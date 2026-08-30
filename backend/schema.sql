@@ -103,3 +103,57 @@ CREATE TABLE IF NOT EXISTS templates (
 
 CREATE INDEX IF NOT EXISTS idx_templates_user_id ON templates(user_id);
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 6. Facebook Accounts Table (OAuth 2.0 Credentials & Page Metadata)
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS facebook_accounts (
+  id                TEXT PRIMARY KEY,
+  user_id           TEXT NOT NULL,
+  fb_user_id        TEXT,
+  fb_user_name      TEXT,
+  page_id           TEXT NOT NULL,
+  page_name         TEXT NOT NULL,
+  page_category     TEXT,
+  page_thumbnail    TEXT,
+  page_access_token TEXT NOT NULL,
+  user_access_token TEXT,
+  available_pages   TEXT,
+  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_facebook_accounts_user_id ON facebook_accounts(user_id);
+CREATE INDEX IF NOT EXISTS idx_facebook_accounts_page_id ON facebook_accounts(page_id);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 7. Facebook Upload Jobs Table (Reels & Page Video Publishing Logs)
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS facebook_upload_jobs (
+  id                   TEXT PRIMARY KEY,
+  user_id              TEXT NOT NULL,
+  facebook_account_id  TEXT,
+  page_id              TEXT NOT NULL,
+  content_type         TEXT NOT NULL DEFAULT 'reel',
+  title                TEXT,
+  caption              TEXT,
+  description          TEXT,
+  hashtags             TEXT,
+  scheduled_at         TEXT,
+  status               TEXT NOT NULL DEFAULT 'pending',
+  b2_file_id           TEXT,
+  b2_file_name         TEXT,
+  facebook_video_id    TEXT,
+  facebook_post_url    TEXT,
+  error_message        TEXT,
+  created_at           TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at           TEXT NOT NULL DEFAULT (datetime('now')),
+  published_at         TEXT,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (facebook_account_id) REFERENCES facebook_accounts(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_facebook_upload_jobs_user_id ON facebook_upload_jobs(user_id);
+CREATE INDEX IF NOT EXISTS idx_facebook_upload_jobs_status ON facebook_upload_jobs(status);
+
+

@@ -336,14 +336,15 @@ export async function createTemplate(db, userId, data) {
   const description = data.description ? data.description.trim() : null;
   const textData = typeof data.text_data === 'object' ? JSON.stringify(data.text_data) : (data.text_data || null);
   const youtubeData = typeof data.youtube_data === 'object' ? JSON.stringify(data.youtube_data) : (data.youtube_data || null);
+  const facebookData = typeof data.facebook_data === 'object' ? JSON.stringify(data.facebook_data) : (data.facebook_data || null);
   const logoData = typeof data.logo_data === 'object' ? JSON.stringify(data.logo_data) : (data.logo_data || null);
 
   await db
     .prepare(`
-      INSERT INTO templates (id, user_id, name, description, text_data, youtube_data, logo_data, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      INSERT INTO templates (id, user_id, name, description, text_data, youtube_data, facebook_data, logo_data, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
     `)
-    .bind(id, userId, name, description, textData, youtubeData, logoData)
+    .bind(id, userId, name, description, textData, youtubeData, facebookData, logoData)
     .run();
 
   return {
@@ -353,6 +354,7 @@ export async function createTemplate(db, userId, data) {
     description,
     text_data: textData,
     youtube_data: youtubeData,
+    facebook_data: facebookData,
     logo_data: logoData
   };
 }
@@ -369,6 +371,9 @@ export async function updateTemplate(db, userId, templateId, data) {
   const youtubeData = data.youtube_data !== undefined
     ? (typeof data.youtube_data === 'object' ? JSON.stringify(data.youtube_data) : data.youtube_data)
     : existing.youtube_data;
+  const facebookData = data.facebook_data !== undefined
+    ? (typeof data.facebook_data === 'object' ? JSON.stringify(data.facebook_data) : data.facebook_data)
+    : existing.facebook_data;
   const logoData = data.logo_data !== undefined
     ? (typeof data.logo_data === 'object' ? JSON.stringify(data.logo_data) : data.logo_data)
     : existing.logo_data;
@@ -376,10 +381,10 @@ export async function updateTemplate(db, userId, templateId, data) {
   await db
     .prepare(`
       UPDATE templates
-      SET name = ?, description = ?, text_data = ?, youtube_data = ?, logo_data = ?, updated_at = datetime('now')
+      SET name = ?, description = ?, text_data = ?, youtube_data = ?, facebook_data = ?, logo_data = ?, updated_at = datetime('now')
       WHERE id = ? AND user_id = ?
     `)
-    .bind(name, description, textData, youtubeData, logoData, templateId, userId)
+    .bind(name, description, textData, youtubeData, facebookData, logoData, templateId, userId)
     .run();
 
   return {
@@ -389,6 +394,7 @@ export async function updateTemplate(db, userId, templateId, data) {
     description,
     text_data: textData,
     youtube_data: youtubeData,
+    facebook_data: facebookData,
     logo_data: logoData
   };
 }
@@ -401,4 +407,168 @@ export async function deleteTemplate(db, userId, templateId) {
     .run();
   return { success: true, deleted: res?.meta?.changes ?? 0 };
 }
+
+// ─── Facebook Account Helpers ─────────────────────────────────────────────────
+
+export async function getFacebookAccount(db, userId) {
+  if (!userId) return null;
+  return db
+    .prepare('SELECT * FROM facebook_accounts WHERE user_id = ? ORDER BY created_at DESC LIMIT 1')
+    .bind(userId)
+    .first();
+}
+
+export async function upsertFacebookAccount(db, userId, data) {
+  const existing = await getFacebookAccount(db, userId);
+  const id = existing?.id || crypto.randomUUID();
+
+  const availablePagesJson = typeof data.available_pages === 'object'
+    ? JSON.stringify(data.available_pages)
+    : (data.available_pages || '[]');
+
+  await db
+    .prepare(`
+      INSERT INTO facebook_accounts
+        (id, user_id, fb_user_id, fb_user_name, page_id, page_name, page_category,
+         page_thumbnail, page_access_token, user_access_token, available_pages, created_at, updated_at)
+      VALUES
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      ON CONFLICT(id) DO UPDATE SET
+        fb_user_id        = excluded.fb_user_id,
+        fb_user_name      = excluded.fb_user_name,
+        page_id           = excluded.page_id,
+        page_name         = excluded.page_name,
+        page_category     = excluded.page_category,
+        page_thumbnail    = excluded.page_thumbnail,
+        page_access_token = excluded.page_access_token,
+        user_access_token = excluded.user_access_token,
+        available_pages   = excluded.available_pages,
+        updated_at        = datetime('now')
+    `)
+    .bind(
+      id,
+      userId,
+      data.fb_user_id || null,
+      data.fb_user_name || null,
+      data.page_id || '',
+      data.page_name || '',
+      data.page_category || null,
+      data.page_thumbnail || null,
+      data.page_access_token || '',
+      data.user_access_token || null,
+      availablePagesJson
+    )
+    .run();
+
+  return getFacebookAccount(db, userId);
+}
+
+export async function updateFacebookPageSelection(db, userId, pageData) {
+  const account = await getFacebookAccount(db, userId);
+  if (!account) return null;
+
+  await db
+    .prepare(`
+      UPDATE facebook_accounts
+      SET page_id = ?, page_name = ?, page_category = ?, page_thumbnail = ?, page_access_token = ?, updated_at = datetime('now')
+      WHERE id = ? AND user_id = ?
+    `)
+    .bind(
+      pageData.page_id,
+      pageData.page_name,
+      pageData.page_category || null,
+      pageData.page_thumbnail || null,
+      pageData.page_access_token,
+      account.id,
+      userId
+    )
+    .run();
+
+  return getFacebookAccount(db, userId);
+}
+
+export async function deleteFacebookAccount(db, userId) {
+  if (!userId) return;
+  await db.prepare('DELETE FROM facebook_accounts WHERE user_id = ?').bind(userId).run();
+}
+
+// ─── Facebook Upload Jobs Helpers ─────────────────────────────────────────────
+
+export async function createFacebookUploadJob(db, data) {
+  const id = data.id || crypto.randomUUID();
+  const hashtagsJson = typeof data.hashtags === 'object' ? JSON.stringify(data.hashtags) : (data.hashtags || '[]');
+
+  await db
+    .prepare(`
+      INSERT INTO facebook_upload_jobs
+        (id, user_id, facebook_account_id, page_id, content_type, title, caption,
+         description, hashtags, scheduled_at, status, b2_file_id, b2_file_name,
+         facebook_video_id, facebook_post_url, error_message, created_at, updated_at)
+      VALUES
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+    `)
+    .bind(
+      id,
+      data.user_id,
+      data.facebook_account_id || null,
+      data.page_id,
+      data.content_type || 'reel',
+      data.title || null,
+      data.caption || null,
+      data.description || null,
+      hashtagsJson,
+      data.scheduled_at || null,
+      data.status || 'pending',
+      data.b2_file_id || null,
+      data.b2_file_name || null,
+      data.facebook_video_id || null,
+      data.facebook_post_url || null,
+      data.error_message || null
+    )
+    .run();
+
+  return getFacebookUploadJob(db, id);
+}
+
+export async function updateFacebookUploadJob(db, jobId, updates) {
+  const allowed = [
+    'status', 'facebook_video_id', 'facebook_post_url', 'error_message',
+    'b2_file_id', 'b2_file_name', 'published_at'
+  ];
+  const setClauses = [];
+  const bindings = [];
+
+  for (const [key, value] of Object.entries(updates)) {
+    if (allowed.includes(key)) {
+      setClauses.push(`${key} = ?`);
+      bindings.push(value);
+    }
+  }
+
+  if (setClauses.length === 0) return;
+
+  setClauses.push("updated_at = datetime('now')");
+  bindings.push(jobId);
+
+  await db
+    .prepare(`UPDATE facebook_upload_jobs SET ${setClauses.join(', ')} WHERE id = ?`)
+    .bind(...bindings)
+    .run();
+
+  return getFacebookUploadJob(db, jobId);
+}
+
+export async function getFacebookUploadJob(db, jobId) {
+  return db.prepare('SELECT * FROM facebook_upload_jobs WHERE id = ?').bind(jobId).first();
+}
+
+export async function getFacebookUploadJobs(db, userId) {
+  if (!userId) return [];
+  const res = await db
+    .prepare('SELECT * FROM facebook_upload_jobs WHERE user_id = ? ORDER BY created_at DESC LIMIT 50')
+    .bind(userId)
+    .all();
+  return res?.results || [];
+}
+
 

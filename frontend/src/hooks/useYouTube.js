@@ -26,6 +26,7 @@ const STORAGE_KEY = 'yt_editor_settings';
 // Default YouTube settings (applied directly to uploads)
 const DEFAULT_YT_SETTINGS = {
   yt_name: 'My Movie',
+  yt_content_type: 'shorts', // 'shorts' | 'video'
   yt_start_part: 1,
   yt_zero_pad: true,
   yt_title_template: '{movie} - Part {part} | #Shorts',

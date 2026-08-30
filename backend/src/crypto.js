@@ -72,3 +72,74 @@ export async function verifyPassword(password, saltHex, storedHashHex) {
   const computedHash = await hashPassword(password, saltHex);
   return computedHash === storedHashHex;
 }
+
+/**
+ * Derive AES-GCM CryptoKey from secret string.
+ */
+async function getCryptoKey(secretKey, usages) {
+  const enc = new TextEncoder();
+  const rawKey = enc.encode(String(secretKey || 'default-secret-key-salt-clip-editor-2026'));
+  const hash = await crypto.subtle.digest('SHA-256', rawKey);
+  return crypto.subtle.importKey(
+    'raw',
+    hash,
+    { name: 'AES-GCM' },
+    false,
+    usages
+  );
+}
+
+/**
+ * Encrypt a sensitive token using AES-GCM (256-bit).
+ * @param {string} plainText - Plain text access token
+ * @param {string} secretKey - Application encryption key
+ * @returns {Promise<string>} Format: "enc:iv_hex:ciphertext_hex"
+ */
+export async function encryptToken(plainText, secretKey) {
+  if (!plainText) return '';
+  const enc = new TextEncoder();
+  const key = await getCryptoKey(secretKey, ['encrypt']);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const cipherBuffer = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    key,
+    enc.encode(plainText)
+  );
+
+  const ivHex = Array.from(iv).map(b => b.toString(16).padStart(2, '0')).join('');
+  const cipherHex = Array.from(new Uint8Array(cipherBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+  return `enc:${ivHex}:${cipherHex}`;
+}
+
+/**
+ * Decrypt an AES-GCM encrypted token.
+ * Gracefully handles legacy plaintext tokens if not prefixed with "enc:".
+ * @param {string} encryptedText - Encrypted token string
+ * @param {string} secretKey - Application encryption key
+ * @returns {Promise<string>} Plain text token
+ */
+export async function decryptToken(encryptedText, secretKey) {
+  if (!encryptedText) return '';
+  if (!encryptedText.startsWith('enc:')) {
+    return encryptedText;
+  }
+  const parts = encryptedText.split(':');
+  if (parts.length !== 3) return '';
+  const [, ivHex, cipherHex] = parts;
+  try {
+    const iv = new Uint8Array(ivHex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
+    const cipherBytes = new Uint8Array(cipherHex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
+
+    const key = await getCryptoKey(secretKey, ['decrypt']);
+    const decryptedBuffer = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv },
+      key,
+      cipherBytes
+    );
+    return new TextDecoder().decode(decryptedBuffer);
+  } catch (err) {
+    console.error('Failed to decrypt token:', err.message);
+    return '';
+  }
+}
+

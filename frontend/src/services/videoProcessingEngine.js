@@ -761,8 +761,8 @@ export async function processVideoClipLegacy({
  * with intelligent word wrapping and auto-fitting to prevent text overflow.
  */
 export function renderTextOverlay(ctx, canvasWidth, canvasHeight, textSettings, partNumber = 1) {
-  const isVertical = canvasHeight > canvasWidth;
-  const scale = canvasWidth / 540;
+  const minDim = Math.min(canvasWidth, canvasHeight);
+  const scale = minDim / 540;
   const maxAllowedTextWidth = canvasWidth * 0.86;
 
   // 1. Primary Title Text Overlay
@@ -941,21 +941,27 @@ export function renderTextOverlay(ctx, canvasWidth, canvasHeight, textSettings, 
 /**
  * Render logo watermark overlay onto canvas with exact preview proportions
  */
-function renderLogoOverlay(ctx, canvasWidth, canvasHeight, logoSettings, logoImage) {
+export function renderLogoOverlay(ctx, canvasWidth, canvasHeight, logoSettings, logoImage) {
+  if (!logoSettings || !logoImage) return;
+
   const {
-    size = 70,
-    opacity = 85,
+    size = 60,
+    opacity = 80,
     position = 'top-right'
   } = logoSettings;
 
   ctx.save();
 
-  const scale = canvasWidth / 540;
-  const scaledWidth = Math.max(30, Math.round((size || 60) * scale));
-  const aspect = (logoImage.naturalHeight || 1) / (logoImage.naturalWidth || 1);
-  const scaledHeight = scaledWidth * aspect;
+  // Consistent isotropic scale based on min dimension so 16:9 landscape doesn't blow up
+  const minDim = Math.min(canvasWidth, canvasHeight);
+  const scale = minDim / 540;
+  const scaledWidth = Math.max(20, Math.round((size || 60) * scale));
+  const naturalW = logoImage.naturalWidth || logoImage.width || 1;
+  const naturalH = logoImage.naturalHeight || logoImage.height || 1;
+  const aspect = naturalH / naturalW;
+  const scaledHeight = Math.round(scaledWidth * aspect);
 
-  const marginX = canvasWidth * 0.05;
+  const marginX = canvasWidth * 0.04;
   const marginY = canvasHeight * 0.04;
 
   let x = canvasWidth - scaledWidth - marginX;
@@ -978,6 +984,9 @@ function renderLogoOverlay(ctx, canvasWidth, canvasHeight, logoSettings, logoIma
   } else if (position === 'bottom-right') {
     x = canvasWidth - scaledWidth - marginX;
     y = canvasHeight - scaledHeight - marginY;
+  } else if (position === 'center') {
+    x = (canvasWidth - scaledWidth) / 2;
+    y = (canvasHeight - scaledHeight) / 2;
   }
 
   ctx.globalAlpha = Math.max(0.05, Math.min(1.0, (opacity || 80) / 100));

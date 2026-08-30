@@ -4,11 +4,29 @@
  * smart auto-ducking, soft-knee peak limiting, and WebCodecs AudioEncoder bridging.
  */
 
+// Stable In-Memory Audio Decode Cache for Batch Queue Performance
+const AUDIO_DECODE_CACHE = new Map();
+const MAX_AUDIO_CACHE_ENTRIES = 3;
+
+function getAudioCacheKey(audioSource) {
+  if (!audioSource) return null;
+  if (typeof audioSource === 'string') return `url:${audioSource}`;
+  if (audioSource?.file instanceof File) return `file:${audioSource.file.name}_${audioSource.file.size}_${audioSource.file.lastModified}`;
+  if (audioSource instanceof File) return `file:${audioSource.name}_${audioSource.size}_${audioSource.lastModified}`;
+  if (audioSource?.name && audioSource?.size) return `file:${audioSource.name}_${audioSource.size}_${audioSource.lastModified || 0}`;
+  return null;
+}
+
 /**
- * Fetch and decode an audio buffer from a URL or Blob
+ * Fetch and decode an audio buffer from a URL or Blob with LRU caching
  */
 export async function fetchAndDecodeAudio(audioSource, audioCtx) {
   if (!audioSource) return null;
+
+  const cacheKey = getAudioCacheKey(audioSource);
+  if (cacheKey && AUDIO_DECODE_CACHE.has(cacheKey)) {
+    return AUDIO_DECODE_CACHE.get(cacheKey);
+  }
 
   try {
     let arrayBuffer;
@@ -28,6 +46,15 @@ export async function fetchAndDecodeAudio(audioSource, audioCtx) {
 
     const ctx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
     const decoded = await ctx.decodeAudioData(arrayBuffer.slice(0));
+
+    if (cacheKey && decoded) {
+      if (AUDIO_DECODE_CACHE.size >= MAX_AUDIO_CACHE_ENTRIES) {
+        const oldestKey = AUDIO_DECODE_CACHE.keys().next().value;
+        AUDIO_DECODE_CACHE.delete(oldestKey);
+      }
+      AUDIO_DECODE_CACHE.set(cacheKey, decoded);
+    }
+
     return decoded;
   } catch (err) {
     console.warn('Audio decoding warning:', err);
@@ -110,22 +137,23 @@ export async function mixAudioTracksOffline({
     const outputLeft = new Float32Array(totalSamples);
     const outputRight = new Float32Array(totalSamples);
 
-    // 4. Voice Activity Profile for Smart Ducking
-    const duckingProfile = new Float32Array(totalSamples);
-    duckingProfile.fill(1.0); // 1.0 = normal volume
+    // 4. Compact Voice Activity Profile for Smart Ducking (Window-Based)
+    const windowSize = Math.round(sampleRate * 0.05); // 50ms windows
+    const numDuckingWindows = Math.ceil(totalSamples / windowSize);
+    const duckingWindowGains = new Float32Array(numDuckingWindows);
+    duckingWindowGains.fill(1.0);
 
     if (voiceoverBuffer && autoDucking) {
       const voiceL = voiceoverBuffer.getChannelData(0);
       const voiceR = voiceoverBuffer.numberOfChannels > 1 ? voiceoverBuffer.getChannelData(1) : voiceL;
       const voiceRatio = voiceoverBuffer.sampleRate / sampleRate;
 
-      // Windowed RMS detector (50ms chunks)
-      const windowSize = Math.round(sampleRate * 0.05);
-      for (let i = 0; i < totalSamples; i += windowSize) {
+      for (let w = 0; w < numDuckingWindows; w++) {
+        const startSample = w * windowSize;
         let sumSq = 0;
         let count = 0;
-        for (let j = 0; j < windowSize && (i + j) < totalSamples; j++) {
-          const srcIdx = Math.round((i + j) * voiceRatio);
+        for (let j = 0; j < windowSize && (startSample + j) < totalSamples; j++) {
+          const srcIdx = Math.round((startSample + j) * voiceRatio);
           if (srcIdx < voiceL.length) {
             const v = (voiceL[srcIdx] + voiceR[srcIdx]) * 0.5;
             sumSq += v * v;
@@ -133,11 +161,7 @@ export async function mixAudioTracksOffline({
           }
         }
         const rms = count > 0 ? Math.sqrt(sumSq / count) : 0;
-        const targetDucking = rms > 0.015 ? 0.35 : 1.0; // Duck to 35% when speech is detected
-
-        for (let j = 0; j < windowSize && (i + j) < totalSamples; j++) {
-          duckingProfile[i + j] = targetDucking;
-        }
+        duckingWindowGains[w] = rms > 0.015 ? 0.35 : 1.0;
       }
     }
 
@@ -156,40 +180,32 @@ export async function mixAudioTracksOffline({
       cumTime += segDur;
     }
 
-    // Helper to map output elapsed time to source video timestamp
-    const mapOutTimeToSourceTime = (outSec) => {
-      const scaledOutSec = outSec * (speed || 1.0);
-      for (const interval of segmentIntervals) {
-        if (scaledOutSec >= interval.cumStart && scaledOutSec < interval.cumEnd) {
-          const offsetInSeg = scaledOutSec - interval.cumStart;
-          return interval.segStart + offsetInSeg;
-        }
-      }
-      // If at or beyond the end, clamp to last segment
-      if (segmentIntervals.length > 0) {
-        const last = segmentIntervals[segmentIntervals.length - 1];
-        return last.segEnd;
-      }
-      return startTime;
-    };
-
-    // 5. Mix Original Video Audio
+    // 5. Mix Original Video Audio by Segment (High Performance)
     if (sourceAudioBuffer && !muteOriginal) {
       const baseGain = (volume / 100);
       const srcL = sourceAudioBuffer.getChannelData(0);
       const srcR = sourceAudioBuffer.numberOfChannels > 1 ? sourceAudioBuffer.getChannelData(1) : srcL;
       const srcSampleRate = sourceAudioBuffer.sampleRate;
+      const effectiveSpeed = speed || 1.0;
 
-      for (let i = 0; i < totalSamples; i++) {
-        const outSec = i / sampleRate;
-        const sourceTime = mapOutTimeToSourceTime(outSec);
-        const srcIdx = Math.round(sourceTime * srcSampleRate);
+      let currentOutSample = 0;
+      for (const seg of segmentIntervals) {
+        const outSamplesInSeg = Math.round((seg.segDur / effectiveSpeed) * sampleRate);
+        const segEndOutSample = Math.min(totalSamples, currentOutSample + outSamplesInSeg);
 
-        if (srcIdx >= 0 && srcIdx < srcL.length) {
-          const duck = autoDucking && voiceoverBuffer ? duckingProfile[i] : 1.0;
-          outputLeft[i] += srcL[srcIdx] * baseGain * duck;
-          outputRight[i] += srcR[srcIdx] * baseGain * duck;
+        for (let i = currentOutSample; i < segEndOutSample; i++) {
+          const timeInSeg = ((i - currentOutSample) / sampleRate) * effectiveSpeed;
+          const sourceTime = seg.segStart + timeInSeg;
+          const srcIdx = Math.round(sourceTime * srcSampleRate);
+
+          if (srcIdx >= 0 && srcIdx < srcL.length) {
+            const wIdx = Math.floor(i / windowSize);
+            const duck = autoDucking && voiceoverBuffer && wIdx < numDuckingWindows ? duckingWindowGains[wIdx] : 1.0;
+            outputLeft[i] += srcL[srcIdx] * baseGain * duck;
+            outputRight[i] += srcR[srcIdx] * baseGain * duck;
+          }
         }
+        currentOutSample = segEndOutSample;
       }
     }
 
@@ -218,9 +234,9 @@ export async function mixAudioTracksOffline({
       const musicLength = mL.length;
 
       for (let i = 0; i < totalSamples; i++) {
-        // Loop index
         const mIdx = Math.round(i * mRatio) % musicLength;
-        const duck = duckingProfile[i];
+        const wIdx = Math.floor(i / windowSize);
+        const duck = autoDucking && voiceoverBuffer && wIdx < numDuckingWindows ? duckingWindowGains[wIdx] : 1.0;
         outputLeft[i] += mL[mIdx] * musicGain * duck;
         outputRight[i] += mR[mIdx] * musicGain * duck;
       }
@@ -228,7 +244,6 @@ export async function mixAudioTracksOffline({
 
     // 8. Soft-Knee Limiter / True-Peak Anti-Clipping
     for (let i = 0; i < totalSamples; i++) {
-      // Soft saturation prevents harsh digital clipping
       outputLeft[i] = Math.tanh(outputLeft[i]);
       outputRight[i] = Math.tanh(outputRight[i]);
     }

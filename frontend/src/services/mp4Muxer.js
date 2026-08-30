@@ -178,41 +178,47 @@ export class MP4Muxer {
       buf.writeFourCC('avc1');
     });
 
-    // 3. Build mdat payload and gather offsets
-    const mdatPayloadBuf = new ByteBuffer(1024 * 1024 * 10);
-    const videoChunkOffsets = [];
-    const audioChunkOffsets = [];
+    // 3. Time-synchronized chunk interleaving & offset calculation (zero duplicate memory)
+    const videoChunkOffsets = new Array(this.videoChunks.length);
+    const audioChunkOffsets = new Array(this.audioChunks.length);
+    const interleavedDataChunks = [];
 
-    // Interleave video and audio chunks for fast streaming
     let vIdx = 0;
     let aIdx = 0;
+    let currentVideoTimeSec = 0;
+    let currentAudioTimeSec = 0;
+    let mdatPayloadSize = 0;
 
     while (vIdx < this.videoChunks.length || (this.hasAudio && aIdx < this.audioChunks.length)) {
-      if (vIdx < this.videoChunks.length) {
-        const vChunk = this.videoChunks[vIdx];
-        videoChunkOffsets.push(mdatPayloadBuf.offset);
-        mdatPayloadBuf.writeBytes(vChunk.data);
-        vIdx++;
-      }
+      const hasMoreVideo = vIdx < this.videoChunks.length;
+      const hasMoreAudio = this.hasAudio && aIdx < this.audioChunks.length;
 
-      if (this.hasAudio && aIdx < this.audioChunks.length) {
+      if (hasMoreVideo && (!hasMoreAudio || currentVideoTimeSec <= currentAudioTimeSec)) {
+        const vChunk = this.videoChunks[vIdx];
+        videoChunkOffsets[vIdx] = mdatPayloadSize;
+        interleavedDataChunks.push(vChunk.data);
+        mdatPayloadSize += vChunk.size;
+        currentVideoTimeSec += vChunk.duration / this.timescale;
+        vIdx++;
+      } else if (hasMoreAudio) {
         const aChunk = this.audioChunks[aIdx];
-        audioChunkOffsets.push(mdatPayloadBuf.offset);
-        mdatPayloadBuf.writeBytes(aChunk.data);
+        audioChunkOffsets[aIdx] = mdatPayloadSize;
+        interleavedDataChunks.push(aChunk.data);
+        mdatPayloadSize += aChunk.size;
+        currentAudioTimeSec += aChunk.duration / this.audioTimescale;
         aIdx++;
       }
     }
 
-    const mdatPayload = mdatPayloadBuf.getUint8Array();
-    const isLargeMdat = mdatPayload.length + 8 > 0xffffffff;
+    const isLargeMdat = (mdatPayloadSize + 8) > 0xffffffff;
 
     const mdatHeader = new ByteBuffer(16);
     if (isLargeMdat) {
       mdatHeader.writeUint32(1); // 1 = 64-bit size follows
       mdatHeader.writeFourCC('mdat');
-      mdatHeader.writeUint64(mdatPayload.length + 16);
+      mdatHeader.writeUint64(mdatPayloadSize + 16);
     } else {
-      mdatHeader.writeUint32(mdatPayload.length + 8);
+      mdatHeader.writeUint32(mdatPayloadSize + 8);
       mdatHeader.writeFourCC('mdat');
     }
 
@@ -422,15 +428,31 @@ export class MP4Muxer {
                           })
                         );
 
-                        // stco (Chunk Offsets)
-                        stblBuf.writeBytes(
-                          createFullBox('stco', 0, 0, (buf) => {
-                            buf.writeUint32(videoChunkOffsets.length);
-                            videoChunkOffsets.forEach((offset) => {
-                              buf.writeUint32(baseOffset + offset);
-                            });
-                          })
-                        );
+                        // stco / co64 (Chunk Offsets)
+                        const maxVideoOffset = videoChunkOffsets.length > 0
+                          ? baseOffset + videoChunkOffsets[videoChunkOffsets.length - 1]
+                          : baseOffset;
+                        const useCo64Video = isLargeMdat || maxVideoOffset > 0xffffffff;
+
+                        if (useCo64Video) {
+                          stblBuf.writeBytes(
+                            createFullBox('co64', 0, 0, (buf) => {
+                              buf.writeUint32(videoChunkOffsets.length);
+                              videoChunkOffsets.forEach((offset) => {
+                                buf.writeUint64(baseOffset + offset);
+                              });
+                            })
+                          );
+                        } else {
+                          stblBuf.writeBytes(
+                            createFullBox('stco', 0, 0, (buf) => {
+                              buf.writeUint32(videoChunkOffsets.length);
+                              videoChunkOffsets.forEach((offset) => {
+                                buf.writeUint32(baseOffset + offset);
+                              });
+                            })
+                          );
+                        }
                       })
                     );
                   })
@@ -603,15 +625,31 @@ export class MP4Muxer {
                             })
                           );
 
-                          // stco (Audio)
-                          stblBuf.writeBytes(
-                            createFullBox('stco', 0, 0, (buf) => {
-                              buf.writeUint32(audioChunkOffsets.length);
-                              audioChunkOffsets.forEach((offset) => {
-                                buf.writeUint32(baseOffset + offset);
-                              });
-                            })
-                          );
+                          // stco / co64 (Audio Chunk Offsets)
+                          const maxAudioOffset = audioChunkOffsets.length > 0
+                            ? baseOffset + audioChunkOffsets[audioChunkOffsets.length - 1]
+                            : baseOffset;
+                          const useCo64Audio = isLargeMdat || maxAudioOffset > 0xffffffff;
+
+                          if (useCo64Audio) {
+                            stblBuf.writeBytes(
+                              createFullBox('co64', 0, 0, (buf) => {
+                                buf.writeUint32(audioChunkOffsets.length);
+                                audioChunkOffsets.forEach((offset) => {
+                                  buf.writeUint64(baseOffset + offset);
+                                });
+                              })
+                            );
+                          } else {
+                            stblBuf.writeBytes(
+                              createFullBox('stco', 0, 0, (buf) => {
+                                buf.writeUint32(audioChunkOffsets.length);
+                                audioChunkOffsets.forEach((offset) => {
+                                  buf.writeUint32(baseOffset + offset);
+                                });
+                              })
+                            );
+                          }
                         })
                       );
                     })
@@ -632,8 +670,8 @@ export class MP4Muxer {
     // Generate final moov with accurate offsets
     const finalMoov = buildMoovWithBaseOffset(finalMdatStartOffset);
 
-    // Combine all boxes into final binary Blob
-    return new Blob([ftyp, finalMoov, mdatHeaderBytes, mdatPayload], {
+    // Combine all boxes and data chunks into final binary Blob (zero-copy memory pipeline)
+    return new Blob([ftyp, finalMoov, mdatHeaderBytes, ...interleavedDataChunks], {
       type: 'video/mp4'
     });
   }

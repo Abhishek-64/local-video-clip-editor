@@ -9,7 +9,7 @@ import { MP4Muxer } from './mp4Muxer';
 import { WebGLEffectsPipeline } from './webglEffectsPipeline';
 import { mixAudioTracksOffline } from './audioEngine';
 import { calculateCropDimensions } from '../utils/crop';
-import { renderTextOverlay } from './videoProcessingEngine';
+import { renderTextOverlay, renderLogoOverlay } from './videoProcessingEngine';
 import { detectFaceInFrame, FaceTrackerSmoother } from './faceDetectionService';
 
 /**
@@ -41,39 +41,75 @@ function parseTargetFps(fpsSetting) {
 }
 
 /**
- * Resilient frame seek with already-seeked fast path and mobile background safety timeout.
- * Prevents export from hanging if the browser tab is backgrounded or screen locked.
+ * Robust, deterministic frame seek with decoder readiness guarantee and adaptive timeout.
+ * Guarantees video decoder has loaded and presented the new frame before returning.
  */
-function seekVideoToTime(videoEl, targetTime, signal) {
+function seekVideoToTime(videoEl, targetTime, signal, isInitialSeek = false) {
   if (signal?.aborted) {
     return Promise.reject(new Error('Export cancelled by user'));
   }
 
-  // Fast path: if video is already at the target timestamp and not actively seeking, resolve immediately
-  if (Math.abs(videoEl.currentTime - targetTime) < 0.005 && !videoEl.seeking) {
+  // Fast path: if video is already at target time, not actively seeking, and has current data
+  if (Math.abs(videoEl.currentTime - targetTime) < 0.005 && !videoEl.seeking && videoEl.readyState >= 2) {
     return Promise.resolve();
   }
 
   return new Promise((resolve) => {
     let resolved = false;
     let timer = null;
+    let rVfcId = null;
 
     const cleanup = () => {
       if (resolved) return;
       resolved = true;
       if (timer) clearTimeout(timer);
+      if (rVfcId && typeof videoEl.cancelVideoFrameCallback === 'function') {
+        try {
+          videoEl.cancelVideoFrameCallback(rVfcId);
+        } catch (e) {}
+      }
       videoEl.removeEventListener('seeked', onSeeked);
       videoEl.removeEventListener('error', onError);
     };
 
+    const checkFrameReadyAndResolve = () => {
+      // Ensure video is ready to draw
+      if (videoEl.readyState >= 2 && !videoEl.seeking) {
+        cleanup();
+        resolve();
+      } else {
+        const onCanPlay = () => {
+          videoEl.removeEventListener('canplay', onCanPlay);
+          cleanup();
+          resolve();
+        };
+        videoEl.addEventListener('canplay', onCanPlay, { once: true });
+        setTimeout(() => {
+          videoEl.removeEventListener('canplay', onCanPlay);
+          cleanup();
+          resolve();
+        }, isInitialSeek ? 1000 : 200);
+      }
+    };
+
     const onSeeked = () => {
-      cleanup();
-      resolve();
+      if (typeof videoEl.requestVideoFrameCallback === 'function') {
+        try {
+          rVfcId = videoEl.requestVideoFrameCallback(() => {
+            cleanup();
+            resolve();
+          });
+          // Fallback timer in case rVFC is delayed by compositor
+          setTimeout(checkFrameReadyAndResolve, isInitialSeek ? 200 : 50);
+          return;
+        } catch (e) {}
+      }
+      checkFrameReadyAndResolve();
     };
 
     const onError = () => {
       cleanup();
-      resolve(); // Gracefully proceed without hanging the entire export pipeline
+      resolve(); // Gracefully proceed without hanging pipeline
     };
 
     videoEl.addEventListener('seeked', onSeeked, { once: true });
@@ -87,11 +123,12 @@ function seekVideoToTime(videoEl, targetTime, signal) {
       return;
     }
 
-    // Safety timeout: if mobile browser delays or drops seeked event while backgrounded, force advance
+    // Adaptive timeout: initial warmup seek gets 5000ms, sequential frame seeks get 1500ms
+    const timeoutMs = isInitialSeek ? 5000 : 1500;
     timer = setTimeout(() => {
       cleanup();
       resolve();
-    }, 350);
+    }, timeoutMs);
   });
 }
 
@@ -368,6 +405,10 @@ async function runWebCodecsExportPipeline({
   const frameIntervalSec = 1 / targetFps;
   const keyframeInterval = Math.round(targetFps * 2); // Keyframe every 2s
 
+  // Pre-roll warmup to first frame timestamp to ensure hardware decoder is primed
+  const initialSourceTime = mapFrameToSourceTime(0);
+  await seekVideoToTime(videoEl, initialSourceTime, signal, true /* isInitialSeek */);
+
   for (let frameIdx = 0; frameIdx < totalFrames; frameIdx++) {
     if (signal?.aborted) {
       videoEncoder.close();
@@ -382,8 +423,8 @@ async function runWebCodecsExportPipeline({
     const frameClipTime = frameIdx * frameIntervalSec;
     const sourceVideoTime = mapFrameToSourceTime(frameClipTime);
 
-    // Seek source video to exact deterministic timestamp with resilient mobile timeout
-    await seekVideoToTime(videoEl, sourceVideoTime, signal);
+    // Seek source video to exact deterministic timestamp with resilient readiness check
+    await seekVideoToTime(videoEl, sourceVideoTime, signal, frameIdx === 0);
 
     // Face detection (run periodically every 15 frames if enabled)
     if (crop.faceTracking && frameIdx - lastFaceDetectFrame >= 15) {
@@ -474,17 +515,23 @@ async function runWebCodecsExportPipeline({
       renderTextOverlay(ctx2d, canvasWidth, canvasHeight, text, partNumber);
     }
 
-
     // Logo Watermark
     if (logo.enabled && logoImage) {
-      const scale = canvasWidth / 540;
-      const logoW = Math.max(30, Math.round((logo.size || 70) * scale));
-      const logoH = logoW * (logoImage.naturalHeight / logoImage.naturalWidth);
-      const margin = canvasWidth * 0.04;
-      ctx2d.save();
-      ctx2d.globalAlpha = (logo.opacity ?? 85) / 100;
-      ctx2d.drawImage(logoImage, canvasWidth - logoW - margin, margin, logoW, logoH);
-      ctx2d.restore();
+      renderLogoOverlay(ctx2d, canvasWidth, canvasHeight, logo, logoImage);
+    }
+
+    // VideoEncoder Backpressure: Prevent queue bloating in hardware encoder
+    if (videoEncoder.encodeQueueSize > 4) {
+      await new Promise((resolve) => {
+        const onDequeue = () => {
+          if (videoEncoder.encodeQueueSize <= 2) {
+            videoEncoder.removeEventListener('dequeue', onDequeue);
+            resolve();
+          }
+        };
+        videoEncoder.addEventListener('dequeue', onDequeue);
+        setTimeout(resolve, 50);
+      });
     }
 
     // Create VideoFrame with deterministic timestamp (microseconds)
@@ -543,6 +590,20 @@ async function runWebCodecsExportPipeline({
       const chunkSize = 1024; // AAC standard frame size
 
       for (let i = 0; i < sampleCount; i += chunkSize) {
+        // Audio backpressure check
+        if (audioEncoder.encodeQueueSize > 8) {
+          await new Promise((resolve) => {
+            const onDequeue = () => {
+              if (audioEncoder.encodeQueueSize <= 4) {
+                audioEncoder.removeEventListener('dequeue', onDequeue);
+                resolve();
+              }
+            };
+            audioEncoder.addEventListener('dequeue', onDequeue);
+            setTimeout(resolve, 50);
+          });
+        }
+
         const currentChunkSize = Math.min(chunkSize, sampleCount - i);
         const interleaved = new Float32Array(currentChunkSize * 2);
 

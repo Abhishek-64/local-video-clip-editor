@@ -36,8 +36,8 @@ export default function VideoPreview({
 }) {
   const videoRef = useRef(null);
   const bgCanvasRef = useRef(null);
-  const containerRef = useRef(null);
   const phoneViewportRef = useRef(null);
+  const framingViewportRef = useRef(null);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [volume, setVolume] = useState(1);
@@ -77,10 +77,13 @@ export default function VideoPreview({
   const bgBlur = bgSettings?.blur ?? 20;
   const bgOpacity = (bgSettings?.opacity ?? 65) / 100;
 
-  // Lightweight Background Canvas Blit for 100% Zero-Lag Single-Decoder Playback
+  // Frame-Driven Background Canvas Blit for 100% Zero-Lag Playback & Zero Idle CPU Usage
   useEffect(() => {
-    let animId;
-    const updateBgCanvas = () => {
+    let animId = null;
+    let rVfcId = null;
+    let isCancelled = false;
+
+    const renderBgFrame = () => {
       if (
         bgCanvasRef.current &&
         videoRef.current &&
@@ -93,12 +96,41 @@ export default function VideoPreview({
           bgCtx.drawImage(videoRef.current, 0, 0, bgCanvasRef.current.width, bgCanvasRef.current.height);
         }
       }
-      animId = requestAnimationFrame(updateBgCanvas);
     };
 
-    animId = requestAnimationFrame(updateBgCanvas);
-    return () => cancelAnimationFrame(animId);
-  }, [isFillMode, bgType]);
+    const scheduleNextFrame = () => {
+      if (isCancelled) return;
+      renderBgFrame();
+
+      const video = videoRef.current;
+      if (video && isPlaying && !video.paused && !video.ended) {
+        if ('requestVideoFrameCallback' in video) {
+          rVfcId = video.requestVideoFrameCallback(() => {
+            scheduleNextFrame();
+          });
+        } else {
+          animId = requestAnimationFrame(scheduleNextFrame);
+        }
+      }
+    };
+
+    // Trigger frame update on play state change or seek
+    if (isPlaying) {
+      scheduleNextFrame();
+    } else {
+      renderBgFrame();
+    }
+
+    return () => {
+      isCancelled = true;
+      if (animId) cancelAnimationFrame(animId);
+      if (rVfcId && videoRef.current && 'cancelVideoFrameCallback' in videoRef.current) {
+        try {
+          videoRef.current.cancelVideoFrameCallback(rVfcId);
+        } catch (e) {}
+      }
+    };
+  }, [isPlaying, isFillMode, bgType, currentTime]);
 
   // Sync video element time if updated externally
   useEffect(() => {
@@ -303,7 +335,7 @@ export default function VideoPreview({
   const handleExtraTextTouchStart = (e, item) => {
     if (!onTextChange || !item.enabled) return;
     const touch = e.touches[0];
-    const parentRect = (phoneViewportRef.current || containerRef.current)?.getBoundingClientRect();
+    const parentRect = (phoneViewportRef.current || framingViewportRef.current || containerRef.current)?.getBoundingClientRect();
     if (!parentRect) return;
 
     setDraggingExtraId(item.id);
@@ -325,7 +357,7 @@ export default function VideoPreview({
     e.preventDefault();
     e.stopPropagation();
 
-    const parentRect = (phoneViewportRef.current || containerRef.current)?.getBoundingClientRect();
+    const parentRect = (phoneViewportRef.current || framingViewportRef.current || containerRef.current)?.getBoundingClientRect();
     if (!parentRect) return;
 
     setIsDraggingLogo(true);
@@ -343,7 +375,7 @@ export default function VideoPreview({
   const handleLogoTouchStart = (e) => {
     if (!onLogoChange || !logoSettings?.enabled) return;
     const touch = e.touches[0];
-    const parentRect = (phoneViewportRef.current || containerRef.current)?.getBoundingClientRect();
+    const parentRect = (phoneViewportRef.current || framingViewportRef.current || containerRef.current)?.getBoundingClientRect();
     if (!parentRect) return;
 
     setIsDraggingLogo(true);
@@ -743,7 +775,7 @@ export default function VideoPreview({
 
     const previewLogoWidth = previewMode === 'vertical'
       ? Math.max(20, Math.round((logoSettings.size || 60) * (236 / 540)))
-      : Math.round((logoSettings.size || 60) * 0.6);
+      : Math.max(24, Math.round((logoSettings.size || 60) * (380 / 540)));
 
     const style = {
       position: 'absolute',
@@ -761,10 +793,15 @@ export default function VideoPreview({
       style.transform = 'translate(-50%, -50%)';
     } else {
       const pos = logoSettings.position || 'top-right';
-      if (pos.includes('top')) style.top = '12px';
-      if (pos.includes('bottom')) style.bottom = '12px';
-      if (pos.includes('left')) style.left = '12px';
-      if (pos.includes('right')) style.right = '12px';
+      if (pos.includes('top')) style.top = '4%';
+      if (pos.includes('bottom')) style.bottom = '4%';
+      if (pos.includes('left')) style.left = '4%';
+      if (pos.includes('right')) style.right = '4%';
+      if (pos === 'center') {
+        style.top = '50%';
+        style.left = '50%';
+        style.transform = 'translate(-50%, -50%)';
+      }
     }
 
     return style;
@@ -1054,7 +1091,7 @@ export default function VideoPreview({
             </div>
           ) : (
             /* ── WIDE FRAMING / MANUAL CROP VIEWPORT ── */
-            <div className="relative w-full h-full flex items-center justify-center select-none">
+            <div ref={framingViewportRef} className="relative w-full h-full flex items-center justify-center select-none">
               <video
                 ref={videoRef}
                 src={videoData.url}

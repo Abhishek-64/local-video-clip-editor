@@ -86,28 +86,21 @@ export function useFacebook({ isAuthenticated = false } = {}) {
   // ── Load Account Info ────────────────────────────────────────────────────────
 
   const refreshFbAccount = useCallback(async () => {
-    if (!apiAvailable) {
-      console.log('[Facebook Hook] API not configured, skipping refresh');
-      return;
-    }
+    if (!apiAvailable) return;
     setIsLoadingAccount(true);
     setAccountError(null);
     try {
-      console.log('[Facebook Hook] Fetching Facebook account from /api/facebook/account...');
       const res = await getFacebookAccount();
-      console.log('[Facebook Hook] /api/facebook/account response:', res);
       if (res && res.account) {
         const hasActivePage = Boolean(res.isPageConnected || (res.account.page_id && res.account.page_name));
         const hasUser = Boolean(res.isUserConnected || res.account.fb_user_name);
 
-        console.log('[Facebook Hook] Auth State -> User Connected:', hasUser, 'Page Connected:', hasActivePage, res.account);
         setFbAccount(res.account);
         setAvailablePages(res.availablePages || []);
         setIsUserConnected(hasUser);
         setIsPageConnected(hasActivePage);
         setIsConnected(hasActivePage);
       } else {
-        console.log('[Facebook Hook] Not connected to Facebook.');
         setFbAccount(null);
         setAvailablePages([]);
         setIsUserConnected(false);
@@ -115,7 +108,6 @@ export function useFacebook({ isAuthenticated = false } = {}) {
         setIsConnected(false);
       }
     } catch (err) {
-      console.warn('[Facebook Hook] Error loading Facebook account:', err.message);
       setAccountError(err.message);
       setIsUserConnected(false);
       setIsPageConnected(false);
@@ -141,8 +133,6 @@ export function useFacebook({ isAuthenticated = false } = {}) {
     const frontendUrl = window.location.origin;
     const connectUrl = `${apiUrl}/api/facebook/connect?frontendUrl=${encodeURIComponent(frontendUrl)}&popup=1`;
 
-    console.log('[Facebook Hook] Initiating Facebook OAuth connection:', { apiUrl, frontendUrl, connectUrl });
-
     const width = 600;
     const height = 700;
     const left = window.screenX + (window.outerWidth - width) / 2;
@@ -155,20 +145,16 @@ export function useFacebook({ isAuthenticated = false } = {}) {
     );
 
     if (!popup || popup.closed || typeof popup.closed === 'undefined') {
-      console.warn('[Facebook Hook] Popup was blocked by the browser. Redirecting directly...');
       window.location.href = connectUrl;
       return;
     }
 
     const handleMessage = (event) => {
-      console.log('[Facebook Hook] Received postMessage from origin:', event.origin, 'Data:', event.data);
       if (event.data && event.data.type === 'FACEBOOK_AUTH_RESULT') {
         window.removeEventListener('message', handleMessage);
         if (event.data.success) {
-          console.log('[Facebook Hook] ✓ OAuth successful! Refreshing account...');
           refreshFbAccount();
         } else {
-          console.error('[Facebook Hook] ✕ OAuth failed with error:', event.data.error);
           setAccountError(event.data.error || 'Failed to connect Facebook account.');
         }
       }
@@ -181,7 +167,6 @@ export function useFacebook({ isAuthenticated = false } = {}) {
       if (popup && popup.closed) {
         clearInterval(timer);
         window.removeEventListener('message', handleMessage);
-        console.log('[Facebook Hook] Popup closed. Checking account connection state...');
         refreshFbAccount();
       }
     }, 1000);
@@ -198,16 +183,13 @@ export function useFacebook({ isAuthenticated = false } = {}) {
     setIsConnectingPage(true);
     setPageConnectError(null);
     try {
-      console.log('[Facebook Hook] Connecting Facebook Page ID:', cleanId);
       const res = await connectFacebookPageById({ pageId: cleanId });
       if (res && res.success) {
-        console.log('[Facebook Hook] ✓ Successfully connected Page:', res.facebook?.page_name || res.account?.page_name);
         await refreshFbAccount();
         return true;
       }
       return false;
     } catch (err) {
-      console.error('[Facebook Hook] Failed to connect Facebook Page ID:', err);
       setPageConnectError(err.message || 'This Facebook Page is not accessible by the connected Facebook account.');
       return false;
     } finally {
@@ -230,11 +212,9 @@ export function useFacebook({ isAuthenticated = false } = {}) {
   const switchPage = useCallback(async (pageId) => {
     if (!pageId) return;
     try {
-      console.log('[Facebook Hook] Switching active Facebook page to:', pageId);
       await selectFacebookPage(pageId);
       await refreshFbAccount();
     } catch (err) {
-      console.error('[Facebook Hook] Failed to switch Facebook page:', err);
       setAccountError(err.message);
     }
   }, [refreshFbAccount]);

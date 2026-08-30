@@ -36,6 +36,7 @@ export default function VideoPreview({
 }) {
   const videoRef = useRef(null);
   const bgCanvasRef = useRef(null);
+  const containerRef = useRef(null);
   const phoneViewportRef = useRef(null);
   const framingViewportRef = useRef(null);
 

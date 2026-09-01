@@ -13,7 +13,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Youtube, CheckCircle2, XCircle, Link, Unlink, Settings2,
   Clock, Calendar, Tag, Eye, Zap, Info, RefreshCw,
-  Sparkles, Lock, Sliders, ChevronDown, Film, Copy, Share2, Video
+  Sparkles, Lock, Sliders, ChevronDown, Film, Copy, Share2, Video, Instagram
 } from 'lucide-react';
 
 import {
@@ -64,6 +64,8 @@ export default function YouTubePanel({
   setPipelineStartTime,
   customParts = [],
   textSettings = {},
+  fbSettings = {},
+  igSettings = {},
   onSwitchToPlatform
 }) {
   const [tagInput, setTagInput] = useState('');
@@ -200,13 +202,11 @@ export default function YouTubePanel({
       <div className="space-y-4">
         <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 text-center space-y-2">
           <Youtube className="w-8 h-8 text-slate-600 mx-auto" />
-          <p className="text-xs font-semibold text-slate-400">YouTube Integration Not Configured</p>
-          <p className="text-[11px] text-slate-500 leading-relaxed">
+          <p className="text-xs font-semibold text-slate-400">YouTube Not Configured</p>
+          <p className="text-[11px] text-slate-500">
             Set <code className="bg-slate-800 px-1 py-0.5 rounded text-amber-300">VITE_API_URL</code> in your{' '}
-            <code className="bg-slate-800 px-1 py-0.5 rounded text-amber-300">.env</code> file to point to your
-            deployed Cloudflare Worker to enable YouTube direct uploads, automation, and scheduled publishing.
+            <code className="bg-slate-800 px-1 py-0.5 rounded text-amber-300">.env</code> to enable direct YouTube uploads and scheduled releases.
           </p>
-          <p className="text-[11px] text-slate-500">All existing local editing features work without this.</p>
         </div>
       </div>
     );
@@ -215,36 +215,36 @@ export default function YouTubePanel({
   // ── Unauthenticated State: Must sign in first ────────────────────────────────
   if (!isAuthenticated) {
     return (
-      <div className="space-y-5">
-        <div className="bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 border border-slate-800 rounded-2xl p-6 text-center space-y-4 shadow-xl">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-orange-500/20 via-red-500/20 to-rose-500/20 border border-red-500/30 flex items-center justify-center mx-auto shadow-inner">
-            <Lock className="w-6 h-6 text-orange-400" />
+      <div className="space-y-4">
+        <div className="bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 border border-slate-800 rounded-2xl p-5 text-center space-y-3.5 shadow-xl">
+          <div className="w-11 h-11 rounded-xl bg-gradient-to-tr from-orange-500/20 via-red-500/20 to-rose-500/20 border border-red-500/30 flex items-center justify-center mx-auto shadow-inner">
+            <Lock className="w-5 h-5 text-orange-400" />
           </div>
           <div>
-            <h4 className="text-sm font-bold text-white tracking-tight">Sign In Required to Connect YouTube</h4>
-            <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto leading-relaxed">
-              Please sign in or create an account first. Connecting your YouTube account to your verified login ensures your OAuth tokens and scheduling presets remain secure and synced across devices.
+            <h4 className="text-sm font-bold text-white tracking-tight">Sign In to Connect YouTube</h4>
+            <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto">
+              Sign in to link your YouTube channel and securely store upload presets.
             </p>
           </div>
 
           <div className="pt-1">
             <button
               onClick={() => onOpenAuth && onOpenAuth('login')}
-              className="px-5 py-2.5 bg-gradient-to-r from-orange-500 via-rose-500 to-amber-500 hover:from-orange-400 hover:to-rose-400 active:scale-98 text-white text-xs font-bold rounded-xl shadow-lg shadow-orange-500/20 transition-all cursor-pointer inline-flex items-center space-x-2 touch-manipulation"
+              className="px-4 py-2 bg-gradient-to-r from-orange-500 via-rose-500 to-amber-500 hover:from-orange-400 hover:to-rose-400 active:scale-98 text-white text-xs font-bold rounded-xl shadow-lg shadow-orange-500/20 transition-all cursor-pointer inline-flex items-center space-x-2 touch-manipulation"
             >
               <Sparkles className="w-4 h-4" />
               <span>Sign In / Create Account</span>
             </button>
           </div>
 
-          <div className="pt-4 border-t border-slate-800/80 grid grid-cols-2 gap-2 text-left max-w-sm mx-auto">
-            <div className="p-2.5 bg-slate-950/40 rounded-xl border border-slate-800/60">
-              <span className="text-[11px] font-semibold text-slate-200 block mb-0.5">Automated Scheduling</span>
-              <span className="text-[10px] text-slate-400 block leading-tight">Publish consecutive parts spaced by your chosen interval.</span>
+          <div className="pt-3 border-t border-slate-800/80 grid grid-cols-2 gap-2 text-left max-w-xs mx-auto">
+            <div className="p-2 bg-slate-950/40 rounded-xl border border-slate-800/60">
+              <span className="text-[11px] font-semibold text-slate-200 block mb-0.5">Automated Schedule</span>
+              <span className="text-[10px] text-slate-400 block">Spaced part releases.</span>
             </div>
-            <div className="p-2.5 bg-slate-950/40 rounded-xl border border-slate-800/60">
-              <span className="text-[11px] font-semibold text-slate-200 block mb-0.5">Direct Shorts Uploads</span>
-              <span className="text-[10px] text-slate-400 block leading-tight">Publish generated clips directly to your channel.</span>
+            <div className="p-2 bg-slate-950/40 rounded-xl border border-slate-800/60">
+              <span className="text-[11px] font-semibold text-slate-200 block mb-0.5">Shorts Uploads</span>
+              <span className="text-[10px] text-slate-400 block">Direct 1-click uploads.</span>
             </div>
           </div>
         </div>
@@ -663,21 +663,45 @@ export default function YouTubePanel({
 
             {/* Field 1: YouTube Series Name */}
             <div className="space-y-1.5">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-1.5">
                 <label className="text-xs font-semibold text-slate-200">
                   YouTube Video / Series Name:
                 </label>
-                {textSettings?.movieName && (
-                  <button
-                    type="button"
-                    onClick={() => updateYtSettings({ yt_name: textSettings.movieName })}
-                    className="text-[10px] text-red-300 hover:text-white bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-lg px-2 py-0.5 transition-colors cursor-pointer flex items-center space-x-1 shrink-0 touch-manipulation"
-                    title="Copy from on-screen text overlay title"
-                  >
-                    <Copy className="w-2.5 h-2.5" />
-                    <span>Copy Overlay Title</span>
-                  </button>
-                )}
+                <div className="flex flex-wrap items-center gap-1">
+                  {textSettings?.movieName && textSettings.movieName !== ytSettings?.yt_name && (
+                    <button
+                      type="button"
+                      onClick={() => updateYtSettings({ yt_name: textSettings.movieName })}
+                      className="text-[10px] text-orange-300 hover:text-white bg-slate-900 hover:bg-slate-800 border border-orange-500/30 rounded-lg px-2 py-0.5 transition-colors cursor-pointer flex items-center space-x-1 shrink-0 touch-manipulation"
+                      title="Copy from on-screen text overlay title"
+                    >
+                      <Copy className="w-2.5 h-2.5 text-orange-400" />
+                      <span>Sync Overlay</span>
+                    </button>
+                  )}
+                  {fbSettings?.fb_name && fbSettings.fb_name !== ytSettings?.yt_name && (
+                    <button
+                      type="button"
+                      onClick={() => updateYtSettings({ yt_name: fbSettings.fb_name })}
+                      className="text-[10px] text-blue-300 hover:text-white bg-slate-900 hover:bg-slate-800 border border-blue-500/30 rounded-lg px-2 py-0.5 transition-colors cursor-pointer flex items-center space-x-1 shrink-0 touch-manipulation"
+                      title="Copy series name from Facebook"
+                    >
+                      <Share2 className="w-2.5 h-2.5 text-blue-400" />
+                      <span>Sync FB</span>
+                    </button>
+                  )}
+                  {igSettings?.ig_name && igSettings.ig_name !== ytSettings?.yt_name && (
+                    <button
+                      type="button"
+                      onClick={() => updateYtSettings({ yt_name: igSettings.ig_name })}
+                      className="text-[10px] text-pink-300 hover:text-white bg-slate-900 hover:bg-slate-800 border border-pink-500/30 rounded-lg px-2 py-0.5 transition-colors cursor-pointer flex items-center space-x-1 shrink-0 touch-manipulation"
+                      title="Copy series name from Instagram"
+                    >
+                      <Instagram className="w-2.5 h-2.5 text-pink-400" />
+                      <span>Sync IG</span>
+                    </button>
+                  )}
+                </div>
               </div>
               <input
                 type="text"
@@ -799,11 +823,34 @@ export default function YouTubePanel({
 
             {/* Field 4: Description Template */}
             <div className="space-y-1.5 pt-1 border-t border-slate-800/80">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-1.5">
                 <label className="text-xs font-semibold text-slate-200">
                   YouTube Description Template
                 </label>
-                <span className="text-[10px] text-slate-400">Auto-appends tags</span>
+                <div className="flex flex-wrap items-center gap-1">
+                  {fbSettings?.fb_caption_template && (
+                    <button
+                      type="button"
+                      onClick={() => updateYtSettings({ yt_description_template: fbSettings.fb_caption_template })}
+                      className="text-[10px] text-blue-300 hover:text-white bg-slate-900 hover:bg-slate-800 border border-blue-500/30 rounded-lg px-2 py-0.5 transition-colors cursor-pointer flex items-center space-x-1 shrink-0 touch-manipulation"
+                      title="Copy description template from Facebook"
+                    >
+                      <Share2 className="w-2.5 h-2.5 text-blue-400" />
+                      <span>Sync from FB</span>
+                    </button>
+                  )}
+                  {igSettings?.ig_caption_template && (
+                    <button
+                      type="button"
+                      onClick={() => updateYtSettings({ yt_description_template: igSettings.ig_caption_template })}
+                      className="text-[10px] text-pink-300 hover:text-white bg-slate-900 hover:bg-slate-800 border border-pink-500/30 rounded-lg px-2 py-0.5 transition-colors cursor-pointer flex items-center space-x-1 shrink-0 touch-manipulation"
+                      title="Copy description template from Instagram"
+                    >
+                      <Instagram className="w-2.5 h-2.5 text-pink-400" />
+                      <span>Sync from IG</span>
+                    </button>
+                  )}
+                </div>
               </div>
               <textarea
                 rows={3}
@@ -813,57 +860,44 @@ export default function YouTubePanel({
                 className="w-full bg-slate-900 border border-slate-700 text-xs text-white rounded-xl px-3 py-2 focus:border-red-500 focus:outline-none font-mono resize-y min-h-[70px] shadow-inner"
               />
             </div>
-
-            {/* Field 5: Live Rendered YouTube Metadata Preview */}
-            <div className="bg-slate-900/90 border border-red-500/20 rounded-xl p-3 sm:p-3.5 space-y-2 shadow-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold text-red-400 uppercase tracking-wider flex items-center space-x-1">
-                  <Sparkles className="w-3 h-3" />
-                  <span>Live YouTube Rendered Metadata Preview</span>
-                </span>
-                <span className="text-[10px] text-slate-400 font-mono">
-                  Part #{ytSettings?.yt_zero_pad !== false ? String(ytSettings?.yt_start_part || 1).padStart(2, '0') : String(ytSettings?.yt_start_part || 1)}
-                </span>
-              </div>
-
-              <div className="space-y-2 bg-slate-950/80 rounded-xl p-3 border border-slate-800">
-                <div>
-                  <span className="text-[10px] font-semibold text-slate-400 block mb-0.5">Title Preview:</span>
-                  <p className="text-xs font-bold text-white font-mono break-words leading-relaxed">
-                    {(ytSettings?.yt_title_template || '{movie} - Part {part} | #Shorts')
-                      .replace(/\{movie\}/gi, ytSettings?.yt_name || 'My Movie')
-                      .replace(/\{title\}/gi, ytSettings?.yt_name || 'My Movie')
-                      .replace(/\{text\}/gi, ytSettings?.yt_name || 'My Movie')
-                      .replace(/\{part\}/gi, ytSettings?.yt_zero_pad !== false ? String(ytSettings?.yt_start_part || 1).padStart(2, '0') : String(ytSettings?.yt_start_part || 1))
-                      .replace(/\{hashtags\}/gi, formatTagsAsHashtagString(Array.isArray(ytSettings?.yt_tags) && ytSettings.yt_tags.length > 0 ? parseTagsInput(ytSettings.yt_tags) : ['shorts', 'viral', 'clips']))
-                      .replace(/\{tags\}/gi, parseTagsInput(ytSettings?.yt_tags || []).join(', '))}
-                  </p>
-                </div>
-
-                <div className="pt-2 border-t border-slate-900">
-                  <span className="text-[10px] font-semibold text-slate-400 block mb-0.5">Description Preview:</span>
-                  <p className="text-[11px] text-slate-300 font-mono whitespace-pre-wrap line-clamp-3 leading-relaxed">
-                    {(ytSettings?.yt_description_template !== undefined ? ytSettings.yt_description_template : '{movie} - Part {part}\n\n#Shorts\n\n{hashtags}')
-                      .replace(/\{movie\}/gi, ytSettings?.yt_name || textSettings?.movieName || 'My Movie')
-                      .replace(/\{title\}/gi, ytSettings?.yt_name || textSettings?.movieName || 'My Movie')
-                      .replace(/\{text\}/gi, ytSettings?.yt_name || textSettings?.movieName || 'My Movie')
-                      .replace(/\{part\}/gi, ytSettings?.yt_zero_pad !== false ? String(ytSettings?.yt_start_part || 1).padStart(2, '0') : String(ytSettings?.yt_start_part || 1))
-                      .replace(/\{hashtags\}/gi, formatTagsAsHashtagString(Array.isArray(ytSettings?.yt_tags) && ytSettings.yt_tags.length > 0 ? parseTagsInput(ytSettings.yt_tags) : ['shorts', 'viral', 'clips']))
-                      .replace(/\{tags\}/gi, parseTagsInput(ytSettings?.yt_tags || []).join(', '))}
-                  </p>
-                </div>
-              </div>
-            </div>
           </div>
 
           {/* ── 7. TAGS & HASHTAGS ───────────────────────────────── */}
           <div className="space-y-2.5">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-1.5">
               <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center space-x-1.5">
                 <Tag className="w-3.5 h-3.5 text-orange-400" />
                 <span>Default Tags &amp; Hashtags</span>
               </label>
-              <div className="flex items-center space-x-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {fbSettings?.fb_tags && fbSettings.fb_tags.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const combined = Array.from(new Set([...(ytSettings?.yt_tags || []), ...fbSettings.fb_tags]));
+                      updateYtSettings({ yt_tags: combined });
+                    }}
+                    className="text-[10px] text-blue-300 hover:text-white bg-slate-900 hover:bg-slate-800 border border-blue-500/30 rounded-lg px-2 py-0.5 transition-colors cursor-pointer flex items-center space-x-1 shrink-0 touch-manipulation"
+                    title="Merge tags from Facebook"
+                  >
+                    <Share2 className="w-2.5 h-2.5 text-blue-400" />
+                    <span>Sync FB Tags ({fbSettings.fb_tags.length})</span>
+                  </button>
+                )}
+                {igSettings?.ig_tags && igSettings.ig_tags.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const combined = Array.from(new Set([...(ytSettings?.yt_tags || []), ...igSettings.ig_tags]));
+                      updateYtSettings({ yt_tags: combined });
+                    }}
+                    className="text-[10px] text-pink-300 hover:text-white bg-slate-900 hover:bg-slate-800 border border-pink-500/30 rounded-lg px-2 py-0.5 transition-colors cursor-pointer flex items-center space-x-1 shrink-0 touch-manipulation"
+                    title="Merge tags from Instagram"
+                  >
+                    <Instagram className="w-2.5 h-2.5 text-pink-400" />
+                    <span>Sync IG Tags ({igSettings.ig_tags.length})</span>
+                  </button>
+                )}
                 <span className="text-[10px] text-slate-500">{(ytSettings?.yt_tags || []).length} active</span>
                 {(ytSettings?.yt_tags || []).length > 0 && (
                   <button
@@ -893,20 +927,20 @@ export default function YouTubePanel({
                 </span>
               ))}
             </div>
-            <div className="flex space-x-2">
+            <div className="flex flex-col sm:flex-row gap-2">
               <input
                 type="text"
                 value={tagInput}
                 onChange={e => setTagInput(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTag(); } }}
                 placeholder="Add tags or paste #shorts #viral..."
-                className="flex-1 bg-slate-900 border border-slate-700 text-xs text-white rounded-lg px-3 py-2 focus:border-orange-500 focus:outline-none"
+                className="flex-1 bg-slate-900 border border-slate-700 text-xs text-white rounded-xl px-3 py-2 focus:border-orange-500 focus:outline-none"
               />
               <button
                 type="button"
                 onClick={addTag}
-                className="px-3 py-2 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition-colors cursor-pointer touch-manipulation"
-              >Add</button>
+                className="w-full sm:w-auto px-5 py-2 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition-colors cursor-pointer touch-manipulation"
+              >Add Tag</button>
             </div>
           </div>
         </>

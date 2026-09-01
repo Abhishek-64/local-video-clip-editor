@@ -9,19 +9,39 @@
  * - Sensitive tokens are encrypted server-side and never returned to the frontend.
  */
 
+import { signOAuthState } from './crypto.js';
+
 const GRAPH_BASE = 'https://graph.facebook.com';
 
 export function getGraphVersion(env) {
-  return env.META_GRAPH_API_VERSION || 'v22.0';
+  return env.META_GRAPH_API_VERSION || 'v26.0';
+}
+
+/**
+ * Canonical redirect URI for Facebook OAuth.
+ */
+export function getFacebookRedirectUri(env) {
+  const base = (env.APP_URL || '').replace(/\/$/, '');
+  return `${base}/api/facebook/callback`;
 }
 
 /**
  * Build Facebook OAuth Dialog URL
  */
-export function buildFacebookAuthUrl(env, userId, frontendUrl = null, isPopup = false) {
+export async function buildFacebookAuthUrl(env, userId, frontendUrl = null, isPopup = false) {
   const version = getGraphVersion(env);
-  const redirectUri = `${env.APP_URL}/api/facebook/callback`;
-  const state = btoa(JSON.stringify({ userId, frontendUrl, isPopup, ts: Date.now() }));
+  const redirectUri = getFacebookRedirectUri(env);
+  const secretKey = env.ENCRYPTION_KEY || env.FACEBOOK_APP_SECRET || 'oauth-state-secret-salt-2026';
+
+  const state = await signOAuthState(
+    {
+      userId,
+      frontendUrl,
+      isPopup: Boolean(isPopup),
+      provider: 'facebook'
+    },
+    secretKey
+  );
 
   const scopes = [
     'pages_show_list',
@@ -47,7 +67,7 @@ export function buildFacebookAuthUrl(env, userId, frontendUrl = null, isPopup = 
  */
 export async function exchangeFacebookCodeForTokens(env, code) {
   const version = getGraphVersion(env);
-  const redirectUri = `${env.APP_URL}/api/facebook/callback`;
+  const redirectUri = getFacebookRedirectUri(env);
 
   // Step 1: Exchange code for short-lived user token
   const tokenUrl = `${GRAPH_BASE}/${version}/oauth/access_token?` + new URLSearchParams({

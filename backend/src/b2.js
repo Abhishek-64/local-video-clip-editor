@@ -148,3 +148,45 @@ export async function b2DeleteFile(env, fileId, fileName) {
     return { success: false, error: err.message };
   }
 }
+
+/**
+ * List files stored in the Backblaze B2 bucket
+ */
+export async function b2ListFileNames(env, maxFileCount = 100) {
+  const auth = await b2Authorize(env);
+  const bucketId = env.B2_BUCKET_ID;
+
+  if (!bucketId) {
+    throw new Error('B2_BUCKET_ID is not configured in environment.');
+  }
+
+  const res = await fetch(`${auth.apiUrl}/b2api/v3/b2_list_file_names`, {
+    method: 'POST',
+    headers: {
+      'Authorization': auth.authorizationToken,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      bucketId,
+      maxFileCount
+    })
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Failed to list B2 files (${res.status}): ${errText}`);
+  }
+
+  const data = await res.json();
+  const bucketName = env.B2_BUCKET_NAME || '';
+
+  return (data.files || []).map(f => ({
+    fileId: f.fileId,
+    fileName: f.fileName,
+    contentLength: f.contentLength,
+    uploadTimestamp: f.uploadTimestamp,
+    contentType: f.contentType,
+    downloadUrl: `${auth.downloadUrl}/file/${bucketName}/${encodeURIComponent(f.fileName)}`
+  }));
+}
+

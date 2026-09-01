@@ -99,8 +99,8 @@ export default function BackgroundEditor({
               <Upload className="w-4 h-4 text-emerald-400 shrink-0" />
               <span className="font-bold text-xs text-white">Custom Picture</span>
             </div>
-            <p className="text-[11px] text-slate-400 leading-relaxed">
-              Upload any photo, poster, or wallpaper.
+            <p className="text-[11px] text-slate-400">
+              Upload photo or poster.
             </p>
           </button>
 
@@ -117,8 +117,8 @@ export default function BackgroundEditor({
               <Sparkles className="w-4 h-4 text-orange-400 shrink-0" />
               <span className="font-bold text-xs text-white">Blurred Video</span>
             </div>
-            <p className="text-[11px] text-slate-400 leading-relaxed">
-              Auto-generates a blurred video backdrop.
+            <p className="text-[11px] text-slate-400">
+              Auto-generated blur.
             </p>
           </button>
 
@@ -135,8 +135,8 @@ export default function BackgroundEditor({
               <div className="w-3.5 h-3.5 rounded-full border border-slate-600 bg-black shrink-0" />
               <span className="font-bold text-xs text-white">Solid Color</span>
             </div>
-            <p className="text-[11px] text-slate-400 leading-relaxed">
-              Clean black or custom solid background color.
+            <p className="text-[11px] text-slate-400">
+              Black or custom color.
             </p>
           </button>
         </div>

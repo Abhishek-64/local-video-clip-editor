@@ -87,17 +87,17 @@ export default function StorageSettingsModal({
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 animate-fadeIn">
       <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-xl w-full overflow-hidden shadow-2xl animate-scaleUp max-h-[92vh] flex flex-col">
         {/* Modal Header */}
-        <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
+        <div className="p-3.5 sm:p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-2xl bg-orange-500/15 border border-orange-500/30 flex items-center justify-center text-orange-400 shrink-0">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-orange-500/15 border border-orange-500/30 flex items-center justify-center text-orange-400 shrink-0">
               <Database className="w-5 h-5" />
             </div>
             <div>
               <h3 className="font-bold text-sm sm:text-base text-white flex items-center space-x-2">
-                <span>Database &amp; Storage Management</span>
+                <span>Database &amp; Storage Settings</span>
               </h3>
               <p className="text-xs text-slate-400">
-                Automated background pruning &bull; User-controlled data deletion
+                Automated pruning and data deletion
               </p>
             </div>
           </div>
@@ -110,39 +110,39 @@ export default function StorageSettingsModal({
         </div>
 
         {/* Scrollable Body */}
-        <div className="p-4 sm:p-6 overflow-y-auto space-y-5 flex-1">
+        <div className="p-3.5 sm:p-5 overflow-y-auto space-y-4 flex-1">
           {/* 1. Automated Background Maintenance Policy Card */}
-          <div className="bg-gradient-to-br from-emerald-950/40 via-slate-950 to-slate-900 border border-emerald-500/30 rounded-2xl p-4 space-y-3 shadow-inner">
+          <div className="bg-gradient-to-br from-emerald-950/40 via-slate-950 to-slate-900 border border-emerald-500/30 rounded-2xl p-3.5 sm:p-4 space-y-2.5 shadow-inner">
             <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-1.5">
                 <ShieldCheck className="w-4 h-4 text-emerald-400" />
                 <span className="text-xs font-bold text-emerald-300 uppercase tracking-wider">
-                  Automated Database Maintenance
+                  Automated Maintenance
                 </span>
               </div>
               <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-semibold">
-                Active &bull; Daily 3 AM UTC
+                Daily 3 AM UTC
               </span>
             </div>
 
-            <p className="text-xs text-slate-300 leading-relaxed">
-              To keep the database lean and never reach capacity limits, temporary and expired data are automatically deleted without requiring manual approval:
+            <p className="text-xs text-slate-300">
+              Automatically deletes expired data to keep the database lean:
             </p>
 
-            <ul className="text-[11px] text-slate-400 space-y-1.5 list-disc list-inside">
-              <li><strong>Expired Login Sessions:</strong> Purged automatically past expiration date.</li>
-              <li><strong>Stale Upload Logs:</strong> Upload records older than 30 days are automatically deleted.</li>
-              <li><strong>Inactive Guest Cache:</strong> Anonymous visitors without an account are cleaned after 7 days.</li>
+            <ul className="text-[11px] text-slate-400 space-y-1 list-disc list-inside">
+              <li><strong>Expired Sessions:</strong> Purged upon expiration.</li>
+              <li><strong>Upload Logs:</strong> Removed after 30 days.</li>
+              <li><strong>Guest Cache:</strong> Cleaned after 7 days.</li>
             </ul>
 
             <div className="pt-1 flex items-center justify-between">
               <button
                 onClick={handleRunAutoCleanup}
                 disabled={isCleaning}
-                className="px-3.5 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-xs font-semibold rounded-xl transition-all cursor-pointer flex items-center space-x-1.5 disabled:opacity-50"
+                className="px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-xs font-semibold rounded-xl transition-all cursor-pointer flex items-center space-x-1.5 disabled:opacity-50"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isCleaning ? 'animate-spin' : ''}`} />
-                <span>{isCleaning ? 'Running Maintenance...' : 'Run Auto-Cleanup Now'}</span>
+                <span>{isCleaning ? 'Cleaning...' : 'Run Auto-Cleanup'}</span>
               </button>
 
               {cleanupReport && (
@@ -154,11 +154,11 @@ export default function StorageSettingsModal({
           </div>
 
           {/* 2. User-Approved Data Clearance Section */}
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             <div className="flex items-center justify-between">
-              <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center space-x-2">
-                <HardDrive className="w-4 h-4 text-orange-400" />
-                <span>Your Stored Data (Requires Your Approval)</span>
+              <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center space-x-1.5">
+                <HardDrive className="w-3.5 h-3.5 text-orange-400" />
+                <span>Your Stored Data</span>
               </h4>
               <button
                 onClick={fetchStats}
@@ -172,23 +172,21 @@ export default function StorageSettingsModal({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {/* Upload History */}
-              <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-3.5 flex flex-col justify-between space-y-3">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <div className="flex items-center space-x-1.5">
-                      <Youtube className="w-4 h-4 text-red-400" />
-                      <span className="text-xs font-bold text-white">Upload History</span>
-                    </div>
-                    <p className="text-[11px] text-slate-400 mt-1">
-                      {stats ? `${stats.uploadJobsCount} record${stats.uploadJobsCount !== 1 ? 's' : ''}` : 'Loading...'}
-                    </p>
+              <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-3 flex flex-col justify-between space-y-2.5">
+                <div>
+                  <div className="flex items-center space-x-1.5">
+                    <Youtube className="w-3.5 h-3.5 text-red-400" />
+                    <span className="text-xs font-bold text-white">Upload History</span>
                   </div>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    {stats ? `${stats.uploadJobsCount} record${stats.uploadJobsCount !== 1 ? 's' : ''}` : 'Loading...'}
+                  </p>
                 </div>
                 <button
                   onClick={() => handleRequestClear(
                     'history',
                     'Upload History',
-                    'This will remove all your completed and recorded YouTube upload history from the database.'
+                    'Delete all completed and recorded YouTube upload history.'
                   )}
                   disabled={!stats || stats.uploadJobsCount === 0}
                   className="w-full py-1.5 text-xs font-semibold text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 rounded-xl transition-colors cursor-pointer disabled:opacity-40 disabled:pointer-events-none flex items-center justify-center space-x-1.5"
@@ -199,23 +197,21 @@ export default function StorageSettingsModal({
               </div>
 
               {/* YouTube Tokens & Channel */}
-              <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-3.5 flex flex-col justify-between space-y-3">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <div className="flex items-center space-x-1.5">
-                      <Youtube className="w-4 h-4 text-red-500" />
-                      <span className="text-xs font-bold text-white">YouTube Channel Token</span>
-                    </div>
-                    <p className="text-[11px] text-slate-400 mt-1 truncate max-w-[170px]">
-                      {stats?.hasYouTube ? (stats.youtubeChannel || 'Linked') : 'Not Connected'}
-                    </p>
+              <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-3 flex flex-col justify-between space-y-2.5">
+                <div>
+                  <div className="flex items-center space-x-1.5">
+                    <Youtube className="w-3.5 h-3.5 text-red-500" />
+                    <span className="text-xs font-bold text-white">YouTube Channel</span>
                   </div>
+                  <p className="text-[11px] text-slate-400 mt-1 truncate max-w-[170px]">
+                    {stats?.hasYouTube ? (stats.youtubeChannel || 'Linked') : 'Not Connected'}
+                  </p>
                 </div>
                 <button
                   onClick={() => handleRequestClear(
                     'youtube',
-                    'YouTube Channel Connection',
-                    'This will revoke and delete your saved YouTube OAuth access and refresh tokens from the database.'
+                    'YouTube Connection',
+                    'Revoke and delete saved YouTube OAuth tokens.'
                   )}
                   disabled={!stats || !stats.hasYouTube}
                   className="w-full py-1.5 text-xs font-semibold text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 rounded-xl transition-colors cursor-pointer disabled:opacity-40 disabled:pointer-events-none flex items-center justify-center space-x-1.5"
@@ -228,24 +224,24 @@ export default function StorageSettingsModal({
           </div>
 
           {/* 3. Danger Zone: Wipe All User Data */}
-          <div className="border border-red-500/30 bg-red-950/20 rounded-2xl p-4 space-y-3">
+          <div className="border border-red-500/30 bg-red-950/20 rounded-2xl p-3.5 space-y-2.5">
             <div className="flex items-center space-x-2 text-rose-400">
               <AlertTriangle className="w-4 h-4" />
-              <span className="text-xs font-bold uppercase tracking-wider">Danger Zone &bull; Complete Wipe</span>
+              <span className="text-xs font-bold uppercase tracking-wider">Danger Zone</span>
             </div>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Permanently erase all your database records, upload history, YouTube tokens, and project preferences.
+            <p className="text-xs text-slate-400">
+              Permanently delete all database records, upload history, and preferences.
             </p>
             <button
               onClick={() => handleRequestClear(
                 'all',
                 'All Account Data',
-                'WARNING: This will permanently delete all your upload history, YouTube tokens, settings, and active login sessions!'
+                'Permanently delete all upload history, YouTube tokens, settings, and login sessions.'
               )}
-              className="px-4 py-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 active:scale-98 text-white text-xs font-bold rounded-xl shadow-lg shadow-red-500/20 cursor-pointer flex items-center space-x-2 transition-all"
+              className="w-full py-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 active:scale-98 text-white text-xs font-bold rounded-xl shadow-lg shadow-red-500/20 cursor-pointer flex items-center justify-center space-x-2 transition-all"
             >
               <Trash2 className="w-4 h-4" />
-              <span>Clear All My Account Data</span>
+              <span>Wipe All My Account Data</span>
             </button>
           </div>
         </div>

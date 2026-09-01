@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import {
   Film, Download, Archive, CheckCircle2, Eye, X, CheckSquare, Square, Filter,
   Youtube, ExternalLink, Upload, RotateCcw, Calendar, Clock, Sparkles, Share2,
-  RefreshCw
+  RefreshCw, Instagram, Zap
 } from 'lucide-react';
 import { formatTime } from '../utils/time';
 import { formatScheduledDateTime } from '../utils/scheduler';
@@ -33,7 +33,22 @@ export default function GeneratedClips({
   fbPublishProgress = 0,
   fbPublishStage = '',
   fbPublishingClipId = null,
-  fbPublishedMap = {}
+  fbPublishedMap = {},
+  // Instagram upload integration
+  isIgConnected = false,
+  igAccount = null,
+  igSettings = {},
+  onPublishIgClip,
+  onBatchPublishIg,
+  isPublishingIg = false,
+  igPublishProgress = 0,
+  igPublishStage = '',
+  igPublishingClipId = null,
+  igPublishedMap = {},
+  // Dual platform FB + IG integration
+  onPublishBothClip,
+  onBatchPublishBoth,
+  isPublishingBoth = false
 }) {
   const [activePreviewClip, setActivePreviewClip] = useState(null);
   const [selectedClipIds, setSelectedClipIds] = useState(new Set());
@@ -99,6 +114,23 @@ export default function GeneratedClips({
     if (selectedClips.length === 0) return;
     if (onBatchPublishFb) {
       onBatchPublishFb(selectedClips);
+    }
+  };
+
+  // Batch Instagram Publish for Selected Clips
+  const handlePublishSelectedIg = () => {
+    const selectedClips = completedClips.filter((c) => selectedClipIds.has(c.id));
+    if (selectedClips.length === 0) return;
+    if (onBatchPublishIg) {
+      onBatchPublishIg(selectedClips);
+    }
+  };
+
+  // Dual platform FB + IG Batch publish selected clips
+  const handlePublishSelectedBoth = async () => {
+    const selectedClips = completedClips.filter((c) => selectedClipIds.has(c.id));
+    if (selectedClips.length > 0 && onBatchPublishBoth) {
+      onBatchPublishBoth(selectedClips);
     }
   };
 
@@ -180,6 +212,37 @@ export default function GeneratedClips({
     return null;
   };
 
+  // Helper: get Instagram Reel published chip
+  const getInstagramChip = (clip) => {
+    const isCurrentlyPublishing = isPublishingIg && igPublishingClipId === clip.id;
+    if (isCurrentlyPublishing) {
+      return (
+        <span className="inline-flex items-center space-x-1 text-[10px] bg-pink-500/20 text-pink-300 border border-pink-500/30 px-1.5 py-0.5 rounded-full animate-pulse font-semibold">
+          <RefreshCw className="w-2.5 h-2.5 animate-spin text-pink-400" />
+          <span>IG Reel...</span>
+        </span>
+      );
+    }
+
+    const reelUrl = igPublishedMap[clip.id];
+    if (reelUrl) {
+      return (
+        <a
+          href={reelUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="inline-flex items-center space-x-1 text-[10px] bg-pink-500/20 text-pink-300 border border-pink-500/30 hover:bg-pink-500/30 px-1.5 py-0.5 rounded-full font-semibold transition-colors"
+        >
+          <Instagram className="w-2.5 h-2.5 text-pink-400" />
+          <span>IG Reel ↗</span>
+        </a>
+      );
+    }
+
+    return null;
+  };
+
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 sm:p-5 shadow-lg space-y-4">
       {/* Header */}
@@ -196,7 +259,7 @@ export default function GeneratedClips({
               </span>
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
-              High-definition clips ready to download, schedule to YouTube, and publish to Facebook Reels.
+              High-definition clips ready to download, schedule to YouTube, and publish to Facebook & Instagram Reels.
             </p>
           </div>
         </div>
@@ -219,15 +282,40 @@ export default function GeneratedClips({
             </button>
           )}
 
+          {/* Dual FB + IG Batch Publish Selected Button */}
+          {selectedCount > 0 && isFbConnected && isIgConnected && onBatchPublishBoth && (
+            <button
+              onClick={handlePublishSelectedBoth}
+              disabled={isPublishingFb || isPublishingIg || isPublishingBoth}
+              className="px-3.5 py-2 text-xs font-bold text-white bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:opacity-95 active:scale-98 rounded-xl shadow-md shadow-purple-500/20 flex items-center justify-center space-x-1.5 transition-all cursor-pointer disabled:opacity-50 touch-manipulation"
+              title="Publish selected clips to both Facebook & Instagram"
+            >
+              <Zap className="w-4 h-4 text-amber-300 fill-current" />
+              <span>⚡ Both FB + IG ({selectedCount})</span>
+            </button>
+          )}
+
           {/* Facebook Batch Publish Selected Button */}
           {selectedCount > 0 && isFbConnected && onBatchPublishFb && (
             <button
               onClick={handlePublishSelectedFb}
-              disabled={isPublishingFb}
+              disabled={isPublishingFb || isPublishingBoth}
               className="px-3.5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 active:scale-98 rounded-xl shadow-md shadow-blue-500/20 flex items-center justify-center space-x-1.5 transition-all cursor-pointer disabled:opacity-50 touch-manipulation"
             >
               <Share2 className="w-4 h-4" />
-              <span>Publish Selected to Facebook ({selectedCount})</span>
+              <span>Facebook ({selectedCount})</span>
+            </button>
+          )}
+
+          {/* Instagram Batch Publish Selected Button */}
+          {selectedCount > 0 && isIgConnected && onBatchPublishIg && (
+            <button
+              onClick={handlePublishSelectedIg}
+              disabled={isPublishingIg || isPublishingBoth}
+              className="px-3.5 py-2 text-xs font-bold text-white bg-gradient-to-r from-pink-500 via-rose-500 to-purple-600 hover:opacity-95 active:scale-98 rounded-xl shadow-md shadow-pink-500/20 flex items-center justify-center space-x-1.5 transition-all cursor-pointer disabled:opacity-50 touch-manipulation"
+            >
+              <Instagram className="w-4 h-4" />
+              <span>Instagram ({selectedCount})</span>
             </button>
           )}
 
@@ -258,7 +346,7 @@ export default function GeneratedClips({
             <span>{isAllSelected ? 'Deselect All' : 'Select All'}</span>
           </button>
 
-          <span className="text-slate-600">&bull;</span>
+          <span className="text-slate-600">•</span>
           <span className="text-xs text-slate-400 font-mono">
             {selectedCount} of {completedClips.length} selected
           </span>
@@ -287,6 +375,7 @@ export default function GeneratedClips({
           const canUploadYt = isConnected && onUploadClip && (!uploadState || uploadState.status === 'upload_cancelled' || uploadState.status === 'upload_failed') && clip.blob;
           const uploadFailed = uploadState?.status === 'upload_failed';
           const canPublishFb = isFbConnected && onPublishFbClip && clip.blob;
+          const canPublishIg = isIgConnected && onPublishIgClip && clip.blob;
 
           return (
             <div
@@ -315,12 +404,13 @@ export default function GeneratedClips({
                   <div className="flex items-center space-x-1 shrink-0">
                     {getYouTubeChip(clip)}
                     {getFacebookChip(clip)}
+                    {getInstagramChip(clip)}
                   </div>
                 </div>
 
                 <div className="flex items-center space-x-2 text-[11px] text-slate-400 font-mono mt-1">
                   <span>{formatTime(clip.duration)}</span>
-                  <span>&bull;</span>
+                  <span>•</span>
                   <span>{clip.size ? `${(clip.size / (1024 * 1024)).toFixed(1)} MB` : '1080p'}</span>
                 </div>
 
@@ -370,16 +460,42 @@ export default function GeneratedClips({
                   </button>
                 )}
 
+                {/* Publish to Facebook & Instagram Reels (Dual) */}
+                {canPublishFb && canPublishIg && onPublishBothClip && (
+                  <button
+                    onClick={() => onPublishBothClip(clip)}
+                    disabled={isPublishingFb || isPublishingIg || isPublishingBoth}
+                    className="flex-1 py-1.5 text-xs font-semibold text-white bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:opacity-95 border border-purple-500/40 rounded-lg flex items-center justify-center space-x-1 transition-all cursor-pointer touch-manipulation shadow-sm shadow-purple-500/20 disabled:opacity-50"
+                    title="Publish to both Facebook and Instagram Reels (Single B2 Upload)"
+                  >
+                    <Zap className="w-3.5 h-3.5 text-amber-300 fill-current" />
+                    <span>⚡ Both</span>
+                  </button>
+                )}
+
                 {/* Publish to Facebook Reels */}
                 {canPublishFb && (
                   <button
                     onClick={() => onPublishFbClip(clip)}
-                    disabled={isPublishingFb}
+                    disabled={isPublishingFb || isPublishingBoth}
                     className="flex-1 py-1.5 text-xs font-semibold text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 border border-blue-500/40 rounded-lg flex items-center justify-center space-x-1 transition-all cursor-pointer touch-manipulation shadow-sm shadow-blue-500/20 disabled:opacity-50"
                     title="Publish directly to Facebook Reels"
                   >
                     <Share2 className="w-3.5 h-3.5" />
                     <span>Facebook</span>
+                  </button>
+                )}
+
+                {/* Publish to Instagram Reels */}
+                {canPublishIg && (
+                  <button
+                    onClick={() => onPublishIgClip(clip)}
+                    disabled={isPublishingIg || isPublishingBoth}
+                    className="flex-1 py-1.5 text-xs font-semibold text-white bg-gradient-to-r from-pink-500 via-rose-500 to-purple-600 hover:opacity-95 border border-pink-500/40 rounded-lg flex items-center justify-center space-x-1 transition-all cursor-pointer touch-manipulation shadow-sm shadow-pink-500/20 disabled:opacity-50"
+                    title="Publish directly to Instagram Reels"
+                  >
+                    <Instagram className="w-3.5 h-3.5" />
+                    <span>Instagram</span>
                   </button>
                 )}
 

@@ -17,6 +17,7 @@ import { useProcessingQueue } from './hooks/useProcessingQueue';
 import { useYouTube } from './hooks/useYouTube';
 import { useUploadQueue } from './hooks/useUploadQueue';
 import { useFacebook } from './hooks/useFacebook';
+import { useInstagram } from './hooks/useInstagram';
 import { useAuth } from './hooks/useAuth';
 import { useTemplates } from './hooks/useTemplates';
 import { Check, Info, X, Film, Palette, Layers, Sparkles } from 'lucide-react';
@@ -258,6 +259,34 @@ export default function App() {
     lastPublishedPost: lastPublishedFbPost
   } = useFacebook({ isAuthenticated: isUserLoggedIn });
 
+  // ── Instagram Hook (Meta Graph API & Instagram Reels) ────────────────────────
+  const {
+    igAccount,
+    availableAccounts: igAvailableAccounts,
+    isConnected: isIgConnected,
+    isUserConnected: isIgUserConnected,
+    isAccountConnected: isIgAccountConnected,
+    isLoadingAccount: isLoadingIgAccount,
+    accountError: igAccountError,
+    connectInstagram,
+    connectAccountById: connectIgAccountById,
+    isConnectingAccount: isConnectingIgAccount,
+    accountConnectError: igAccountConnectError,
+    setAccountConnectError: setIgAccountConnectError,
+    switchAccount: switchIgAccount,
+    disconnectInstagram,
+    refreshIgAccount,
+    igSettings,
+    updateIgSettings,
+    renderIgTemplate,
+    publishToInstagramPipeline,
+    isPublishing: isPublishingIg,
+    publishProgress: publishIgProgress,
+    publishStage: publishIgStage,
+    publishError: publishIgError,
+    lastPublishedPost: lastPublishedIgPost
+  } = useInstagram({ isAuthenticated: isUserLoggedIn });
+
   // ── Templates / Presets Hook (Cross-Section Multi-Configuration) ──────────────
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
   const {
@@ -274,6 +303,7 @@ export default function App() {
       const textConfig = typeof template.text_data === 'string' ? JSON.parse(template.text_data || '{}') : (template.text_data || {});
       const ytConfig = typeof template.youtube_data === 'string' ? JSON.parse(template.youtube_data || '{}') : (template.youtube_data || {});
       const fbConfig = typeof template.facebook_data === 'string' ? JSON.parse(template.facebook_data || '{}') : (template.facebook_data || template.fb_data || {});
+      const igConfig = typeof template.instagram_data === 'string' ? JSON.parse(template.instagram_data || '{}') : (template.instagram_data || template.ig_data || {});
       const logoConfig = typeof template.logo_data === 'string' ? JSON.parse(template.logo_data || '{}') : (template.logo_data || {});
 
       if (textConfig && Object.keys(textConfig).length > 0) {
@@ -284,6 +314,9 @@ export default function App() {
       }
       if (fbConfig && Object.keys(fbConfig).length > 0) {
         updateFbSettings(fbConfig);
+      }
+      if (igConfig && Object.keys(igConfig).length > 0) {
+        updateIgSettings(igConfig);
       }
       if (logoConfig && Object.keys(logoConfig).length > 0) {
         const logoSrc = logoConfig.dataUrl || (logoConfig.url && !logoConfig.url.startsWith('blob:') ? logoConfig.url : null);
@@ -361,6 +394,97 @@ export default function App() {
     if (!clipsToPublish || clipsToPublish.length === 0) return;
     for (const clip of clipsToPublish) {
       await handlePublishFbClip(clip);
+    }
+  };
+
+  // ── Instagram Direct & Batch Publishing Integration ──────────────────────────
+  const [igPublishedMap, setIgPublishedMap] = useState({});
+  const [igPublishingClipId, setIgPublishingClipId] = useState(null);
+
+  const handlePublishIgClip = async (clip) => {
+    if (!clip || !clip.blob) {
+      showToast('Clip video data not ready for publishing.', 'error');
+      return;
+    }
+    setIgPublishingClipId(clip.id);
+    try {
+      const partNum = clip.partNumber || 1;
+      const movie = igSettings?.ig_name || textSettings.movieName || 'My Movie';
+      const isZeroPad = igSettings?.ig_zero_pad !== false;
+
+      const caption = renderIgTemplate
+        ? renderIgTemplate(igSettings?.ig_caption_template || '{movie} - Part {part}\n\n#Reels #InstagramReels #Viral\n\n{hashtags}', {
+            movieName: movie,
+            partNumber: partNum,
+            zeroPad: isZeroPad,
+            tags: igSettings?.ig_tags || []
+          })
+        : `${movie} - Part ${partNum}\n\n#Reels #Viral`;
+
+      const res = await publishToInstagramPipeline(clip.blob, {
+        fileName: `${movie.replace(/[\\/:*?"<>|]/g, '_')}_Part_${partNum}.mp4`,
+        title: `${movie} - Part ${partNum}`,
+        caption,
+        hashtags: igSettings?.ig_tags || [],
+        shareToFeed: igSettings?.ig_share_to_feed !== false,
+        contentType: igSettings?.ig_content_type || 'reel'
+      });
+
+      const publishedUrl = res?.postUrl || (res?.media_id ? `https://www.instagram.com/reel/${res.media_id}` : null);
+      if (publishedUrl) {
+        setIgPublishedMap(prev => ({ ...prev, [clip.id]: publishedUrl }));
+        showToast(`Published Part ${partNum} to Instagram Reels!`, 'success');
+      } else {
+        showToast(`Part ${partNum} sent to Instagram!`, 'success');
+      }
+    } catch (err) {
+      console.error('Instagram publish error:', err);
+      showToast(`Instagram publish failed: ${err.message}`, 'error');
+    } finally {
+      setIgPublishingClipId(null);
+    }
+  };
+
+  const handleBatchPublishIg = async (clipsToPublish) => {
+    if (!clipsToPublish || clipsToPublish.length === 0) return;
+    for (const clip of clipsToPublish) {
+      await handlePublishIgClip(clip);
+    }
+  };
+
+  // ── Dual FB + IG Direct & Batch Publishing Integration ────────────────────────
+  const [isPublishingBoth, setIsPublishingBoth] = useState(false);
+
+  const handlePublishBothClip = async (clip) => {
+    if (!clip || !clip.blob) {
+      showToast('Clip video data not ready for publishing.', 'error');
+      return;
+    }
+    setIsPublishingBoth(true);
+    try {
+      showToast(`Publishing Part ${clip.partNumber || 1} to Facebook & Instagram Reels (Temporary upload cached)...`, 'info');
+      // 1. Publish to Facebook first (uploads to Backblaze B2 and caches descriptor)
+      await handlePublishFbClip(clip);
+      // 2. Publish to Instagram (reuses public B2 URL instantly from cache)
+      await handlePublishIgClip(clip);
+      showToast(`Part ${clip.partNumber || 1} published to both Facebook & Instagram!`, 'success');
+    } catch (err) {
+      console.error('Dual FB+IG publish error:', err);
+      showToast(`Dual publish error: ${err.message}`, 'error');
+    } finally {
+      setIsPublishingBoth(false);
+    }
+  };
+
+  const handleBatchPublishBoth = async (clipsToPublish) => {
+    if (!clipsToPublish || clipsToPublish.length === 0) return;
+    setIsPublishingBoth(true);
+    try {
+      for (const clip of clipsToPublish) {
+        await handlePublishBothClip(clip);
+      }
+    } finally {
+      setIsPublishingBoth(false);
     }
   };
 
@@ -874,13 +998,15 @@ export default function App() {
         isAuthenticated={isUserLoggedIn}
         onOpenAuth={openAuthModal}
         onLogout={handleLogout}
-        onOpenStorage={() => setIsStorageModalOpen(true)}
+        onOpenStorage={() => handleNavigateTab('storage')}
         onOpenTemplates={() => setIsTemplateModalOpen(true)}
         templatesCount={templates.length}
         ytAccount={ytAccount}
         fbAccount={fbAccount}
+        igAccount={igAccount}
         isYtConnected={isConnected}
         isFbConnected={isFbConnected}
+        isIgConnected={isIgConnected}
         activeTab={activeEditorTab}
         onNavigateTab={handleNavigateTab}
       />
@@ -1055,6 +1181,31 @@ export default function App() {
                   publishFbStage={publishFbStage}
                   publishFbError={publishFbError}
                   lastPublishedFbPost={lastPublishedFbPost}
+                  // Instagram props
+                  igAccount={igAccount}
+                  availableIgAccounts={igAvailableAccounts}
+                  isIgConnected={isIgConnected}
+                  isIgUserConnected={isIgUserConnected}
+                  isIgAccountConnected={isIgAccountConnected}
+                  isLoadingIgAccount={isLoadingIgAccount}
+                  igAccountError={igAccountError}
+                  connectInstagram={connectInstagram}
+                  connectIgAccountById={connectIgAccountById}
+                  isConnectingIgAccount={isConnectingIgAccount}
+                  igAccountConnectError={igAccountConnectError}
+                  setIgAccountConnectError={setIgAccountConnectError}
+                  switchIgAccount={switchIgAccount}
+                  disconnectInstagram={disconnectInstagram}
+                  refreshIgAccount={refreshIgAccount}
+                  igSettings={igSettings}
+                  updateIgSettings={updateIgSettings}
+                  renderIgTemplate={renderIgTemplate}
+                  publishToInstagramPipeline={publishToInstagramPipeline}
+                  isPublishingIg={isPublishingIg}
+                  publishIgProgress={publishIgProgress}
+                  publishIgStage={publishIgStage}
+                  publishIgError={publishIgError}
+                  lastPublishedIgPost={lastPublishedIgPost}
                   activeTab={activeEditorTab}
                   onTabChange={setActiveEditorTab}
                 />
@@ -1121,6 +1272,21 @@ export default function App() {
                 fbPublishStage={publishFbStage}
                 fbPublishingClipId={fbPublishingClipId}
                 fbPublishedMap={fbPublishedMap}
+                // Instagram Reels upload integration
+                isIgConnected={isIgConnected}
+                igAccount={igAccount}
+                igSettings={igSettings}
+                onPublishIgClip={handlePublishIgClip}
+                onBatchPublishIg={handleBatchPublishIg}
+                isPublishingIg={isPublishingIg}
+                igPublishProgress={publishIgProgress}
+                igPublishStage={publishIgStage}
+                igPublishingClipId={igPublishingClipId}
+                igPublishedMap={igPublishedMap}
+                // Dual FB + IG platform integration
+                onPublishBothClip={handlePublishBothClip}
+                onBatchPublishBoth={handleBatchPublishBoth}
+                isPublishingBoth={isPublishingBoth}
               />
 
               {/* YouTube Upload History (only shown when there are history records) */}
@@ -1212,6 +1378,7 @@ export default function App() {
         currentTextSettings={textSettings}
         currentYtSettings={ytSettings}
         currentFbSettings={fbSettings}
+        currentIgSettings={igSettings}
         currentLogoSettings={logoSettings}
       />
     </div>

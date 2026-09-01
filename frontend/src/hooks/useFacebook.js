@@ -20,6 +20,7 @@ import {
   getFacebookJobs,
   isApiConfigured
 } from '../services/apiService';
+import sharedUploadCache from '../services/sharedUploadCache';
 
 const FB_SETTINGS_STORAGE_KEY = 'video_clip_editor_fb_settings';
 
@@ -291,29 +292,48 @@ export function useFacebook({ isAuthenticated = false } = {}) {
     setPublishError(null);
     setLastPublishedPost(null);
 
-    const tempFileName = `fb_${Date.now()}_${Math.random().toString(36).substring(2, 7)}_${fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+    const cacheKey = opts.clipId || videoBlob;
+    const cachedUpload = sharedUploadCache.getCachedUpload(cacheKey);
+
+    let b2FileId = cachedUpload?.b2FileId;
+    let b2FileName = cachedUpload?.b2FileName;
 
     try {
-      // Step 1: Obtain Backblaze B2 Upload Endpoint
-      setPublishStage('b2_upload');
-      const target = await getB2UploadTarget();
-      if (!target || !target.uploadUrl) {
-        throw new Error('Failed to obtain Backblaze B2 upload target.');
-      }
-
-      // Step 2: Upload Video to Backblaze B2 with progress tracking
-      const b2Res = await uploadToB2(
-        target.uploadUrl,
-        target.authorizationToken,
-        videoBlob,
-        tempFileName,
-        (percent) => {
-          setPublishProgress(percent);
+      if (!b2FileName) {
+        // Step 1: Obtain Backblaze B2 Upload Endpoint
+        setPublishStage('b2_upload');
+        const target = await getB2UploadTarget();
+        if (!target || !target.uploadUrl) {
+          throw new Error('Failed to obtain Backblaze B2 upload target.');
         }
-      );
 
-      const b2FileId = b2Res.fileId || tempFileName;
-      const b2FileName = b2Res.fileName || tempFileName;
+        const tempFileName = `fb_${Date.now()}_${Math.random().toString(36).substring(2, 7)}_${fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+
+        // Step 2: Upload Video to Backblaze B2 with progress tracking
+        const b2Res = await uploadToB2(
+          target.uploadUrl,
+          target.authorizationToken,
+          videoBlob,
+          tempFileName,
+          (percent) => {
+            setPublishProgress(percent);
+          }
+        );
+
+        b2FileId = b2Res.fileId || tempFileName;
+        b2FileName = b2Res.fileName || tempFileName;
+
+        // Cache the uploaded file so Instagram or other platforms can reuse it immediately
+        sharedUploadCache.setCachedUpload(cacheKey, {
+          b2FileId,
+          b2FileName,
+          b2Url: b2Res.downloadUrl
+        });
+      } else {
+        // Already uploaded to B2! Skip upload and proceed directly
+        setPublishStage('fb_processing');
+        setPublishProgress(100);
+      }
 
       // Step 3: Trigger Meta Graph API Ingestion via Cloudflare Worker
       setPublishStage('fb_processing');

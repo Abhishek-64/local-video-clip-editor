@@ -158,12 +158,22 @@ export async function ensureValidToken(env, db, account) {
  * Returns null if no valid session found.
  */
 export function getSessionUserId(request) {
-  const cookie = request.headers.get('Cookie') || '';
+  if (!request) return null;
+  let cookie = '';
+  if (typeof request === 'string') {
+    cookie = request;
+  } else if (request.headers && typeof request.headers.get === 'function') {
+    cookie = request.headers.get('Cookie') || '';
+  } else if (request.req && typeof request.req.header === 'function') {
+    cookie = request.req.header('Cookie') || '';
+  } else if (typeof request.header === 'function') {
+    cookie = request.header('Cookie') || '';
+  }
+  
   const match = cookie.match(/(?:^|;\s*)__vcuid=([^;]+)/);
   if (!match) return null;
 
   try {
-    // Simple base64 decode of userId — not cryptographically signed (use SESSION_SECRET for HMAC if needed)
     return atob(match[1]);
   } catch {
     return null;

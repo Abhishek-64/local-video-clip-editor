@@ -517,5 +517,137 @@ export async function getFacebookJob(id) {
   return apiFetch(`/api/facebook/jobs/${id}`);
 }
 
+// ─── Instagram Account & Reels Publishing ─────────────────────────────────────
 
+/**
+ * Returns whether Instagram is connected and active account info.
+ */
+export async function getInstagramAccount() {
+  return apiFetch('/api/instagram/account');
+}
+
+/**
+ * Switch active Instagram Account.
+ */
+export async function selectInstagramAccount(igUserId) {
+  return apiFetch('/api/instagram/select-account', {
+    method: 'POST',
+    body: JSON.stringify({ ig_user_id: igUserId })
+  });
+}
+
+/**
+ * Safe Instagram Diagnostics Check
+ */
+export async function debugInstagramAccount() {
+  return apiFetch('/api/instagram/debug-account');
+}
+
+/**
+ * Safe Instagram Diagnostics Check (full info endpoint)
+ */
+export async function getInstagramDiagnostics() {
+  return apiFetch('/api/instagram/diagnostics');
+}
+
+/**
+ * Connect an Instagram Account by Account ID / Username
+ */
+export async function connectInstagramAccountById({ accountId }) {
+  return apiFetch('/api/instagram/connect-account-id', {
+    method: 'POST',
+    body: JSON.stringify({
+      accountId
+    })
+  });
+}
+
+/**
+ * Disconnect Instagram account.
+ */
+export async function disconnectInstagramAccount() {
+  return apiFetch('/api/instagram/disconnect', {
+    method: 'POST'
+  });
+}
+
+/**
+ * Get presigned Backblaze B2 upload target for Instagram.
+ */
+export async function getInstagramB2UploadTarget() {
+  return apiFetch('/api/instagram/b2/upload-url', {
+    method: 'POST'
+  });
+}
+
+/**
+ * Initiate Instagram publishing (Reels) via worker ingest & B2 cleanup.
+ */
+export async function publishToInstagram(payload) {
+  return apiFetch('/api/instagram/publish', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+/**
+ * Get Instagram upload job history.
+ */
+export async function getInstagramJobs() {
+  return apiFetch('/api/instagram/jobs');
+}
+
+/**
+ * Get single Instagram job status.
+ */
+export async function getInstagramJob(id) {
+  return apiFetch(`/api/instagram/jobs/${id}`);
+}
+
+// ─── Storage, Backblaze B2 & Database Management ──────────────────────────────
+
+/**
+ * Get comprehensive overview of Backblaze B2 bucket storage, files, and D1 stats.
+ */
+export async function getStorageOverview() {
+  return apiFetch('/api/storage/overview');
+}
+
+/**
+ * Delete a specific file from B2.
+ */
+export async function deleteB2File({ fileId, fileName }) {
+  return apiFetch('/api/storage/b2/delete', {
+    method: 'POST',
+    body: JSON.stringify({ fileId, fileName })
+  });
+}
+
+/**
+ * Delete all files in B2 bucket.
+ */
+export async function deleteAllB2Files() {
+  return apiFetch('/api/storage/b2/delete-all', {
+    method: 'POST'
+  });
+}
+
+/**
+ * Clear specific database records for the authenticated user.
+ */
+export async function clearDataScope(scope) {
+  return apiFetch('/api/storage/clear-scope', {
+    method: 'POST',
+    body: JSON.stringify({ scope })
+  });
+}
+
+/**
+ * Wipe all user data across all tables, temporary B2 files, and sessions.
+ */
+export async function wipeAllUserData() {
+  return apiFetch('/api/storage/wipe-all', {
+    method: 'POST'
+  });
+}
 

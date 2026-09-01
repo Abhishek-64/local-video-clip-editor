@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import {
   Bookmark, X, Plus, Check, Trash2, Edit3, Sparkles, Type, Youtube,
   Image as ImageIcon, Clock, Calendar, Search, ArrowRight, LayoutTemplate,
-  CheckCircle2, AlertCircle, FileText, Share2
+  CheckCircle2, AlertCircle, FileText, Share2, Instagram
 } from 'lucide-react';
 
 export default function TemplateManagerModal({
@@ -16,6 +16,7 @@ export default function TemplateManagerModal({
   currentTextSettings = {},
   currentYtSettings = {},
   currentFbSettings = {},
+  currentIgSettings = {},
   currentLogoSettings = {}
 }) {
   const [activeTab, setActiveTab] = useState('list'); // 'list' | 'save'
@@ -39,6 +40,7 @@ export default function TemplateManagerModal({
         textSettings: currentTextSettings,
         ytSettings: currentYtSettings,
         fbSettings: currentFbSettings,
+        igSettings: currentIgSettings,
         logoSettings: currentLogoSettings
       });
       setTemplateName('');
@@ -170,6 +172,7 @@ export default function TemplateManagerModal({
                     const textConfig = typeof template.text_data === 'string' ? JSON.parse(template.text_data || '{}') : template.text_data;
                     const ytConfig = typeof template.youtube_data === 'string' ? JSON.parse(template.youtube_data || '{}') : template.youtube_data;
                     const fbConfig = typeof template.facebook_data === 'string' ? JSON.parse(template.facebook_data || '{}') : template.facebook_data;
+                    const igConfig = typeof template.instagram_data === 'string' ? JSON.parse(template.instagram_data || '{}') : (template.instagram_data || template.ig_data);
                     const logoConfig = typeof template.logo_data === 'string' ? JSON.parse(template.logo_data || '{}') : template.logo_data;
                     const isApplied = appliedId === template.id;
 
@@ -214,6 +217,13 @@ export default function TemplateManagerModal({
                               <span className="inline-flex items-center space-x-1 px-2 py-0.5 bg-sky-500/10 text-sky-300 border border-sky-500/20 rounded-md text-[10px] font-medium">
                                 <Share2 className="w-2.5 h-2.5" />
                                 <span>Facebook: {fbConfig.fb_content_type === 'reel' ? 'Reel' : 'Video'}</span>
+                              </span>
+                            )}
+
+                            {igConfig && (
+                              <span className="inline-flex items-center space-x-1 px-2 py-0.5 bg-pink-500/10 text-pink-300 border border-pink-500/20 rounded-md text-[10px] font-medium">
+                                <Instagram className="w-2.5 h-2.5" />
+                                <span>Instagram: {(igConfig.ig_tags || []).length} tags</span>
                               </span>
                             )}
 
@@ -304,7 +314,7 @@ export default function TemplateManagerModal({
                   Configuration to be Saved in this Template:
                 </span>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 text-left">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2 text-left">
                   {/* Text Section Preview */}
                   <div className="p-2.5 bg-slate-950/60 rounded-xl border border-slate-800/80 space-y-1">
                     <div className="flex items-center space-x-1.5 text-blue-400 text-xs font-semibold">
@@ -344,6 +354,20 @@ export default function TemplateManagerModal({
                     </p>
                     <p className="text-[10px] text-slate-400 font-mono truncate">
                       Type: {currentFbSettings?.fb_content_type === 'video' ? 'Page Video' : 'Reels'}
+                    </p>
+                  </div>
+
+                  {/* Instagram Section Preview */}
+                  <div className="p-2.5 bg-slate-950/60 rounded-xl border border-slate-800/80 space-y-1">
+                    <div className="flex items-center space-x-1.5 text-pink-400 text-xs font-semibold">
+                      <Instagram className="w-3.5 h-3.5" />
+                      <span>Instagram Defaults</span>
+                    </div>
+                    <p className="text-[10px] text-slate-300 font-mono truncate">
+                      Tags: {(currentIgSettings?.ig_tags || []).length} active
+                    </p>
+                    <p className="text-[10px] text-slate-400 font-mono truncate">
+                      Feed: {currentIgSettings?.ig_share_to_feed !== false ? 'Grid Enabled' : 'Reels Only'}
                     </p>
                   </div>
 

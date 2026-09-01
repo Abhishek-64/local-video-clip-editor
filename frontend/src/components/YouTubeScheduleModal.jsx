@@ -243,13 +243,13 @@ export default function YouTubeScheduleModal({
             </div>
             <div>
               <h3 className="font-bold text-sm sm:text-base text-white flex items-center space-x-1.5">
-                <span>YouTube Upload &amp; Schedule</span>
+                <span>YouTube Upload & Schedule</span>
                 <span className="text-[10px] uppercase font-bold bg-red-500/20 text-red-300 border border-red-500/30 px-1.5 py-0.5 rounded-full">
                   Part {clipPartNumber}
                 </span>
               </h3>
               <p className="text-xs text-slate-400 truncate max-w-xs sm:max-w-sm">
-                {clip.name} &bull; {formatTime(clip.duration || (clip.endTime - clip.startTime) || 0)}
+                {clip.name} • {formatTime(clip.duration || (clip.endTime - clip.startTime) || 0)}
               </p>
             </div>
           </div>

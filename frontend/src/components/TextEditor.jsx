@@ -15,12 +15,18 @@ import {
   Check,
   Layout,
   Sliders,
-  Paintbrush
+  Paintbrush,
+  Youtube,
+  Share2,
+  Instagram
 } from 'lucide-react';
 
 export default function TextEditor({
   textSettings = {},
-  onChange
+  onChange,
+  ytSettings = {},
+  fbSettings = {},
+  igSettings = {}
 }) {
   const updateSetting = (key, value) => {
     onChange({
@@ -162,10 +168,46 @@ export default function TextEditor({
           <div className="space-y-4 animate-fadeIn">
             {/* Field 1: Movie / Video Title */}
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-200 flex items-center justify-between">
-                <span>Movie / Video Title</span>
-                <span className="text-[10px] text-orange-400 font-mono">Custom text</span>
-              </label>
+              <div className="flex flex-wrap items-center justify-between gap-1.5">
+                <label className="text-xs font-semibold text-slate-200">
+                  Movie / Video Title
+                </label>
+                <div className="flex flex-wrap items-center gap-1">
+                  {ytSettings?.yt_name && ytSettings.yt_name !== textSettings.movieName && (
+                    <button
+                      type="button"
+                      onClick={() => updateSetting('movieName', ytSettings.yt_name)}
+                      className="text-[10px] text-red-300 hover:text-white bg-slate-900 hover:bg-slate-800 border border-red-500/30 rounded-lg px-2 py-0.5 transition-colors cursor-pointer flex items-center space-x-1 shrink-0 touch-manipulation"
+                      title="Copy series title from YouTube"
+                    >
+                      <Youtube className="w-2.5 h-2.5 text-red-400" />
+                      <span>Sync YT</span>
+                    </button>
+                  )}
+                  {fbSettings?.fb_name && fbSettings.fb_name !== textSettings.movieName && (
+                    <button
+                      type="button"
+                      onClick={() => updateSetting('movieName', fbSettings.fb_name)}
+                      className="text-[10px] text-blue-300 hover:text-white bg-slate-900 hover:bg-slate-800 border border-blue-500/30 rounded-lg px-2 py-0.5 transition-colors cursor-pointer flex items-center space-x-1 shrink-0 touch-manipulation"
+                      title="Copy series title from Facebook"
+                    >
+                      <Share2 className="w-2.5 h-2.5 text-blue-400" />
+                      <span>Sync FB</span>
+                    </button>
+                  )}
+                  {igSettings?.ig_name && igSettings.ig_name !== textSettings.movieName && (
+                    <button
+                      type="button"
+                      onClick={() => updateSetting('movieName', igSettings.ig_name)}
+                      className="text-[10px] text-pink-300 hover:text-white bg-slate-900 hover:bg-slate-800 border border-pink-500/30 rounded-lg px-2 py-0.5 transition-colors cursor-pointer flex items-center space-x-1 shrink-0 touch-manipulation"
+                      title="Copy series title from Instagram"
+                    >
+                      <Instagram className="w-2.5 h-2.5 text-pink-400" />
+                      <span>Sync IG</span>
+                    </button>
+                  )}
+                </div>
+              </div>
               <input
                 type="text"
                 value={textSettings.movieName || ''}
@@ -487,7 +529,7 @@ export default function TextEditor({
           >
             <Sparkles className="w-5 h-5 text-slate-500 mx-auto mb-1.5" />
             <p className="text-xs font-medium text-slate-300">No extra text added yet</p>
-            <p className="text-[11px] text-slate-500">Click to add "Follow for Part 2", "@mychannel", or a custom banner</p>
+            <p className="text-[11px] text-slate-500">Click to add handle, CTA, or custom overlay</p>
           </div>
         ) : (
           <div className="space-y-3">

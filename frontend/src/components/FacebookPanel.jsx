@@ -3,7 +3,8 @@ import {
   Share2, CheckCircle2, AlertCircle, RefreshCw, LogOut, ChevronDown,
   Tag, Clock, Calendar, Film, Sparkles, ExternalLink, ShieldCheck,
   Video, Hash, HelpCircle, Check, Lock, ChevronUp, Plus, Youtube,
-  Layers, CheckSquare, Square, ListOrdered, Play, ArrowRight
+  Layers, CheckSquare, Square, ListOrdered, Play, ArrowRight, Instagram, Zap,
+  Type, Undo2, Copy
 } from 'lucide-react';
 
 export default function FacebookPanel({
@@ -38,6 +39,14 @@ export default function FacebookPanel({
   customParts = [],
   completedClips = [],
   textSettings = {},
+  onTextChange,
+  ytSettings,
+  igSettings,
+  isIgConnected = false,
+  isIgAccountConnected = false,
+  igAccount,
+  renderIgTemplate,
+  publishToInstagramPipeline,
   onSwitchToPlatform
 }) {
   const [tagInput, setTagInput] = useState('');
@@ -49,12 +58,11 @@ export default function FacebookPanel({
   const [showAddAnotherPage, setShowAddAnotherPage] = useState(false);
 
   // ── Multi-Clip & Generated Clips Selection State ─────────────────────────────
-  // Modes: 'all' (all completed clips) | 'custom' (multi-select checkboxes) | 'full' (active project video)
-  const [selectionMode, setSelectionMode] = useState(() => (completedClips.length > 0 ? 'all' : 'full'));
+  // Modes: 'all' (all completed clips) | 'custom' (multi-select checkboxes)
+  const [selectionMode, setSelectionMode] = useState('all');
   const [selectedClipIds, setSelectedClipIds] = useState(() =>
-    completedClips.length > 0 ? completedClips.map(c => c.id) : ['full']
+    completedClips.map(c => c.id)
   );
-  const [previewPartIdx, setPreviewPartIdx] = useState(0);
 
   // Batch publishing execution state
   const [isBatchPublishing, setIsBatchPublishing] = useState(false);
@@ -70,10 +78,7 @@ export default function FacebookPanel({
         setSelectedClipIds(completedClips.map(c => c.id));
       }
     } else {
-      if (selectionMode !== 'full') {
-        setSelectionMode('full');
-        setSelectedClipIds(['full']);
-      }
+      setSelectedClipIds([]);
     }
   }, [completedClips.length, selectionMode]);
 
@@ -82,17 +87,10 @@ export default function FacebookPanel({
   const baseStartPart = Math.max(1, parseInt(fbSettings?.fb_start_part) || 1);
   const isZeroPad = fbSettings?.fb_zero_pad !== false;
 
-  // Resolved list of active target clips to publish
+  // Resolved list of active target clips to publish (strictly generated clips only)
   const activeSelectedClips = useMemo(() => {
-    if (selectionMode === 'full' || completedClips.length === 0) {
-      return [{
-        id: 'full',
-        name: `${effectiveMovieName}.mp4`,
-        partNumber: baseStartPart,
-        blob: videoData?.file || null,
-        duration: videoData?.duration || 0,
-        isFull: true
-      }];
+    if (completedClips.length === 0) {
+      return [];
     }
     if (selectionMode === 'all') {
       return completedClips.map((clip, idx) => ({
@@ -107,60 +105,7 @@ export default function FacebookPanel({
         ...clip,
         partNumber: clip.partNumber || (baseStartPart + idx)
       }));
-  }, [selectionMode, completedClips, selectedClipIds, videoData, effectiveMovieName, baseStartPart]);
-
-  // Active clip currently focused for Live Preview
-  const activePreviewClip = activeSelectedClips[Math.min(previewPartIdx, Math.max(0, activeSelectedClips.length - 1))] || activeSelectedClips[0];
-  const previewPartNumber = activePreviewClip?.partNumber || baseStartPart;
-
-  // ── Helper to format title and caption for any specific part ─────────────────
-  const getRenderedMetadataForPart = (partNum) => {
-    const partStr = isZeroPad ? String(partNum).padStart(2, '0') : String(partNum);
-    const tagsStr = (fbSettings?.fb_tags || []).map(t => `#${t.replace(/^#+/, '')}`).join(' ');
-
-    const titleTemplate = fbSettings?.fb_title_template || '{movie} - Part {part} | #Reels';
-    let title = '';
-    if (renderFbTemplate) {
-      title = renderFbTemplate(titleTemplate, {
-        movieName: effectiveMovieName,
-        partNumber: partNum,
-        zeroPad: isZeroPad,
-        tags: fbSettings?.fb_tags || []
-      });
-    } else {
-      title = titleTemplate
-        .replace(/\{movie\}/gi, effectiveMovieName)
-        .replace(/\{title\}/gi, effectiveMovieName)
-        .replace(/\{part\}/gi, partStr);
-    }
-
-    const captionTemplate = fbSettings?.fb_caption_template !== undefined
-      ? fbSettings.fb_caption_template
-      : '{movie} - Part {part}\n\n#Reels #Shorts\n\n{hashtags}';
-
-    let caption = '';
-    if (renderFbTemplate) {
-      caption = renderFbTemplate(captionTemplate, {
-        movieName: effectiveMovieName,
-        partNumber: partNum,
-        zeroPad: isZeroPad,
-        tags: fbSettings?.fb_tags || []
-      });
-    } else {
-      caption = captionTemplate
-        .replace(/\{movie\}/gi, effectiveMovieName)
-        .replace(/\{title\}/gi, effectiveMovieName)
-        .replace(/\{part\}/gi, partStr)
-        .replace(/\{hashtags\}/gi, tagsStr);
-    }
-
-    return { title, caption, partStr };
-  };
-
-  // Rendered preview title and caption
-  const { title: renderedTitle, caption: renderedCaption } = useMemo(() => {
-    return getRenderedMetadataForPart(previewPartNumber);
-  }, [previewPartNumber, effectiveMovieName, isZeroPad, fbSettings?.fb_title_template, fbSettings?.fb_caption_template, fbSettings?.fb_tags, renderFbTemplate]);
+  }, [selectionMode, completedClips, selectedClipIds, baseStartPart]);
 
   // ── Tags Management ─────────────────────────────────────────────────────────
   const addTag = () => {
@@ -222,14 +167,17 @@ export default function FacebookPanel({
     }
   };
 
+  const [activePublishTarget, setActivePublishTarget] = useState('facebook'); // 'facebook' | 'both'
+
   // ── Batch / Multi-Clip Publishing Pipeline Execution ────────────────────────
-  const handlePublishExecution = async () => {
+  const handlePublishExecution = async (target = 'facebook') => {
     if (activeSelectedClips.length === 0) {
       alert('Please select at least one clip or video to publish.');
       return;
     }
 
     const clipsToPublish = [...activeSelectedClips];
+    setActivePublishTarget(target);
     setIsBatchPublishing(true);
     setBatchTotalCount(clipsToPublish.length);
     setBatchCurrentIdx(0);
@@ -237,6 +185,8 @@ export default function FacebookPanel({
     setBatchError(null);
 
     const publishedResults = [];
+    const isScheduled = fbSettings?.fb_schedule_mode === 'schedule' && fbSettings?.fb_schedule_time;
+    const intervalMinutes = parseInt(fbSettings?.fb_schedule_interval) || 30;
 
     for (let i = 0; i < clipsToPublish.length; i++) {
       const clip = clipsToPublish[i];
@@ -252,34 +202,62 @@ export default function FacebookPanel({
         continue;
       }
 
+      let scheduledAt = null;
+      if (isScheduled) {
+        const baseDate = new Date(fbSettings.fb_schedule_time);
+        const clipDate = new Date(baseDate.getTime() + i * intervalMinutes * 60 * 1000);
+        scheduledAt = clipDate.toISOString();
+      }
+
       // Automatically compute part-specific metadata
-      const { title: partTitle, caption: partCaption } = getRenderedMetadataForPart(clip.partNumber || (baseStartPart + i));
-      const fileName = clip.name || `${effectiveMovieName}_part${clip.partNumber || i + 1}.mp4`;
+      const partNum = clip.partNumber || (baseStartPart + i);
+      const { title: partTitle, caption: partCaption } = getRenderedMetadataForPart(partNum);
+      const fileName = clip.name || `${effectiveMovieName}_part${partNum}.mp4`;
 
       try {
+        // 1. Publish to Facebook (uploads to B2 once & caches the B2 URL)
         const result = await publishToFacebookPipeline(targetBlob, {
+          clipId: clip.id,
           contentType: fbSettings?.fb_content_type || 'reel',
           caption: partCaption,
           title: partTitle,
           hashtags: fbSettings?.fb_tags || [],
-          scheduledAt: fbSettings?.fb_schedule_mode === 'schedule' && fbSettings?.fb_schedule_time ? fbSettings.fb_schedule_time : null,
+          scheduledAt,
           fileName,
-          partNumber: clip.partNumber
+          partNumber: partNum
         });
 
-        if (result && result.postUrl) {
-          publishedResults.push({
-            partNumber: clip.partNumber || (baseStartPart + i),
-            clipName: clip.name || fileName,
-            postUrl: result.postUrl,
-            status: result.status || 'published',
-            videoId: result.video_id
+        let igResult = null;
+        // 2. If dual publishing requested: Publish to Instagram using cached B2 URL (0s upload!)
+        if (target === 'both' && publishToInstagramPipeline && isIgAccountConnected) {
+          const igCaption = (renderIgTemplate && igSettings)
+            ? renderIgTemplate(igSettings?.ig_caption_template || partCaption, { movieName: effectiveMovieName, partNumber: partNum, zeroPad: isZeroPad, tags: igSettings?.ig_tags || fbSettings?.fb_tags })
+            : partCaption;
+
+          igResult = await publishToInstagramPipeline({
+            clipId: clip.id,
+            videoBlob: targetBlob,
+            contentType: 'reel',
+            caption: igCaption,
+            shareToFeed: igSettings?.ig_share_to_feed !== false,
+            fileName,
+            igUserId: igAccount?.ig_user_id,
+            scheduledAt
           });
-          setBatchPublishedPosts([...publishedResults]);
         }
+
+        publishedResults.push({
+          partNumber: partNum,
+          clipName: clip.name || fileName,
+          postUrl: result?.postUrl,
+          igPostUrl: igResult?.postUrl || `https://www.instagram.com/reel/`,
+          status: result?.status || 'published',
+          videoId: result?.video_id || result?.videoId
+        });
+        setBatchPublishedPosts([...publishedResults]);
       } catch (err) {
-        console.error(`Error publishing part ${clip.partNumber || i + 1}:`, err);
-        setBatchError(`Failed on part #${clip.partNumber || i + 1}: ${err.message}`);
+        console.error(`Error publishing part ${partNum}:`, err);
+        setBatchError(`Failed on part #${partNum}: ${err.message}`);
         break;
       }
     }
@@ -292,11 +270,10 @@ export default function FacebookPanel({
       <div className="space-y-4">
         <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 text-center space-y-2">
           <Share2 className="w-8 h-8 text-slate-600 mx-auto" />
-          <p className="text-xs font-semibold text-slate-400">Facebook Integration Not Configured</p>
-          <p className="text-[11px] text-slate-500 leading-relaxed">
+          <p className="text-xs font-semibold text-slate-400">Facebook Not Configured</p>
+          <p className="text-[11px] text-slate-500">
             Set <code className="bg-slate-800 px-1 py-0.5 rounded text-amber-300">VITE_API_URL</code> in your{' '}
-            <code className="bg-slate-800 px-1 py-0.5 rounded text-amber-300">.env</code> file to point to your
-            deployed Cloudflare Worker to enable Facebook direct uploads, Reels automation, and scheduled publishing.
+            <code className="bg-slate-800 px-1 py-0.5 rounded text-amber-300">.env</code> to enable Facebook Reels uploads and scheduling.
           </p>
         </div>
       </div>
@@ -306,36 +283,36 @@ export default function FacebookPanel({
   // ── Unauthenticated State: Must sign in first ────────────────────────────────
   if (!isAuthenticated) {
     return (
-      <div className="space-y-5">
-        <div className="bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 border border-slate-800 rounded-2xl p-6 text-center space-y-4 shadow-xl">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-500/20 via-indigo-500/20 to-sky-500/20 border border-blue-500/30 flex items-center justify-center mx-auto shadow-inner">
-            <Lock className="w-6 h-6 text-blue-400" />
+      <div className="space-y-4">
+        <div className="bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 border border-slate-800 rounded-2xl p-5 text-center space-y-3.5 shadow-xl">
+          <div className="w-11 h-11 rounded-xl bg-gradient-to-tr from-blue-500/20 via-indigo-500/20 to-sky-500/20 border border-blue-500/30 flex items-center justify-center mx-auto shadow-inner">
+            <Lock className="w-5 h-5 text-blue-400" />
           </div>
           <div>
-            <h4 className="text-sm font-bold text-white tracking-tight">Sign In Required to Connect Facebook</h4>
-            <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto leading-relaxed">
-              Please sign in or create an account first. Connecting your Facebook Page to your verified login ensures your OAuth Page tokens and scheduling presets remain secure and synced across devices.
+            <h4 className="text-sm font-bold text-white tracking-tight">Sign In to Connect Facebook</h4>
+            <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto">
+              Sign in to connect Facebook Pages and sync presets across devices.
             </p>
           </div>
 
           <div className="pt-1">
             <button
               onClick={() => onOpenAuth && onOpenAuth('login')}
-              className="px-5 py-2.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-sky-500 hover:from-blue-500 hover:to-indigo-500 active:scale-98 text-white text-xs font-bold rounded-xl shadow-lg shadow-blue-500/20 transition-all cursor-pointer inline-flex items-center space-x-2 touch-manipulation"
+              className="px-4 py-2 bg-gradient-to-r from-blue-600 via-indigo-600 to-sky-500 hover:from-blue-500 hover:to-indigo-500 active:scale-98 text-white text-xs font-bold rounded-xl shadow-lg shadow-blue-500/20 transition-all cursor-pointer inline-flex items-center space-x-2 touch-manipulation"
             >
               <Sparkles className="w-4 h-4" />
               <span>Sign In / Create Account</span>
             </button>
           </div>
 
-          <div className="pt-4 border-t border-slate-800/80 grid grid-cols-2 gap-2 text-left max-w-sm mx-auto">
-            <div className="p-2.5 bg-slate-950/40 rounded-xl border border-slate-800/60">
-              <span className="text-[11px] font-semibold text-slate-200 block mb-0.5">Facebook Reels Ingest</span>
-              <span className="text-[10px] text-slate-400 block leading-tight">Publish consecutive parts as 9:16 vertical Reels.</span>
+          <div className="pt-3 border-t border-slate-800/80 grid grid-cols-2 gap-2 text-left max-w-xs mx-auto">
+            <div className="p-2 bg-slate-950/40 rounded-xl border border-slate-800/60">
+              <span className="text-[11px] font-semibold text-slate-200 block mb-0.5">Reels Ingest</span>
+              <span className="text-[10px] text-slate-400 block">Vertical 9:16 reels.</span>
             </div>
-            <div className="p-2.5 bg-slate-950/40 rounded-xl border border-slate-800/60">
-              <span className="text-[11px] font-semibold text-slate-200 block mb-0.5">Backblaze B2 Speed</span>
-              <span className="text-[10px] text-slate-400 block leading-tight">Temporary zero-bloat storage with auto-cleanup.</span>
+            <div className="p-2 bg-slate-950/40 rounded-xl border border-slate-800/60">
+              <span className="text-[11px] font-semibold text-slate-200 block mb-0.5">B2 Fast Pipeline</span>
+              <span className="text-[10px] text-slate-400 block">Direct Meta ingestion.</span>
             </div>
           </div>
         </div>
@@ -550,14 +527,14 @@ export default function FacebookPanel({
               </div>
             </div>
 
-            <div className="flex items-center space-x-2 self-end sm:self-center shrink-0">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 self-start sm:self-auto shrink-0">
               {availablePages.length > 1 && (
                 <div className="relative">
                   <button
                     onClick={() => setSelectedPageDropdownOpen(!selectedPageDropdownOpen)}
-                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 border border-slate-700 rounded-xl flex items-center space-x-1.5 transition-colors cursor-pointer"
+                    className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 border border-slate-700 rounded-xl flex items-center space-x-1.5 transition-colors cursor-pointer"
                   >
-                    <span>Switch Page</span>
+                    <span>Switch</span>
                     <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
                   </button>
 
@@ -590,15 +567,15 @@ export default function FacebookPanel({
                 title="Connect another Facebook Page ID"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Add Page ID</span>
+                <span className="text-[11px]">Add Page</span>
               </button>
 
               <button
                 onClick={disconnectFacebook}
-                className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition-colors cursor-pointer"
+                className="p-1.5 sm:p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 border border-slate-800 rounded-xl transition-colors cursor-pointer"
                 title="Disconnect Facebook account"
               >
-                <LogOut className="w-4 h-4" />
+                <LogOut className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               </button>
             </div>
           </div>
@@ -713,47 +690,33 @@ export default function FacebookPanel({
           </div>
 
           {/* Mode Switcher Buttons */}
-          <div className="flex items-center space-x-1 bg-slate-900 p-1 rounded-xl border border-slate-800 shrink-0">
-            {completedClips.length > 0 && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => setSelectionMode('all')}
-                  className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
-                    selectionMode === 'all'
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  All ({completedClips.length})
-                </button>
+          {completedClips.length > 0 && (
+            <div className="flex items-center space-x-1 bg-slate-900 p-1 rounded-xl border border-slate-800 shrink-0">
+              <button
+                type="button"
+                onClick={() => setSelectionMode('all')}
+                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
+                  selectionMode === 'all'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                All ({completedClips.length})
+              </button>
 
-                <button
-                  type="button"
-                  onClick={() => setSelectionMode('custom')}
-                  className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
-                    selectionMode === 'custom'
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  Select Parts
-                </button>
-              </>
-            )}
-
-            <button
-              type="button"
-              onClick={() => setSelectionMode('full')}
-              className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
-                selectionMode === 'full'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Full Video
-            </button>
-          </div>
+              <button
+                type="button"
+                onClick={() => setSelectionMode('custom')}
+                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
+                  selectionMode === 'custom'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Select Parts
+              </button>
+            </div>
+          )}
         </div>
 
         {/* CLIPS DISPLAY & INTERACTIVE CHECKBOXES */}
@@ -834,37 +797,31 @@ export default function FacebookPanel({
                         </p>
                       </div>
                     </div>
-
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPreviewPartIdx(idx);
-                      }}
-                      className="px-2.5 py-1 text-[10px] font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700 cursor-pointer shrink-0"
-                    >
-                      Preview Part
-                    </button>
                   </div>
                 );
               })}
             </div>
           </div>
         ) : (
-          /* Active Video Project Selected (Single Mode) */
-          <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl space-y-2">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-slate-300 font-semibold flex items-center space-x-1.5">
-                <Film className="w-3.5 h-3.5 text-blue-400" />
-                <span>Active Video Project Selected</span>
-              </span>
-              <span className="px-2 py-0.5 bg-blue-500/20 text-blue-300 rounded-full text-[10px] font-mono">
-                Single Video Mode
-              </span>
+          <div className="p-6 bg-slate-900/60 border border-slate-800 rounded-2xl text-center space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center mx-auto">
+              <Layers className="w-6 h-6" />
             </div>
-            <p className="text-[11px] text-slate-400 leading-relaxed">
-              Your active video project will be published directly. To publish consecutive segments as separate vertical Reels, export clips in the <strong>Split &amp; Cut</strong> section.
-            </p>
+            <div className="space-y-1">
+              <h5 className="text-sm font-bold text-white">No Exported Clips Found</h5>
+              <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                Reels publishing requires exported clips. Go to <strong>Split &amp; Cut</strong> and export your parts first.
+              </p>
+            </div>
+            {onSwitchToPlatform && (
+              <button
+                type="button"
+                onClick={() => onSwitchToPlatform('split-cut')}
+                className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 active:scale-98 text-white font-semibold text-xs rounded-xl shadow-md transition-all cursor-pointer inline-flex items-center space-x-1.5 touch-manipulation"
+              >
+                <span>Go to Split &amp; Cut ✂️</span>
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -873,19 +830,45 @@ export default function FacebookPanel({
       <div className="space-y-4 bg-slate-950/60 border border-slate-800 rounded-2xl p-4 sm:p-5">
         {/* Field 1: Facebook Video / Series Title */}
         <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-1.5">
             <label className="text-xs font-semibold text-slate-200">
               Facebook Video / Series Title:
             </label>
-            {textSettings?.movieName && (
-              <button
-                type="button"
-                onClick={() => updateFbSettings({ fb_name: textSettings.movieName })}
-                className="text-[10px] text-blue-400 hover:text-blue-300 font-medium cursor-pointer"
-              >
-                Sync with Text Section
-              </button>
-            )}
+            <div className="flex flex-wrap items-center gap-1">
+              {textSettings?.movieName && textSettings.movieName !== fbSettings?.fb_name && (
+                <button
+                  type="button"
+                  onClick={() => updateFbSettings({ fb_name: textSettings.movieName })}
+                  className="text-[10px] text-orange-300 hover:text-white bg-slate-900 hover:bg-slate-800 border border-orange-500/30 rounded-lg px-2 py-0.5 transition-colors cursor-pointer flex items-center space-x-1 shrink-0 touch-manipulation"
+                  title="Copy from on-screen text overlay title"
+                >
+                  <Copy className="w-2.5 h-2.5 text-orange-400" />
+                  <span>Sync Overlay</span>
+                </button>
+              )}
+              {ytSettings?.yt_name && ytSettings.yt_name !== fbSettings?.fb_name && (
+                <button
+                  type="button"
+                  onClick={() => updateFbSettings({ fb_name: ytSettings.yt_name })}
+                  className="text-[10px] text-red-300 hover:text-white bg-slate-900 hover:bg-slate-800 border border-red-500/30 rounded-lg px-2 py-0.5 transition-colors cursor-pointer flex items-center space-x-1 shrink-0 touch-manipulation"
+                  title="Copy series name from YouTube"
+                >
+                  <Youtube className="w-2.5 h-2.5 text-red-400" />
+                  <span>Sync YT</span>
+                </button>
+              )}
+              {igSettings?.ig_name && igSettings.ig_name !== fbSettings?.fb_name && (
+                <button
+                  type="button"
+                  onClick={() => updateFbSettings({ fb_name: igSettings.ig_name })}
+                  className="text-[10px] text-pink-300 hover:text-white bg-slate-900 hover:bg-slate-800 border border-pink-500/30 rounded-lg px-2 py-0.5 transition-colors cursor-pointer flex items-center space-x-1 shrink-0 touch-manipulation"
+                  title="Copy series name from Instagram"
+                >
+                  <Instagram className="w-2.5 h-2.5 text-pink-400" />
+                  <span>Sync IG</span>
+                </button>
+              )}
+            </div>
           </div>
           <input
             type="text"
@@ -984,84 +967,80 @@ export default function FacebookPanel({
 
         {/* Field 4: Description / Caption Template */}
         <div className="space-y-1.5 pt-1 border-t border-slate-800/80">
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-1.5">
             <label className="text-xs font-semibold text-slate-200">
               Facebook Caption &amp; Description Template
             </label>
-            <span className="text-[10px] text-slate-400">Auto-appends tags</span>
+            <div className="flex flex-wrap items-center gap-1">
+              {ytSettings?.yt_description_template && (
+                <button
+                  type="button"
+                  onClick={() => updateFbSettings({ fb_caption_template: ytSettings.yt_description_template })}
+                  className="text-[10px] text-red-300 hover:text-white bg-slate-900 hover:bg-slate-800 border border-red-500/30 rounded-lg px-2 py-0.5 transition-colors cursor-pointer flex items-center space-x-1 shrink-0 touch-manipulation"
+                  title="Copy description from YouTube"
+                >
+                  <Youtube className="w-2.5 h-2.5 text-red-400" />
+                  <span>Sync from YT</span>
+                </button>
+              )}
+              {igSettings?.ig_caption_template && (
+                <button
+                  type="button"
+                  onClick={() => updateFbSettings({ fb_caption_template: igSettings.ig_caption_template })}
+                  className="text-[10px] text-pink-300 hover:text-white bg-slate-900 hover:bg-slate-800 border border-pink-500/30 rounded-lg px-2 py-0.5 transition-colors cursor-pointer flex items-center space-x-1 shrink-0 touch-manipulation"
+                  title="Copy caption from Instagram"
+                >
+                  <Instagram className="w-2.5 h-2.5 text-pink-400" />
+                  <span>Sync from IG</span>
+                </button>
+              )}
+            </div>
           </div>
           <textarea
             rows={3}
             value={fbSettings?.fb_caption_template || ''}
             onChange={e => updateFbSettings({ fb_caption_template: e.target.value })}
-            placeholder="{movie} - Part {part}&#10;&#10;#Reels #Shorts&#10;{hashtags}"
+            placeholder="{movie} - Part {part}\n\n#Reels #Shorts\n{hashtags}"
             className="w-full bg-slate-900 border border-slate-700 text-xs text-white rounded-xl px-3 py-2 focus:border-blue-500 focus:outline-none font-mono resize-y min-h-[70px] shadow-inner"
           />
         </div>
 
-        {/* Field 5: Live Rendered Facebook Metadata Preview with Part Selector */}
-        <div className="bg-slate-900/90 border border-blue-500/20 rounded-xl p-3 sm:p-3.5 space-y-2 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider flex items-center space-x-1">
-              <Sparkles className="w-3 h-3" />
-              <span>Live Automatic Part Preview</span>
-            </span>
-
-            {/* Part Preview Tabs */}
-            {activeSelectedClips.length > 1 && (
-              <div className="flex items-center space-x-1 bg-slate-950 p-0.5 rounded-lg border border-slate-800">
-                {activeSelectedClips.slice(0, 6).map((c, idx) => {
-                  const partNum = c.partNumber || (baseStartPart + idx);
-                  const isCur = previewPartIdx === idx;
-                  return (
-                    <button
-                      key={c.id || idx}
-                      type="button"
-                      onClick={() => setPreviewPartIdx(idx)}
-                      className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold transition-colors cursor-pointer ${
-                        isCur
-                          ? 'bg-blue-600 text-white'
-                          : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      Pt {isZeroPad ? String(partNum).padStart(2, '0') : partNum}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          <div className="space-y-2 bg-slate-950/80 rounded-xl p-3 border border-slate-800">
-            <div>
-              <div className="flex items-center justify-between mb-0.5">
-                <span className="text-[10px] font-semibold text-slate-400">Title Preview:</span>
-                <span className="text-[9px] font-mono text-blue-400">
-                  Part #{isZeroPad ? String(previewPartNumber).padStart(2, '0') : previewPartNumber}
-                </span>
-              </div>
-              <p className="text-xs font-bold text-white font-mono break-words leading-relaxed">
-                {renderedTitle}
-              </p>
-            </div>
-
-            <div className="pt-2 border-t border-slate-900">
-              <span className="text-[10px] font-semibold text-slate-400 block mb-0.5">Caption Preview:</span>
-              <p className="text-[11px] text-slate-300 font-mono whitespace-pre-wrap line-clamp-3 leading-relaxed">
-                {renderedCaption}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Field 6: Default Tags & Hashtags */}
+        {/* Field 5: Default Tags & Hashtags */}
         <div className="space-y-2 pt-1 border-t border-slate-800/80">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-1.5">
             <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center space-x-1.5">
               <Tag className="w-3.5 h-3.5 text-blue-400" />
               <span>Default Tags &amp; Hashtags</span>
             </label>
-            <div className="flex items-center space-x-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {ytSettings?.yt_tags && ytSettings.yt_tags.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const combined = Array.from(new Set([...(fbSettings?.fb_tags || []), ...ytSettings.yt_tags]));
+                    updateFbSettings({ fb_tags: combined });
+                  }}
+                  className="text-[10px] text-red-300 hover:text-white bg-slate-900 hover:bg-slate-800 border border-red-500/30 rounded-lg px-2 py-0.5 transition-colors cursor-pointer flex items-center space-x-1 shrink-0 touch-manipulation"
+                  title="Merge tags from YouTube"
+                >
+                  <Youtube className="w-2.5 h-2.5 text-red-400" />
+                  <span>Sync YT Tags ({ytSettings.yt_tags.length})</span>
+                </button>
+              )}
+              {igSettings?.ig_tags && igSettings.ig_tags.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const combined = Array.from(new Set([...(fbSettings?.fb_tags || []), ...igSettings.ig_tags]));
+                    updateFbSettings({ fb_tags: combined });
+                  }}
+                  className="text-[10px] text-pink-300 hover:text-white bg-slate-900 hover:bg-slate-800 border border-pink-500/30 rounded-lg px-2 py-0.5 transition-colors cursor-pointer flex items-center space-x-1 shrink-0 touch-manipulation"
+                  title="Merge tags from Instagram"
+                >
+                  <Instagram className="w-2.5 h-2.5 text-pink-400" />
+                  <span>Sync IG Tags ({igSettings.ig_tags.length})</span>
+                </button>
+              )}
               <span className="text-[10px] text-slate-500">{(fbSettings?.fb_tags || []).length} active</span>
               {(fbSettings?.fb_tags || []).length > 0 && (
                 <button
@@ -1092,7 +1071,7 @@ export default function FacebookPanel({
             ))}
           </div>
 
-          <div className="flex space-x-2">
+          <div className="flex flex-col sm:flex-row gap-2">
             <input
               type="text"
               value={tagInput}
@@ -1104,8 +1083,10 @@ export default function FacebookPanel({
             <button
               type="button"
               onClick={addTag}
-              className="px-3.5 py-2 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition-colors cursor-pointer touch-manipulation"
-            >Add</button>
+              className="w-full sm:w-auto px-5 py-2 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition-colors cursor-pointer touch-manipulation"
+            >
+              Add Tag
+            </button>
           </div>
         </div>
 
@@ -1203,7 +1184,7 @@ export default function FacebookPanel({
           <div className="p-4 bg-emerald-950/40 border border-emerald-500/40 rounded-2xl space-y-3 shadow-lg">
             <div className="flex items-center space-x-2 text-emerald-300 text-xs font-bold">
               <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              <span>{batchPublishedPosts.length} Facebook Reel(s) Published Successfully!</span>
+              <span>{batchPublishedPosts.length} Reel(s) Published Successfully!</span>
             </div>
 
             <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
@@ -1219,17 +1200,32 @@ export default function FacebookPanel({
                     <span className="text-white truncate font-medium">{post.clipName}</span>
                   </div>
 
-                  {post.postUrl && (
-                    <a
-                      href={post.postUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="px-3 py-1 bg-emerald-500 hover:bg-emerald-400 text-white font-bold text-[11px] rounded-lg flex items-center space-x-1 shrink-0 transition-colors"
-                    >
-                      <span>Open Reel</span>
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
-                  )}
+                  <div className="flex items-center space-x-1.5 shrink-0">
+                    {post.postUrl && (
+                      <a
+                        href={post.postUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white font-bold text-[11px] rounded-lg flex items-center space-x-1 transition-colors"
+                      >
+                        <Share2 className="w-3 h-3" />
+                        <span>FB Reel</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                    {post.igPostUrl && (
+                      <a
+                        href={post.igPostUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-2.5 py-1 bg-gradient-to-r from-pink-600 to-purple-600 hover:opacity-90 text-white font-bold text-[11px] rounded-lg flex items-center space-x-1 transition-colors"
+                      >
+                        <Instagram className="w-3 h-3" />
+                        <span>IG Reel</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -1248,53 +1244,108 @@ export default function FacebookPanel({
                   {lastPublishedPost.status === 'scheduled' ? 'Reel Scheduled Successfully!' : 'Reel Published Successfully!'}
                 </p>
                 <p className="text-[10px] text-slate-400">
-                  Temporary B2 storage cleared. Post is live on Facebook.
+                  Temporary B2 storage uploaded once &amp; verified by Meta.
                 </p>
               </div>
             </div>
 
-            {lastPublishedPost.postUrl && (
-              <a
-                href={lastPublishedPost.postUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-white font-bold text-xs rounded-xl shadow-md flex items-center justify-center space-x-1.5 transition-all shrink-0"
-              >
-                <span>Open on Facebook</span>
-                <ExternalLink className="w-3.5 h-3.5" />
-              </a>
-            )}
+            <div className="flex items-center space-x-2 shrink-0">
+              {lastPublishedPost.postUrl && (
+                <a
+                  href={lastPublishedPost.postUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl shadow-md flex items-center justify-center space-x-1.5 transition-all"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                  <span>Open on Facebook</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              )}
+              {lastPublishedPost.igPostUrl && (
+                <a
+                  href={lastPublishedPost.igPostUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-3.5 py-2 bg-gradient-to-r from-pink-600 to-purple-600 hover:opacity-90 text-white font-bold text-xs rounded-xl shadow-md flex items-center justify-center space-x-1.5 transition-all"
+                >
+                  <Instagram className="w-3.5 h-3.5" />
+                  <span>Open on Instagram</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              )}
+            </div>
           </div>
         )}
 
-        <button
-          type="button"
-          onClick={handlePublishExecution}
-          disabled={!isConnected || isPublishing || isBatchPublishing || activeSelectedClips.length === 0}
-          className="w-full py-3.5 px-4 bg-gradient-to-r from-[#1877F2] to-indigo-600 hover:from-[#166fe5] hover:to-indigo-500 active:scale-98 disabled:opacity-50 text-white font-bold text-sm rounded-2xl shadow-xl shadow-blue-500/20 flex items-center justify-center space-x-2 transition-all cursor-pointer touch-manipulation"
-        >
-          {isPublishing || isBatchPublishing ? (
-            <>
-              <RefreshCw className="w-4 h-4 animate-spin" />
-              <span>
-                {activeSelectedClips.length > 1
-                  ? `Publishing Part ${batchCurrentIdx || 1} of ${batchTotalCount || activeSelectedClips.length}...`
-                  : 'Publishing to Facebook...'}
-              </span>
-            </>
-          ) : (
-            <>
-              <Share2 className="w-4 h-4" />
-              <span>
-                {activeSelectedClips.length > 1
-                  ? `Publish ${activeSelectedClips.length} Selected Clips to Facebook (Batch)`
-                  : fbSettings?.fb_schedule_mode === 'schedule'
-                  ? `Schedule ${fbSettings?.fb_content_type === 'reel' ? 'Reel' : 'Video'}`
-                  : `Publish ${fbSettings?.fb_content_type === 'reel' ? 'Reel' : 'Video'} to Facebook`}
-              </span>
-            </>
-          )}
-        </button>
+        {/* Dual / Single Action Buttons Bar */}
+        {completedClips.length === 0 ? (
+          <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-2xl text-center space-y-2">
+            <p className="text-xs text-slate-300 font-medium">
+              ⚠️ Please export video clips in <strong>Split &amp; Cut</strong> first. Facebook Reels publishing is only enabled for generated clips.
+            </p>
+          </div>
+        ) : (
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+            {/* Dedicated 1-Click Dual Publish Button (When both FB and IG are connected) */}
+            {isPageConnected && isIgAccountConnected && (
+              <button
+                type="button"
+                onClick={() => handlePublishExecution('both')}
+                disabled={isPublishing || isBatchPublishing || activeSelectedClips.length === 0}
+                className="flex-1 py-3.5 px-4 bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:opacity-95 active:scale-98 disabled:opacity-50 text-white font-bold text-xs sm:text-sm rounded-2xl shadow-xl shadow-purple-500/20 flex items-center justify-center space-x-2 transition-all cursor-pointer touch-manipulation"
+              >
+                {isPublishing || isBatchPublishing ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>{activePublishTarget === 'both' ? 'Publishing to Both FB & IG...' : 'Processing...'}</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-4 h-4 text-amber-300 fill-current" />
+                    <span>
+                      {fbSettings?.fb_schedule_mode === 'schedule'
+                        ? `Schedule Both FB + IG (${activeSelectedClips.length})`
+                        : `Publish to Both FB + IG (${activeSelectedClips.length})`}
+                    </span>
+                  </>
+                )}
+              </button>
+            )}
+
+            {/* Standard Facebook Publish Button */}
+            <button
+              type="button"
+              onClick={() => handlePublishExecution('facebook')}
+              disabled={!isConnected || isPublishing || isBatchPublishing || activeSelectedClips.length === 0}
+              className={`${
+                isPageConnected && isIgAccountConnected ? 'flex-1' : 'w-full'
+              } py-3.5 px-4 bg-gradient-to-r from-[#1877F2] to-indigo-600 hover:from-[#166fe5] hover:to-indigo-500 active:scale-98 disabled:opacity-50 text-white font-bold text-xs sm:text-sm rounded-2xl shadow-xl shadow-blue-500/20 flex items-center justify-center space-x-2 transition-all cursor-pointer touch-manipulation`}
+            >
+              {isPublishing || isBatchPublishing ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>
+                    {activeSelectedClips.length > 1
+                      ? `Publishing Part ${batchCurrentIdx || 1} of ${batchTotalCount || activeSelectedClips.length}...`
+                      : 'Publishing to Facebook...'}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Share2 className="w-4 h-4" />
+                  <span>
+                    {activeSelectedClips.length > 1
+                      ? `Publish ${activeSelectedClips.length} Clips to Facebook`
+                      : fbSettings?.fb_schedule_mode === 'schedule'
+                      ? `Schedule ${fbSettings?.fb_content_type === 'reel' ? 'Reel' : 'Video'}`
+                      : `Publish ${fbSettings?.fb_content_type === 'reel' ? 'Reel' : 'Video'} to Facebook`}
+                  </span>
+                </>
+              )}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

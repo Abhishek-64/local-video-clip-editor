@@ -143,3 +143,91 @@ export async function decryptToken(encryptedText, secretKey) {
   }
 }
 
+/**
+ * Sign an OAuth state payload with HMAC-SHA256.
+ * Formatted as `${payloadBase64Url}.${signatureHex}`.
+ */
+export async function signOAuthState(payload, secretKey) {
+  const data = {
+    ...payload,
+    ts: Date.now(),
+    nonce: generateRandomHex(8)
+  };
+  const jsonStr = JSON.stringify(data);
+  const payloadB64 = btoa(jsonStr).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+  const enc = new TextEncoder();
+  const rawKey = enc.encode(String(secretKey || 'oauth-state-secret-salt-2026'));
+  const hmacKey = await crypto.subtle.importKey(
+    'raw',
+    rawKey,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+
+  const sigBuffer = await crypto.subtle.sign('HMAC', hmacKey, enc.encode(payloadB64));
+  const sigHex = Array.from(new Uint8Array(sigBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+  return `${payloadB64}.${sigHex}`;
+}
+
+/**
+ * Verify an HMAC-SHA256 signed OAuth state and enforce expiration (15 minutes).
+ * Falls back gracefully to legacy unsigned base64 if within maxAge.
+ */
+export async function verifyOAuthState(stateString, secretKey, maxAgeMs = 15 * 60 * 1000) {
+  if (!stateString || typeof stateString !== 'string') {
+    throw new Error('Missing or invalid OAuth state parameter');
+  }
+
+  const parts = stateString.split('.');
+  if (parts.length !== 2) {
+    // Check legacy base64 for backwards compatibility
+    try {
+      const legacyJson = atob(stateString.replace(/-/g, '+').replace(/_/g, '/'));
+      const legacyData = JSON.parse(legacyJson);
+      if (legacyData && (Date.now() - (legacyData.ts || 0) < maxAgeMs)) {
+        return legacyData;
+      }
+    } catch {}
+    throw new Error('Malformed or expired OAuth state');
+  }
+
+  const [payloadB64, sigHex] = parts;
+  const enc = new TextEncoder();
+  const rawKey = enc.encode(String(secretKey || 'oauth-state-secret-salt-2026'));
+  const hmacKey = await crypto.subtle.importKey(
+    'raw',
+    rawKey,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['verify']
+  );
+
+  const sigBytes = new Uint8Array(sigHex.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+  const isValid = await crypto.subtle.verify('HMAC', hmacKey, sigBytes, enc.encode(payloadB64));
+
+  if (!isValid) {
+    throw new Error('Invalid OAuth state signature (tampering or CSRF detected)');
+  }
+
+  let jsonStr = '';
+  try {
+    let base64 = payloadB64.replace(/-/g, '+').replace(/_/g, '/');
+    while (base64.length % 4 !== 0) {
+      base64 += '=';
+    }
+    jsonStr = atob(base64);
+  } catch {
+    throw new Error('Failed to decode OAuth state payload');
+  }
+
+  const payload = JSON.parse(jsonStr);
+  if (Date.now() - (payload.ts || 0) > maxAgeMs) {
+    throw new Error('OAuth authorization session expired. Please connect again.');
+  }
+
+  return payload;
+}
+
+

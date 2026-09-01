@@ -263,54 +263,6 @@ export async function runAutoCleanup(db) {
   return results;
 }
 
-// ─── User-Approved Storage & Data Management ──────────────────────────────────
-
-/**
- * Get data stats for a specific user.
- */
-export async function getUserStorageStats(db, userId) {
-  if (!userId) {
-    return { uploadJobsCount: 0, hasYouTube: false };
-  }
-
-  const [uploadsRes, ytRes] = await Promise.all([
-    db.prepare('SELECT COUNT(*) as count FROM upload_jobs WHERE user_id = ?').bind(userId).first(),
-    db.prepare('SELECT id, channel_title FROM youtube_accounts WHERE user_id = ?').bind(userId).first()
-  ]);
-
-  return {
-    uploadJobsCount: uploadsRes?.count ?? 0,
-    hasYouTube: Boolean(ytRes),
-    youtubeChannel: ytRes?.channel_title || null
-  };
-}
-
-/**
- * Clear specific scopes of user data upon explicit user approval.
- */
-export async function clearUserData(db, userId, scope = 'all') {
-  if (!userId) return { success: false, error: 'User ID required' };
-
-  const cleared = {};
-
-  if (scope === 'history' || scope === 'all') {
-    const res = await db.prepare('DELETE FROM upload_jobs WHERE user_id = ?').bind(userId).run();
-    cleared.history = res?.meta?.changes ?? 0;
-  }
-
-  if (scope === 'youtube' || scope === 'all') {
-    const res = await db.prepare('DELETE FROM youtube_accounts WHERE user_id = ?').bind(userId).run();
-    cleared.youtube = res?.meta?.changes ?? 0;
-  }
-
-  if (scope === 'all') {
-    // Delete user sessions
-    await db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(userId).run();
-  }
-
-  return { success: true, scope, cleared };
-}
-
 // ─── Template CRUD Helpers ───────────────────────────────────────────────────
 
 export async function getTemplates(db, userId) {
@@ -337,14 +289,15 @@ export async function createTemplate(db, userId, data) {
   const textData = typeof data.text_data === 'object' ? JSON.stringify(data.text_data) : (data.text_data || null);
   const youtubeData = typeof data.youtube_data === 'object' ? JSON.stringify(data.youtube_data) : (data.youtube_data || null);
   const facebookData = typeof data.facebook_data === 'object' ? JSON.stringify(data.facebook_data) : (data.facebook_data || null);
+  const instagramData = typeof data.instagram_data === 'object' ? JSON.stringify(data.instagram_data) : (data.instagram_data || null);
   const logoData = typeof data.logo_data === 'object' ? JSON.stringify(data.logo_data) : (data.logo_data || null);
 
   await db
     .prepare(`
-      INSERT INTO templates (id, user_id, name, description, text_data, youtube_data, facebook_data, logo_data, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      INSERT INTO templates (id, user_id, name, description, text_data, youtube_data, facebook_data, instagram_data, logo_data, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
     `)
-    .bind(id, userId, name, description, textData, youtubeData, facebookData, logoData)
+    .bind(id, userId, name, description, textData, youtubeData, facebookData, instagramData, logoData)
     .run();
 
   return {
@@ -355,6 +308,7 @@ export async function createTemplate(db, userId, data) {
     text_data: textData,
     youtube_data: youtubeData,
     facebook_data: facebookData,
+    instagram_data: instagramData,
     logo_data: logoData
   };
 }
@@ -374,6 +328,9 @@ export async function updateTemplate(db, userId, templateId, data) {
   const facebookData = data.facebook_data !== undefined
     ? (typeof data.facebook_data === 'object' ? JSON.stringify(data.facebook_data) : data.facebook_data)
     : existing.facebook_data;
+  const instagramData = data.instagram_data !== undefined
+    ? (typeof data.instagram_data === 'object' ? JSON.stringify(data.instagram_data) : data.instagram_data)
+    : existing.instagram_data;
   const logoData = data.logo_data !== undefined
     ? (typeof data.logo_data === 'object' ? JSON.stringify(data.logo_data) : data.logo_data)
     : existing.logo_data;
@@ -381,10 +338,10 @@ export async function updateTemplate(db, userId, templateId, data) {
   await db
     .prepare(`
       UPDATE templates
-      SET name = ?, description = ?, text_data = ?, youtube_data = ?, facebook_data = ?, logo_data = ?, updated_at = datetime('now')
+      SET name = ?, description = ?, text_data = ?, youtube_data = ?, facebook_data = ?, instagram_data = ?, logo_data = ?, updated_at = datetime('now')
       WHERE id = ? AND user_id = ?
     `)
-    .bind(name, description, textData, youtubeData, facebookData, logoData, templateId, userId)
+    .bind(name, description, textData, youtubeData, facebookData, instagramData, logoData, templateId, userId)
     .run();
 
   return {
@@ -395,6 +352,7 @@ export async function updateTemplate(db, userId, templateId, data) {
     text_data: textData,
     youtube_data: youtubeData,
     facebook_data: facebookData,
+    instagram_data: instagramData,
     logo_data: logoData
   };
 }
@@ -570,5 +528,265 @@ export async function getFacebookUploadJobs(db, userId) {
     .all();
   return res?.results || [];
 }
+
+// ─── Instagram Account Helpers ────────────────────────────────────────────────
+
+export async function getInstagramAccount(db, userId) {
+  if (!userId) return null;
+  return db
+    .prepare('SELECT * FROM instagram_accounts WHERE user_id = ? ORDER BY created_at DESC LIMIT 1')
+    .bind(userId)
+    .first();
+}
+
+export async function upsertInstagramAccount(db, userId, data) {
+  const existing = await getInstagramAccount(db, userId);
+  const id = existing?.id || crypto.randomUUID();
+
+  const availableAccountsJson = typeof data.available_accounts === 'object'
+    ? JSON.stringify(data.available_accounts)
+    : (data.available_accounts || '[]');
+
+  await db
+    .prepare(`
+      INSERT INTO instagram_accounts
+        (id, user_id, ig_user_id, ig_username, ig_name, ig_profile_picture_url, page_id, page_name,
+         access_token, user_access_token, available_accounts, created_at, updated_at)
+      VALUES
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      ON CONFLICT(id) DO UPDATE SET
+        ig_user_id             = excluded.ig_user_id,
+        ig_username            = excluded.ig_username,
+        ig_name                = excluded.ig_name,
+        ig_profile_picture_url = excluded.ig_profile_picture_url,
+        page_id                = excluded.page_id,
+        page_name              = excluded.page_name,
+        access_token           = excluded.access_token,
+        user_access_token      = excluded.user_access_token,
+        available_accounts     = excluded.available_accounts,
+        updated_at             = datetime('now')
+    `)
+    .bind(
+      id,
+      userId,
+      data.ig_user_id || '',
+      data.ig_username || '',
+      data.ig_name || '',
+      data.ig_profile_picture_url || null,
+      data.page_id || null,
+      data.page_name || null,
+      data.access_token || '',
+      data.user_access_token || null,
+      availableAccountsJson
+    )
+    .run();
+
+  return getInstagramAccount(db, userId);
+}
+
+export async function updateInstagramAccountSelection(db, userId, accountData) {
+  const account = await getInstagramAccount(db, userId);
+  if (!account) return null;
+
+  await db
+    .prepare(`
+      UPDATE instagram_accounts
+      SET ig_user_id = ?, ig_username = ?, ig_name = ?, ig_profile_picture_url = ?, page_id = ?, page_name = ?, access_token = ?, updated_at = datetime('now')
+      WHERE id = ? AND user_id = ?
+    `)
+    .bind(
+      accountData.ig_user_id,
+      accountData.ig_username || '',
+      accountData.ig_name || '',
+      accountData.ig_profile_picture_url || null,
+      accountData.page_id || null,
+      accountData.page_name || null,
+      accountData.access_token,
+      account.id,
+      userId
+    )
+    .run();
+
+  return getInstagramAccount(db, userId);
+}
+
+export async function deleteInstagramAccount(db, userId) {
+  if (!userId) return;
+  await db.prepare('DELETE FROM instagram_accounts WHERE user_id = ?').bind(userId).run();
+}
+
+// ─── Instagram Upload Jobs Helpers ────────────────────────────────────────────
+
+export async function createInstagramUploadJob(db, data) {
+  const id = data.id || crypto.randomUUID();
+  const hashtagsJson = typeof data.hashtags === 'object' ? JSON.stringify(data.hashtags) : (data.hashtags || '[]');
+
+  await db
+    .prepare(`
+      INSERT INTO instagram_upload_jobs
+        (id, user_id, instagram_account_id, ig_user_id, content_type, title, caption,
+         description, hashtags, scheduled_at, status, b2_file_id, b2_file_name,
+         instagram_container_id, instagram_media_id, instagram_post_url, error_message, created_at, updated_at)
+      VALUES
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+    `)
+    .bind(
+      id,
+      data.user_id,
+      data.instagram_account_id || null,
+      data.ig_user_id,
+      data.content_type || 'reel',
+      data.title || null,
+      data.caption || null,
+      data.description || null,
+      hashtagsJson,
+      data.scheduled_at || null,
+      data.status || 'pending',
+      data.b2_file_id || null,
+      data.b2_file_name || null,
+      data.instagram_container_id || null,
+      data.instagram_media_id || null,
+      data.instagram_post_url || null,
+      data.error_message || null
+    )
+    .run();
+
+  return getInstagramUploadJob(db, id);
+}
+
+export async function updateInstagramUploadJob(db, jobId, updates) {
+  const allowed = [
+    'status', 'instagram_container_id', 'instagram_media_id', 'instagram_post_url', 'error_message',
+    'b2_file_id', 'b2_file_name', 'published_at'
+  ];
+  const setClauses = [];
+  const bindings = [];
+
+  for (const [key, value] of Object.entries(updates)) {
+    if (allowed.includes(key)) {
+      setClauses.push(`${key} = ?`);
+      bindings.push(value);
+    }
+  }
+
+  if (setClauses.length === 0) return;
+
+  setClauses.push("updated_at = datetime('now')");
+  bindings.push(jobId);
+
+  await db
+    .prepare(`UPDATE instagram_upload_jobs SET ${setClauses.join(', ')} WHERE id = ?`)
+    .bind(...bindings)
+    .run();
+
+  return getInstagramUploadJob(db, jobId);
+}
+
+export async function getInstagramUploadJob(db, jobId) {
+  return db.prepare('SELECT * FROM instagram_upload_jobs WHERE id = ?').bind(jobId).first();
+}
+
+export async function getInstagramUploadJobs(db, userId) {
+  if (!userId) return [];
+  const res = await db
+    .prepare('SELECT * FROM instagram_upload_jobs WHERE user_id = ? ORDER BY created_at DESC LIMIT 50')
+    .bind(userId)
+    .all();
+  return res?.results || [];
+}
+
+// ─── Storage & User Data Management Helpers ────────────────────────────────────
+
+export async function getUserStorageStats(db, userId) {
+  if (!userId) return null;
+
+  const [
+    templatesCount,
+    ytAccount,
+    ytJobsCount,
+    fbAccount,
+    fbJobsCount,
+    igAccount,
+    igJobsCount
+  ] = await Promise.all([
+    db.prepare('SELECT COUNT(*) as count FROM templates WHERE user_id = ?').bind(userId).first(),
+    db.prepare('SELECT channel_title, channel_handle FROM youtube_accounts WHERE user_id = ? LIMIT 1').bind(userId).first(),
+    db.prepare('SELECT COUNT(*) as count FROM upload_jobs WHERE user_id = ?').bind(userId).first(),
+    db.prepare('SELECT page_name, page_id FROM facebook_accounts WHERE user_id = ? LIMIT 1').bind(userId).first(),
+    db.prepare('SELECT COUNT(*) as count FROM facebook_upload_jobs WHERE user_id = ?').bind(userId).first(),
+    db.prepare('SELECT ig_username, ig_user_id FROM instagram_accounts WHERE user_id = ? LIMIT 1').bind(userId).first(),
+    db.prepare('SELECT COUNT(*) as count FROM instagram_upload_jobs WHERE user_id = ?').bind(userId).first()
+  ]);
+
+  return {
+    templatesCount: templatesCount?.count || 0,
+    hasYouTube: Boolean(ytAccount),
+    youtubeChannel: ytAccount?.channel_title || ytAccount?.channel_handle || null,
+    youtubeJobsCount: ytJobsCount?.count || 0,
+    hasFacebook: Boolean(fbAccount),
+    facebookPage: fbAccount?.page_name || null,
+    facebookJobsCount: fbJobsCount?.count || 0,
+    hasInstagram: Boolean(igAccount),
+    instagramAccount: igAccount?.ig_username ? `@${igAccount.ig_username}` : null,
+    instagramJobsCount: igJobsCount?.count || 0
+  };
+}
+
+export async function clearUserDataByScope(db, userId, scope) {
+  if (!userId) return { success: false, error: 'User ID is required' };
+
+  switch (scope) {
+    case 'templates':
+      await db.prepare('DELETE FROM templates WHERE user_id = ?').bind(userId).run();
+      break;
+    case 'youtube':
+      await db.prepare('DELETE FROM youtube_accounts WHERE user_id = ?').bind(userId).run();
+      await db.prepare('DELETE FROM upload_jobs WHERE user_id = ?').bind(userId).run();
+      break;
+    case 'facebook':
+      await db.prepare('DELETE FROM facebook_accounts WHERE user_id = ?').bind(userId).run();
+      await db.prepare('DELETE FROM facebook_upload_jobs WHERE user_id = ?').bind(userId).run();
+      break;
+    case 'instagram':
+      await db.prepare('DELETE FROM instagram_accounts WHERE user_id = ?').bind(userId).run();
+      await db.prepare('DELETE FROM instagram_upload_jobs WHERE user_id = ?').bind(userId).run();
+      break;
+    case 'history':
+    case 'jobs':
+      await db.prepare('DELETE FROM upload_jobs WHERE user_id = ?').bind(userId).run();
+      await db.prepare('DELETE FROM facebook_upload_jobs WHERE user_id = ?').bind(userId).run();
+      await db.prepare('DELETE FROM instagram_upload_jobs WHERE user_id = ?').bind(userId).run();
+      break;
+    case 'all':
+      await wipeAllUserData(db, userId);
+      break;
+    default:
+      throw new Error(`Unknown clearance scope: ${scope}`);
+  }
+
+  return { success: true, scope };
+}
+
+export async function wipeAllUserData(db, userId) {
+  if (!userId) return { success: false };
+
+  await Promise.all([
+    db.prepare('DELETE FROM templates WHERE user_id = ?').bind(userId).run(),
+    db.prepare('DELETE FROM upload_jobs WHERE user_id = ?').bind(userId).run(),
+    db.prepare('DELETE FROM youtube_accounts WHERE user_id = ?').bind(userId).run(),
+    db.prepare('DELETE FROM facebook_upload_jobs WHERE user_id = ?').bind(userId).run(),
+    db.prepare('DELETE FROM facebook_accounts WHERE user_id = ?').bind(userId).run(),
+    db.prepare('DELETE FROM instagram_upload_jobs WHERE user_id = ?').bind(userId).run(),
+    db.prepare('DELETE FROM instagram_accounts WHERE user_id = ?').bind(userId).run(),
+    db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(userId).run()
+  ]);
+
+  return { success: true };
+}
+
+export const clearUserData = clearUserDataByScope;
+
+
+
 
 

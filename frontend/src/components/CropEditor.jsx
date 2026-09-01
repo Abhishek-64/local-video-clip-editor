@@ -242,8 +242,8 @@ export default function CropEditor({
                   POPULAR
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400 leading-relaxed">
-                Shows <strong>entire widescreen video</strong> with backdrop image/blur above &amp; below. Zero pixels cropped.
+              <p className="text-[11px] text-slate-400">
+                Fit full widescreen with backdrop above &amp; below.
               </p>
             </button>
 
@@ -258,10 +258,10 @@ export default function CropEditor({
             >
               <div className="flex items-center space-x-2 mb-1">
                 <Maximize2 className="w-4 h-4 text-orange-400 shrink-0" />
-                <span className="font-bold text-xs text-white">Zoom to Fill Screen</span>
+                <span className="font-bold text-xs text-white">Zoom to Fill</span>
               </div>
-              <p className="text-[11px] text-slate-400 leading-relaxed">
-                Zooms to fill 100% of vertical screen. Left and right sides are cropped.
+              <p className="text-[11px] text-slate-400">
+                Fill vertical screen. Crops left &amp; right edges.
               </p>
             </button>
           </div>

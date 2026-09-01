@@ -162,9 +162,9 @@ export default function VideoUploader({ onVideoSelect, currentVideo }) {
                 </p>
                 <div className="flex items-center space-x-1.5 sm:space-x-2 text-[11px] sm:text-xs text-slate-400 mt-0.5 font-mono">
                   <span>{currentVideo.width}×{currentVideo.height}</span>
-                  <span>&bull;</span>
+                  <span>•</span>
                   <span>{formatFileSize(currentVideo.size)}</span>
-                  <span>&bull;</span>
+                  <span>•</span>
                   <span className="text-emerald-400 hidden xs:inline-flex items-center">
                     <CheckCircle2 className="w-3 h-3 mr-1 inline" /> Ready
                   </span>

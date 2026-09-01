@@ -58,14 +58,25 @@ import {
   createFacebookUploadJob,
   updateFacebookUploadJob,
   getFacebookUploadJob,
-  getFacebookUploadJobs
+  getFacebookUploadJobs,
+  getInstagramAccount,
+  upsertInstagramAccount,
+  updateInstagramAccountSelection,
+  deleteInstagramAccount,
+  createInstagramUploadJob,
+  updateInstagramUploadJob,
+  getInstagramUploadJob,
+  getInstagramUploadJobs,
+  clearUserDataByScope,
+  wipeAllUserData
 } from './db.js';
 
 import {
   b2Authorize,
   b2GetUploadUrl,
   b2GetDownloadUrl,
-  b2DeleteFile
+  b2DeleteFile,
+  b2ListFileNames
 } from './b2.js';
 
 import {
@@ -79,12 +90,23 @@ import {
 } from './facebook.js';
 
 import {
+  buildInstagramAuthUrl,
+  exchangeInstagramCodeForTokens,
+  fetchInstagramAccounts,
+  validateAndGetInstagramAccount,
+  verifyInstagramPublishCapability,
+  publishInstagramReel
+} from './instagram.js';
+
+import {
   generateRandomHex,
   generateSessionToken,
   hashPassword,
   verifyPassword,
   encryptToken,
-  decryptToken
+  decryptToken,
+  signOAuthState,
+  verifyOAuthState
 } from './crypto.js';
 
 // ─── App Setup ────────────────────────────────────────────────────────────────
@@ -554,7 +576,7 @@ app.post('/api/youtube/disconnect', withUser, async (c) => {
  * GET /api/facebook/connect
  * Redirects to Facebook OAuth authorization page.
  */
-app.get('/api/facebook/connect', withUser, (c) => {
+app.get('/api/facebook/connect', withUser, async (c) => {
   const userId = c.get('userId');
   const frontendUrl = c.req.query('frontendUrl') || c.req.header('referer') || c.env.FRONTEND_URL || 'http://localhost:3000';
   const isPopup = c.req.query('popup') === '1' || c.req.query('popup') === 'true';
@@ -568,7 +590,7 @@ app.get('/api/facebook/connect', withUser, (c) => {
     }, 500);
   }
 
-  const authUrl = buildFacebookAuthUrl(c.env, userId, frontendUrl, isPopup);
+  const authUrl = await buildFacebookAuthUrl(c.env, userId, frontendUrl, isPopup);
   console.log('[FB Worker] Redirecting to Meta OAuth URL:', authUrl);
   return c.redirect(authUrl);
 });
@@ -590,19 +612,28 @@ app.get('/api/facebook/callback', async (c) => {
     error_description
   });
 
+  const secretKey = c.env.ENCRYPTION_KEY || c.env.FACEBOOK_APP_SECRET || 'oauth-state-secret-salt-2026';
+
   if (state) {
     try {
-      const decoded = decodeState(state);
+      const decoded = await verifyOAuthState(state, secretKey);
       userId = decoded.userId;
       if (decoded.frontendUrl) {
-        frontendUrl = decoded.frontendUrl.replace(/\/$/, '');
+        // Validate URL format
+        try {
+          const parsed = new URL(decoded.frontendUrl);
+          if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+            frontendUrl = decoded.frontendUrl.replace(/\/$/, '');
+          }
+        } catch {}
       }
       if (decoded.isPopup) {
         isPopup = Boolean(decoded.isPopup);
       }
-      console.log('[FB Worker] Decoded OAuth state:', { userId, frontendUrl, isPopup });
+      console.log('[FB Worker] Verified OAuth state:', { userId, frontendUrl, isPopup });
     } catch (e) {
-      console.error('[FB Worker] Failed to decode OAuth state:', e.message);
+      console.error('[FB Worker] Failed to verify OAuth state:', e.message);
+      return c.html(`<!DOCTYPE html><html><body style="font-family:sans-serif;background:#0f172a;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;"><div style="text-align:center;"><h2>Security Error</h2><p>${e.message}</p></div></body></html>`, 403);
     }
   }
 
@@ -1198,6 +1229,721 @@ app.get('/api/facebook/jobs/:id', withUser, async (c) => {
   return c.json(job);
 });
 
+// ─── Instagram Graph API OAuth & Account Management ──────────────────────────
+
+/**
+ * GET /api/instagram/connect
+ * Initiate Meta OAuth for Instagram Professional accounts.
+ */
+app.get('/api/instagram/connect', withUser, async (c) => {
+  const userId = c.get('userId');
+  const frontendUrl = c.req.query('frontendUrl') || c.req.header('referer') || c.env.FRONTEND_URL || 'http://localhost:3000';
+  const isPopup = c.req.query('popup') === '1' || c.req.query('popup') === 'true';
+
+  console.log('[IG Worker] /api/instagram/connect requested:', { userId, frontendUrl, isPopup });
+
+  if (!c.env.FACEBOOK_APP_ID || !c.env.FACEBOOK_APP_SECRET) {
+    console.error('[IG Worker] FACEBOOK_APP_ID or FACEBOOK_APP_SECRET missing');
+    return c.json({
+      error: 'Meta OAuth is not configured. Set FACEBOOK_APP_ID and FACEBOOK_APP_SECRET in your environment.'
+    }, 500);
+  }
+
+  const authUrl = await buildInstagramAuthUrl(c.env, userId, frontendUrl, isPopup);
+  console.log('[IG Worker] Redirecting to Meta OAuth URL:', authUrl);
+  return c.redirect(authUrl);
+});
+
+/**
+ * GET /api/instagram/callback
+ * Meta redirects here after user grants Instagram permissions.
+ */
+app.get('/api/instagram/callback', async (c) => {
+  const { code, state, error, error_description } = c.req.query();
+  let frontendUrl = (c.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, '');
+  let isPopup = false;
+  let userId;
+
+  console.log('[IG Worker] /api/instagram/callback received:', {
+    hasCode: !!code,
+    state,
+    error,
+    error_description
+  });
+
+  const secretKey = c.env.ENCRYPTION_KEY || c.env.FACEBOOK_APP_SECRET || 'oauth-state-secret-salt-2026';
+
+  if (state) {
+    try {
+      const decoded = await verifyOAuthState(state, secretKey);
+      userId = decoded.userId;
+      if (decoded.frontendUrl) {
+        try {
+          const parsed = new URL(decoded.frontendUrl);
+          if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+            frontendUrl = decoded.frontendUrl.replace(/\/$/, '');
+          }
+        } catch {}
+      }
+      if (decoded.isPopup) {
+        isPopup = Boolean(decoded.isPopup);
+      }
+      console.log('[IG Worker] Verified OAuth state:', { userId, frontendUrl, isPopup });
+    } catch (e) {
+      console.error('[IG Worker] Failed to verify OAuth state:', e.message);
+      return c.html(`<!DOCTYPE html><html><body style="font-family:sans-serif;background:#0f172a;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;"><div style="text-align:center;"><h2>Security Error</h2><p>${e.message}</p></div></body></html>`, 403);
+    }
+  }
+
+  const renderAuthHtml = (success, errorMsg = null) => {
+    const isHttps = frontendUrl.startsWith('https://');
+    if (userId) {
+      setCookie(c, '__vcuid', btoa(userId), {
+        httpOnly: true,
+        path: '/',
+        sameSite: 'Lax',
+        maxAge: 31536000,
+        secure: isHttps
+      });
+    }
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>${success ? 'Instagram Connected' : 'Instagram Connection Error'}</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #090d16;
+      color: #f8fafc;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 20px;
+      box-sizing: border-box;
+      text-align: center;
+    }
+    .card {
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 16px;
+      padding: 32px;
+      max-width: 440px;
+      width: 100%;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+    }
+    .icon {
+      width: 56px;
+      height: 56px;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 16px;
+      font-size: 28px;
+    }
+    .icon.success { background: rgba(225, 48, 108, 0.15); color: #e1306c; border: 1px solid rgba(225, 48, 108, 0.3); }
+    .icon.error { background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); }
+    h2 { margin: 0 0 8px; font-size: 20px; font-weight: 700; color: #ffffff; }
+    p { margin: 0 0 24px; color: #94a3b8; font-size: 14px; line-height: 1.5; word-break: break-word; }
+    .btn {
+      display: inline-block;
+      width: 100%;
+      padding: 12px;
+      background: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%);
+      color: white;
+      text-decoration: none;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+      border: none;
+      box-sizing: border-box;
+      transition: opacity 0.2s;
+    }
+    .btn:hover { opacity: 0.9; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon ${success ? 'success' : 'error'}">
+      ${success ? '✓' : '✕'}
+    </div>
+    <h2>${success ? 'Instagram Connected!' : 'Connection Failed'}</h2>
+    <p>${success ? 'Your Instagram Professional account has been linked successfully. You can now close this window.' : (errorMsg || error_description || 'Unable to connect to Instagram.')}</p>
+    <button class="btn" onclick="window.close()">Close Window</button>
+  </div>
+  <script>
+    try {
+      const msg = {
+        type: 'INSTAGRAM_AUTH_RESULT',
+        success: ${success},
+        error: ${JSON.stringify(errorMsg || error_description || null)}
+      };
+      if (window.opener) {
+        try { window.opener.postMessage(msg, '${frontendUrl}'); } catch(e){}
+        try { window.opener.postMessage(msg, '*'); } catch(e){}
+        setTimeout(() => window.close(), 1200);
+      } else {
+        setTimeout(() => { window.location.href = '${frontendUrl}'; }, 1500);
+      }
+    } catch(e) {
+      setTimeout(() => { window.location.href = '${frontendUrl}'; }, 1500);
+    }
+  </script>
+</body>
+</html>`;
+    return c.html(html);
+  };
+
+  if (error) {
+    console.error('[IG Worker] Meta returned error in callback:', error, error_description);
+    return renderAuthHtml(false, error_description || error);
+  }
+
+  if (!code) {
+    console.error('[IG Worker] No authorization code received');
+    return renderAuthHtml(false, 'No authorization code received.');
+  }
+
+  try {
+    const secretKey = c.env.ENCRYPTION_KEY || c.env.FACEBOOK_APP_SECRET || '7a279df54155e4f8f70991df0a4e9c9c';
+    console.log('[IG Worker] Exchanging authorization code for long-lived tokens...');
+    const { userAccessToken } = await exchangeInstagramCodeForTokens(c.env, code);
+    console.log('[IG Worker] Tokens received. Fetching linked Instagram accounts...');
+    const { fbUser, accounts } = await fetchInstagramAccounts(c.env, userAccessToken);
+
+    console.log('[IG Worker] Accounts found count:', accounts?.length, accounts?.map(a => ({ id: a.ig_user_id, username: a.ig_username })));
+
+    // Encrypt sensitive tokens server-side before storing
+    const encryptedUserToken = await encryptToken(userAccessToken, secretKey);
+    const encryptedAccounts = await Promise.all(
+      (accounts || []).map(async (a) => ({
+        ig_user_id: a.ig_user_id,
+        ig_username: a.ig_username,
+        ig_name: a.ig_name,
+        ig_profile_picture_url: a.ig_profile_picture_url,
+        page_id: a.page_id,
+        page_name: a.page_name,
+        access_token: await encryptToken(a.access_token, secretKey)
+      }))
+    );
+
+    const hasAccounts = encryptedAccounts && encryptedAccounts.length > 0;
+    const primaryAccount = hasAccounts ? encryptedAccounts[0] : {
+      ig_user_id: '',
+      ig_username: '',
+      ig_name: '',
+      ig_profile_picture_url: null,
+      page_id: null,
+      page_name: null,
+      access_token: ''
+    };
+
+    console.log('[IG Worker] Saving Instagram Account to D1 database for userId:', userId, 'Primary IG:', primaryAccount.ig_username || '(None yet)');
+    await upsertInstagramAccount(c.env.DB, userId, {
+      ig_user_id: primaryAccount.ig_user_id,
+      ig_username: primaryAccount.ig_username,
+      ig_name: primaryAccount.ig_name,
+      ig_profile_picture_url: primaryAccount.ig_profile_picture_url,
+      page_id: primaryAccount.page_id,
+      page_name: primaryAccount.page_name,
+      access_token: primaryAccount.access_token,
+      user_access_token: encryptedUserToken,
+      available_accounts: encryptedAccounts
+    });
+
+    console.log('[IG Worker] ✓ Upsert successful. Rendering success page.');
+    return renderAuthHtml(true);
+  } catch (err) {
+    console.error('[IG Worker] Callback processing failed:', err.stack || err.message);
+    return renderAuthHtml(false, err.message);
+  }
+});
+
+/**
+ * GET /api/instagram/account
+ * Returns current connected Instagram account and auth state. Never returns sensitive tokens.
+ */
+app.get('/api/instagram/account', withUser, async (c) => {
+  const userId = c.get('userId');
+  const account = await getInstagramAccount(c.env.DB, userId);
+
+  if (!account) {
+    return c.json({
+      connected: false,
+      isUserConnected: false,
+      isAccountConnected: false,
+      instagram: null,
+      account: null,
+      availableAccounts: []
+    });
+  }
+
+  let availableAccounts = [];
+  try {
+    availableAccounts = typeof account.available_accounts === 'string'
+      ? JSON.parse(account.available_accounts || '[]')
+      : (account.available_accounts || []);
+  } catch {}
+
+  // Strip all sensitive tokens from client response
+  const sanitizedAccounts = availableAccounts.map(a => ({
+    ig_user_id: a.ig_user_id,
+    ig_username: a.ig_username,
+    ig_name: a.ig_name,
+    ig_profile_picture_url: a.ig_profile_picture_url,
+    page_id: a.page_id,
+    page_name: a.page_name
+  }));
+
+  const hasAccount = Boolean(account.ig_user_id && account.access_token);
+  const hasUser = Boolean(account.user_access_token || account.ig_user_id);
+
+  return c.json({
+    connected: hasAccount,
+    isUserConnected: hasUser,
+    isAccountConnected: hasAccount,
+    instagram: hasAccount ? {
+      ig_user_id: account.ig_user_id,
+      ig_username: account.ig_username,
+      ig_name: account.ig_name
+    } : null,
+    account: {
+      id: account.id,
+      ig_user_id: account.ig_user_id || null,
+      ig_username: account.ig_username || null,
+      ig_name: account.ig_name || null,
+      ig_profile_picture_url: account.ig_profile_picture_url || null,
+      page_id: account.page_id || null,
+      page_name: account.page_name || null,
+      created_at: account.created_at
+    },
+    availableAccounts: sanitizedAccounts
+  });
+});
+
+/**
+ * GET /api/instagram/debug-account
+ * GET /api/instagram/diagnostics
+ * Safe authenticated diagnostic endpoints returning connection status, permissions, and publishing limits.
+ */
+app.get('/api/instagram/debug-account', withUser, async (c) => {
+  const userId = c.get('userId');
+  const account = await getInstagramAccount(c.env.DB, userId);
+
+  if (!account || !account.ig_user_id) {
+    return c.json({
+      connected: false,
+      ig_user_id: null,
+      ig_username: null,
+      has_access_token: false,
+      can_publish: false,
+      quotaUsage: null,
+      quotaTotal: null,
+      error: 'No Instagram account connected.'
+    });
+  }
+
+  const secretKey = c.env.ENCRYPTION_KEY || c.env.FACEBOOK_APP_SECRET || 'oauth-state-secret-salt-2026';
+  const decryptedToken = await decryptToken(account.access_token, secretKey);
+
+  const diag = await verifyInstagramPublishCapability(c.env, decryptedToken, account.ig_user_id);
+
+  return c.json({
+    connected: diag.connected,
+    ig_user_id: account.ig_user_id,
+    ig_username: diag.ig_username || account.ig_username,
+    has_access_token: Boolean(decryptedToken),
+    can_publish: diag.can_publish,
+    quotaUsage: diag.quotaUsage,
+    quotaTotal: diag.quotaTotal,
+    error: diag.error || null
+  });
+});
+
+app.get('/api/instagram/diagnostics', withUser, async (c) => {
+  const userId = c.get('userId');
+  const account = await getInstagramAccount(c.env.DB, userId);
+
+  if (!account || !account.ig_user_id) {
+    return c.json({
+      connected: false,
+      instagram: null,
+      facebookPage: null,
+      token: { present: false, valid: false },
+      permissions: { instagramBasic: false, instagramContentPublish: false },
+      canPublish: false,
+      publishingQuota: null,
+      error: 'No Instagram account connected.'
+    });
+  }
+
+  const secretKey = c.env.ENCRYPTION_KEY || c.env.FACEBOOK_APP_SECRET || 'oauth-state-secret-salt-2026';
+  const decryptedToken = await decryptToken(account.access_token, secretKey);
+
+  const diag = await verifyInstagramPublishCapability(c.env, decryptedToken, account.ig_user_id);
+
+  return c.json({
+    connected: diag.connected,
+    instagram: {
+      id: account.ig_user_id,
+      username: diag.ig_username || account.ig_username,
+      name: diag.ig_name || account.ig_name,
+      profilePictureUrl: diag.ig_profile_picture_url || account.ig_profile_picture_url
+    },
+    facebookPage: {
+      id: account.page_id || null,
+      name: account.page_name || null
+    },
+    token: {
+      present: Boolean(decryptedToken),
+      valid: diag.connected,
+      created_at: account.created_at
+    },
+    permissions: {
+      instagramBasic: diag.connected,
+      instagramContentPublish: diag.can_publish
+    },
+    canPublish: diag.can_publish,
+    publishingQuota: {
+      quotaUsage: diag.quotaUsage,
+      quotaTotal: diag.quotaTotal
+    },
+    error: diag.error || null
+  });
+});
+
+/**
+ * POST /api/instagram/connect-account-id
+ * Validates that submitted Instagram Account ID / username belongs to user and stores verified token.
+ */
+app.post('/api/instagram/connect-account-id', withUser, async (c) => {
+  const userId = c.get('userId');
+  let body = {};
+  try {
+    body = await c.req.json();
+  } catch {}
+
+  const identifier = body.accountId || body.account_id || body.username || body.ig_user_id;
+
+  if (!identifier || !String(identifier).trim()) {
+    return c.json({ success: false, error: 'Instagram Account ID or Username is required.' }, 400);
+  }
+
+  const account = await getInstagramAccount(c.env.DB, userId);
+  if (!account || !account.user_access_token) {
+    return c.json({
+      success: false,
+      error: 'Please authenticate / sign in with Meta first before connecting an Instagram Account.'
+    }, 401);
+  }
+
+  const secretKey = c.env.ENCRYPTION_KEY || c.env.FACEBOOK_APP_SECRET || '7a279df54155e4f8f70991df0a4e9c9c';
+  const decryptedUserToken = await decryptToken(account.user_access_token, secretKey);
+
+  try {
+    console.log('[IG Worker] Validating Instagram account with Meta:', identifier, 'for userId:', userId);
+    const targetData = await validateAndGetInstagramAccount(
+      c.env,
+      decryptedUserToken,
+      identifier
+    );
+
+    const encryptedToken = await encryptToken(targetData.access_token, secretKey);
+
+    // Merge into available_accounts
+    let availableAccounts = [];
+    try {
+      availableAccounts = typeof account.available_accounts === 'string'
+        ? JSON.parse(account.available_accounts || '[]')
+        : (account.available_accounts || []);
+    } catch {}
+
+    const storedObj = {
+      ig_user_id: targetData.ig_user_id,
+      ig_username: targetData.ig_username,
+      ig_name: targetData.ig_name,
+      ig_profile_picture_url: targetData.ig_profile_picture_url,
+      page_id: targetData.page_id,
+      page_name: targetData.page_name,
+      access_token: encryptedToken
+    };
+
+    const existingIdx = availableAccounts.findIndex(a => a.ig_user_id === targetData.ig_user_id);
+    if (existingIdx >= 0) {
+      availableAccounts[existingIdx] = storedObj;
+    } else {
+      availableAccounts.push(storedObj);
+    }
+
+    const updatedAccount = await upsertInstagramAccount(c.env.DB, userId, {
+      ig_user_id: targetData.ig_user_id,
+      ig_username: targetData.ig_username,
+      ig_name: targetData.ig_name,
+      ig_profile_picture_url: targetData.ig_profile_picture_url,
+      page_id: targetData.page_id,
+      page_name: targetData.page_name,
+      access_token: encryptedToken,
+      user_access_token: account.user_access_token,
+      available_accounts: availableAccounts
+    });
+
+    return c.json({
+      success: true,
+      connected: true,
+      instagram: {
+        ig_user_id: targetData.ig_user_id,
+        ig_username: targetData.ig_username
+      },
+      account: {
+        id: updatedAccount.id,
+        ig_user_id: updatedAccount.ig_user_id,
+        ig_username: updatedAccount.ig_username,
+        ig_name: updatedAccount.ig_name,
+        ig_profile_picture_url: updatedAccount.ig_profile_picture_url,
+        page_id: updatedAccount.page_id,
+        page_name: updatedAccount.page_name,
+        created_at: updatedAccount.created_at
+      }
+    });
+  } catch (err) {
+    console.error('[IG Worker] Failed to connect Instagram Account:', err.message);
+    return c.json({
+      success: false,
+      error: err.message || 'This Instagram account is not accessible by the connected Meta account.'
+    }, err.status || 400);
+  }
+});
+
+/**
+ * POST /api/instagram/select-account
+ * Switch the active Instagram Account from available accounts list.
+ */
+app.post('/api/instagram/select-account', withUser, async (c) => {
+  const userId = c.get('userId');
+  let body = {};
+  try {
+    body = await c.req.json();
+  } catch {}
+
+  const targetIgUserId = body.ig_user_id || body.accountId;
+  if (!targetIgUserId) {
+    return c.json({ error: 'ig_user_id is required' }, 400);
+  }
+
+  const account = await getInstagramAccount(c.env.DB, userId);
+  if (!account) {
+    return c.json({ error: 'No Instagram account connected' }, 404);
+  }
+
+  let availableAccounts = [];
+  try {
+    availableAccounts = typeof account.available_accounts === 'string'
+      ? JSON.parse(account.available_accounts || '[]')
+      : (account.available_accounts || []);
+  } catch {}
+
+  const target = availableAccounts.find(a => a.ig_user_id === targetIgUserId);
+  if (!target) {
+    return c.json({ error: 'Selected Instagram account not found in your connected accounts list' }, 404);
+  }
+
+  const updated = await updateInstagramAccountSelection(c.env.DB, userId, target);
+  return c.json({
+    success: true,
+    connected: true,
+    instagram: {
+      ig_user_id: updated.ig_user_id,
+      ig_username: updated.ig_username
+    }
+  });
+});
+
+/**
+ * POST /api/instagram/disconnect
+ * Disconnect Instagram account from D1.
+ */
+app.post('/api/instagram/disconnect', withUser, async (c) => {
+  const userId = c.get('userId');
+  await deleteInstagramAccount(c.env.DB, userId);
+  return c.json({ success: true });
+});
+
+/**
+ * POST /api/instagram/b2/upload-url
+ * Get presigned B2 upload URL and token for Instagram upload.
+ */
+app.post('/api/instagram/b2/upload-url', withUser, async (c) => {
+  try {
+    const target = await b2GetUploadUrl(c.env);
+    return c.json({
+      success: true,
+      uploadUrl: target.uploadUrl,
+      authorizationToken: target.authorizationToken
+    });
+  } catch (err) {
+    console.error('B2 upload url error for Instagram:', err);
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+// ─── Instagram Publishing & Reels Ingestion ───────────────────────────────────
+
+/**
+ * POST /api/instagram/publish
+ * Ingest from temporary B2 file -> upload to Meta Graph API Instagram Container -> Poll -> Publish -> cleanup B2.
+ */
+app.post('/api/instagram/publish', withUser, async (c) => {
+  const userId = c.get('userId');
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Invalid JSON body' }, 400);
+  }
+
+  const {
+    contentType = 'reel',
+    b2FileId,
+    b2FileName,
+    caption = '',
+    title = '',
+    description = '',
+    hashtags = [],
+    shareToFeed = true,
+    scheduledAt = null,
+    igUserId = null
+  } = body;
+
+  if (!b2FileId || !b2FileName) {
+    return c.json({ error: 'b2FileId and b2FileName are required for upload ingest.' }, 400);
+  }
+
+  const account = await getInstagramAccount(c.env.DB, userId);
+  if (!account || !account.access_token || !account.ig_user_id) {
+    return c.json({ error: 'Instagram Account is not connected. Please connect your Instagram account first.' }, 400);
+  }
+
+  const secretKey = c.env.ENCRYPTION_KEY || c.env.FACEBOOK_APP_SECRET || '7a279df54155e4f8f70991df0a4e9c9c';
+  const activeIgUserId = igUserId || account.ig_user_id;
+  let encryptedToken = account.access_token;
+
+  // If specific account requested, check available accounts
+  if (igUserId && igUserId !== account.ig_user_id) {
+    try {
+      const accounts = JSON.parse(account.available_accounts || '[]');
+      const match = accounts.find(a => a.ig_user_id === igUserId);
+      if (match && match.access_token) {
+        encryptedToken = match.access_token;
+      }
+    } catch {}
+  }
+
+  const activeToken = await decryptToken(encryptedToken, secretKey);
+  if (!activeToken) {
+    return c.json({ error: 'Instagram Access Token could not be decrypted. Please reconnect your account.' }, 400);
+  }
+
+  // Create initial D1 job record
+  const job = await createInstagramUploadJob(c.env.DB, {
+    user_id: userId,
+    instagram_account_id: account.id,
+    ig_user_id: activeIgUserId,
+    content_type: contentType,
+    title,
+    caption,
+    description,
+    hashtags,
+    scheduled_at: scheduledAt,
+    status: 'processing',
+    b2_file_id: b2FileId,
+    b2_file_name: b2FileName
+  });
+
+  try {
+    // 1. Generate authorized download link from B2
+    const b2DownloadUrl = await b2GetDownloadUrl(c.env, b2FileName, 3600);
+
+    // Format full caption including hashtags
+    const hashtagsStr = Array.isArray(hashtags) && hashtags.length > 0
+      ? hashtags.map(t => `#${t.replace(/^#+/, '')}`).join(' ')
+      : '';
+    const fullCaption = `${caption ? caption.trim() : ''}${hashtagsStr ? (caption ? '\n\n' : '') + hashtagsStr : ''}`;
+
+    // 2. Publish to Instagram Reel
+    const publishResult = await publishInstagramReel(c.env, activeToken, activeIgUserId, {
+      b2DownloadUrl,
+      caption: fullCaption,
+      shareToFeed,
+      scheduledAt
+    });
+
+    // 3. Immediately cleanup temporary file from Backblaze B2
+    await b2DeleteFile(c.env, b2FileId, b2FileName);
+
+    // 4. Update job in D1
+    await updateInstagramUploadJob(c.env.DB, job.id, {
+      status: publishResult.status || 'published',
+      instagram_container_id: publishResult.containerId,
+      instagram_media_id: publishResult.mediaId,
+      instagram_post_url: publishResult.postUrl,
+      published_at: scheduledAt ? null : new Date().toISOString()
+    });
+
+    return c.json({
+      success: true,
+      media_id: publishResult.mediaId,
+      ig_user_id: activeIgUserId,
+      status: publishResult.status,
+      postUrl: publishResult.postUrl
+    });
+  } catch (err) {
+    console.error('Instagram publish error:', err);
+
+    // Attempt B2 cleanup on error as well
+    try {
+      await b2DeleteFile(c.env, b2FileId, b2FileName);
+    } catch {}
+
+    await updateInstagramUploadJob(c.env.DB, job.id, {
+      status: 'failed',
+      error_message: err.message
+    });
+
+    return c.json({
+      success: false,
+      error: `Instagram upload failed: ${err.message}`,
+      jobId: job.id
+    }, 500);
+  }
+});
+
+/**
+ * GET /api/instagram/jobs
+ * Returns Instagram upload job history for current user.
+ */
+app.get('/api/instagram/jobs', withUser, async (c) => {
+  const userId = c.get('userId');
+  const jobs = await getInstagramUploadJobs(c.env.DB, userId);
+  return c.json(jobs);
+});
+
+/**
+ * GET /api/instagram/jobs/:id
+ * Single Instagram job status.
+ */
+app.get('/api/instagram/jobs/:id', withUser, async (c) => {
+  const id = c.req.param('id');
+  const job = await getInstagramUploadJob(c.env.DB, id);
+  if (!job) return c.json({ error: 'Job not found' }, 404);
+  return c.json(job);
+});
+
 
 
 // ─── Upload Jobs ──────────────────────────────────────────────────────────────
@@ -1475,7 +2221,130 @@ app.delete('/api/templates/:id', withUser, async (c) => {
   return c.json(result);
 });
 
-// ─── User Storage & Database Data Management ──────────────────────────────────
+// ─── Storage, Backblaze B2 & Database Management ──────────────────────────────
+
+/**
+ * GET /api/storage/overview
+ * Get comprehensive overview of Backblaze B2 bucket storage, active files, and D1 database stats.
+ */
+app.get('/api/storage/overview', withUser, async (c) => {
+  const userId = c.get('userId');
+  const dbStats = await getUserStorageStats(c.env.DB, userId);
+
+  let b2Files = [];
+  let b2Error = null;
+  let totalB2Bytes = 0;
+
+  try {
+    if (c.env.B2_KEY_ID && c.env.B2_APPLICATION_KEY && c.env.B2_BUCKET_ID) {
+      b2Files = await b2ListFileNames(c.env, 100);
+      totalB2Bytes = b2Files.reduce((acc, f) => acc + (f.contentLength || 0), 0);
+    }
+  } catch (err) {
+    console.warn('[Storage API] B2 file list error:', err.message);
+    b2Error = err.message;
+  }
+
+  return c.json({
+    success: true,
+    database: dbStats,
+    b2: {
+      configured: Boolean(c.env.B2_BUCKET_ID && c.env.B2_KEY_ID),
+      bucketName: c.env.B2_BUCKET_NAME || 'videoclip-reels',
+      bucketId: c.env.B2_BUCKET_ID || null,
+      fileCount: b2Files.length,
+      totalBytes: totalB2Bytes,
+      totalMb: (totalB2Bytes / (1024 * 1024)).toFixed(2),
+      files: b2Files,
+      error: b2Error
+    }
+  });
+});
+
+/**
+ * POST /api/storage/b2/delete
+ * Delete a specific file from Backblaze B2 bucket.
+ */
+app.post('/api/storage/b2/delete', withUser, async (c) => {
+  let body = {};
+  try {
+    body = await c.req.json();
+  } catch {}
+
+  const { fileId, fileName } = body;
+  if (!fileId || !fileName) {
+    return c.json({ error: 'fileId and fileName are required to delete a B2 file.' }, 400);
+  }
+
+  const result = await b2DeleteFile(c.env, fileId, fileName);
+  return c.json(result);
+});
+
+/**
+ * POST /api/storage/b2/delete-all
+ * Delete all files stored in Backblaze B2 bucket.
+ */
+app.post('/api/storage/b2/delete-all', withUser, async (c) => {
+  try {
+    const files = await b2ListFileNames(c.env, 100);
+    const deletePromises = files.map(f => b2DeleteFile(c.env, f.fileId, f.fileName));
+    await Promise.all(deletePromises);
+    return c.json({ success: true, deletedCount: files.length });
+  } catch (err) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+/**
+ * POST /api/storage/clear-scope
+ * Clear specific database records for the authenticated user.
+ */
+app.post('/api/storage/clear-scope', withUser, async (c) => {
+  const userId = c.get('userId');
+  let body = {};
+  try {
+    body = await c.req.json();
+  } catch {}
+
+  const scope = body.scope || 'history';
+  const result = await clearUserDataByScope(c.env.DB, userId, scope);
+  return c.json(result);
+});
+
+/**
+ * DELETE /api/storage/wipe-all
+ * POST /api/user/wipe-all
+ * Complete wipe: deletes all user rows across all D1 tables, deletes temporary B2 files, and wipes session cookie.
+ */
+app.on(['DELETE', 'POST'], ['/api/storage/wipe-all', '/api/user/wipe-all'], withUser, async (c) => {
+  const userId = c.get('userId');
+  console.log('[Storage API] Wiping all data for user:', userId);
+
+  // 1. Wipe D1 Database records
+  await wipeAllUserData(c.env.DB, userId);
+
+  // 2. Clear temporary files in B2 if possible
+  try {
+    const files = await b2ListFileNames(c.env, 100);
+    const userFiles = files.filter(f => f.fileName.includes(userId) || f.fileName.startsWith('ig_') || f.fileName.startsWith('fb_'));
+    await Promise.all(userFiles.map(f => b2DeleteFile(c.env, f.fileId, f.fileName)));
+  } catch (e) {
+    console.warn('[Storage API] B2 wipe cleanup warning:', e.message);
+  }
+
+  // 3. Clear cookie
+  setCookie(c, '__vcuid', '', {
+    httpOnly: true,
+    path: '/',
+    maxAge: 0
+  });
+
+  return c.json({
+    success: true,
+    wiped: true,
+    message: 'All user data, templates, tokens, and storage files have been permanently erased.'
+  });
+});
 
 /**
  * GET /api/user/storage
@@ -1508,7 +2377,7 @@ app.post('/api/user/storage/clear', withUser, async (c) => {
   } catch {}
 
   const scope = body.scope || 'history';
-  const result = await clearUserData(c.env.DB, userId, scope);
+  const result = await clearUserDataByScope(c.env.DB, userId, scope);
   return c.json(result);
 });
 

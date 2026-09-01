@@ -81,6 +81,7 @@ export function useTemplates({ isAuthenticated = false } = {}) {
     textSettings = null,
     ytSettings = null,
     fbSettings = null,
+    igSettings = null,
     logoSettings = null
   }) => {
     const newId = `tpl-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
@@ -91,6 +92,7 @@ export function useTemplates({ isAuthenticated = false } = {}) {
       text_data: textSettings,
       youtube_data: ytSettings,
       facebook_data: fbSettings,
+      instagram_data: igSettings,
       logo_data: logoSettings,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()

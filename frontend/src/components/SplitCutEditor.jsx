@@ -367,7 +367,7 @@ export default function SplitCutEditor({
             <button onClick={selectAllActive} className="text-slate-400 hover:text-white cursor-pointer touch-manipulation">
               Select All
             </button>
-            <span>&bull;</span>
+            <span>•</span>
             <button onClick={clearSelection} className="text-slate-400 hover:text-white cursor-pointer touch-manipulation">
               Clear
             </button>

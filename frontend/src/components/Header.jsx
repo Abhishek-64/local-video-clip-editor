@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   ShieldCheck, Film, Sparkles, User, LogOut, Youtube, ChevronDown,
-  CheckCircle2, Database, LayoutTemplate, Bookmark, Share2
+  CheckCircle2, Database, LayoutTemplate, Bookmark, Share2, Instagram
 } from 'lucide-react';
 
 export default function Header({
@@ -16,8 +16,10 @@ export default function Header({
   templatesCount = 0,
   ytAccount,
   fbAccount,
+  igAccount,
   isYtConnected = false,
   isFbConnected = false,
+  isIgConnected = false,
   activeTab = 'split-cut',
   onNavigateTab
 }) {
@@ -51,7 +53,7 @@ export default function Header({
                 AUTOMATIC VIDEO CLIPPER
               </span>
             </div>
-            <p className="text-[10px] sm:text-xs text-slate-400 truncate">Local Browser Processing &bull; Private</p>
+            <p className="text-[10px] sm:text-xs text-slate-400 truncate">Local Browser Processing • Private</p>
           </div>
         </div>
 
@@ -100,6 +102,16 @@ export default function Header({
                       <Youtube className="w-2.5 h-2.5" />
                       <span className="truncate max-w-[90px]">{ytAccount.channel_title || 'Linked'}</span>
                     </div>
+                  ) : igAccount ? (
+                    <div className="flex items-center space-x-1 text-[10px] text-pink-400">
+                      <Instagram className="w-2.5 h-2.5" />
+                      <span className="truncate max-w-[90px]">@{igAccount.ig_username || 'Linked'}</span>
+                    </div>
+                  ) : fbAccount ? (
+                    <div className="flex items-center space-x-1 text-[10px] text-blue-400">
+                      <Share2 className="w-2.5 h-2.5" />
+                      <span className="truncate max-w-[90px]">{fbAccount.page_name || 'Linked'}</span>
+                    </div>
                   ) : (
                     <div className="text-[10px] text-slate-400">Account</div>
                   )}
@@ -134,6 +146,31 @@ export default function Header({
                           <p className="text-[10px] text-emerald-400 flex items-center space-x-1">
                             <CheckCircle2 className="w-2.5 h-2.5 inline" />
                             <span>YouTube Connected</span>
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {igAccount && (
+                    <div className="px-3.5 py-2.5 bg-slate-950/40 border-b border-slate-800/60">
+                      <div className="flex items-center space-x-2">
+                        {igAccount.ig_profile_picture_url ? (
+                          <img
+                            src={igAccount.ig_profile_picture_url}
+                            alt=""
+                            className="w-6 h-6 rounded-full border border-pink-500/40 shrink-0"
+                          />
+                        ) : (
+                          <Instagram className="w-5 h-5 text-pink-400 shrink-0" />
+                        )}
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-semibold text-slate-200 truncate">
+                            @{igAccount.ig_username}
+                          </p>
+                          <p className="text-[10px] text-pink-400 flex items-center space-x-1">
+                            <CheckCircle2 className="w-2.5 h-2.5 inline" />
+                            <span>Instagram Connected</span>
                           </p>
                         </div>
                       </div>

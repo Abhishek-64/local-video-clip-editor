@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Crop, Image as ImageIcon, Type, Sparkles, Volume2, SlidersHorizontal, CheckCheck, Youtube, Scissors, Share2 } from 'lucide-react';
+import { Crop, Image as ImageIcon, Type, Sparkles, Volume2, SlidersHorizontal, CheckCheck, Youtube, Scissors, Share2, Instagram, Database } from 'lucide-react';
 import CropEditor from './CropEditor';
 import BackgroundEditor from './BackgroundEditor';
 import TextEditor from './TextEditor';
@@ -9,7 +9,9 @@ import AudioPanel from './AudioPanel';
 import ExportPanel from './ExportPanel';
 import YouTubePanel from './YouTubePanel';
 import FacebookPanel from './FacebookPanel';
+import InstagramPanel from './InstagramPanel';
 import SplitCutEditor from './SplitCutEditor';
+import StoragePanel from './StoragePanel';
 
 export default function EditorTabs({
   videoData,
@@ -88,6 +90,31 @@ export default function EditorTabs({
   publishFbStage = '',
   publishFbError = null,
   lastPublishedFbPost = null,
+  // Instagram props
+  igAccount,
+  availableIgAccounts = [],
+  isIgConnected = false,
+  isIgUserConnected = false,
+  isIgAccountConnected = false,
+  isLoadingIgAccount = false,
+  igAccountError = null,
+  connectInstagram,
+  connectIgAccountById,
+  isConnectingIgAccount = false,
+  igAccountConnectError = null,
+  setIgAccountConnectError,
+  switchIgAccount,
+  disconnectInstagram,
+  refreshIgAccount,
+  igSettings,
+  updateIgSettings,
+  renderIgTemplate,
+  publishToInstagramPipeline,
+  isPublishingIg = false,
+  publishIgProgress = 0,
+  publishIgStage = '',
+  publishIgError = null,
+  lastPublishedIgPost = null,
   activeTab: controlledActiveTab,
   onTabChange
 }) {
@@ -110,7 +137,9 @@ export default function EditorTabs({
     { id: 'audio', label: 'Audio', icon: Volume2 },
     { id: 'export', label: 'Export', icon: SlidersHorizontal },
     { id: 'youtube', label: 'YouTube', icon: Youtube },
-    { id: 'facebook', label: 'Facebook', icon: Share2 }
+    { id: 'facebook', label: 'Facebook', icon: Share2 },
+    { id: 'instagram', label: 'Instagram', icon: Instagram },
+    { id: 'storage', label: 'Storage & DB', icon: Database }
   ];
 
   return (
@@ -129,6 +158,12 @@ export default function EditorTabs({
                   isActive
                     ? t.id === 'youtube'
                       ? 'bg-slate-900 border-slate-800 text-red-400 border-b-2 border-b-red-500 shadow-sm'
+                      : t.id === 'facebook'
+                      ? 'bg-slate-900 border-slate-800 text-blue-400 border-b-2 border-b-blue-500 shadow-sm'
+                      : t.id === 'instagram'
+                      ? 'bg-slate-900 border-slate-800 text-pink-400 border-b-2 border-b-pink-500 shadow-sm'
+                      : t.id === 'storage'
+                      ? 'bg-slate-900 border-slate-800 text-indigo-400 border-b-2 border-b-indigo-500 shadow-sm'
                       : 'bg-slate-900 border-slate-800 text-orange-400 border-b-2 border-b-orange-500 shadow-sm'
                     : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/40'
                 }`}
@@ -139,6 +174,10 @@ export default function EditorTabs({
                       ? 'text-red-400'
                       : t.id === 'facebook'
                       ? 'text-blue-400'
+                      : t.id === 'instagram'
+                      ? 'text-pink-400'
+                      : t.id === 'storage'
+                      ? 'text-indigo-400'
                       : 'text-orange-400'
                     : 'text-slate-400'
                 }`} />
@@ -154,6 +193,9 @@ export default function EditorTabs({
                 )}
                 {t.id === 'facebook' && isFbConnected && (
                   <span className="w-1.5 h-1.5 bg-blue-400 rounded-full shrink-0" />
+                )}
+                {t.id === 'instagram' && isIgConnected && (
+                  <span className="w-1.5 h-1.5 bg-pink-400 rounded-full shrink-0" />
                 )}
               </button>
             );
@@ -217,6 +259,8 @@ export default function EditorTabs({
             onNavigateTab={setActiveTab}
             ytSettings={ytSettings}
             updateYtSettings={updateYtSettings}
+            fbSettings={fbSettings}
+            igSettings={igSettings}
           />
         )}
 
@@ -273,6 +317,8 @@ export default function EditorTabs({
             setPipelineStartTime={setPipelineStartTime}
             customParts={customParts}
             textSettings={textSettings}
+            fbSettings={fbSettings}
+            igSettings={igSettings}
             onSwitchToPlatform={setActiveTab}
           />
         )}
@@ -310,10 +356,70 @@ export default function EditorTabs({
             customParts={customParts}
             completedClips={completedClips}
             textSettings={textSettings}
+            onTextChange={onTextChange}
+            ytSettings={ytSettings}
+            igSettings={igSettings}
+            isIgConnected={isIgConnected}
+            isIgAccountConnected={isIgAccountConnected}
+            igAccount={igAccount}
+            renderIgTemplate={renderIgTemplate}
+            publishToInstagramPipeline={publishToInstagramPipeline}
             onSwitchToPlatform={setActiveTab}
+          />
+        )}
+
+        {activeTab === 'instagram' && (
+          <InstagramPanel
+            igAccount={igAccount}
+            availableAccounts={availableIgAccounts}
+            isConnected={isIgConnected}
+            isUserConnected={isIgUserConnected}
+            isAccountConnected={isIgAccountConnected}
+            isLoadingAccount={isLoadingIgAccount}
+            accountError={igAccountError}
+            connectInstagram={connectInstagram}
+            connectAccountById={connectIgAccountById}
+            isConnectingAccount={isConnectingIgAccount}
+            accountConnectError={igAccountConnectError}
+            setAccountConnectError={setIgAccountConnectError}
+            switchAccount={switchIgAccount}
+            disconnectInstagram={disconnectInstagram}
+            refreshIgAccount={refreshIgAccount}
+            igSettings={igSettings}
+            updateIgSettings={updateIgSettings}
+            renderIgTemplate={renderIgTemplate}
+            publishToInstagramPipeline={publishToInstagramPipeline}
+            isPublishing={isPublishingIg}
+            publishProgress={publishIgProgress}
+            publishStage={publishIgStage}
+            publishError={publishIgError}
+            lastPublishedPost={lastPublishedIgPost}
+            apiAvailable={apiAvailable}
+            isAuthenticated={isAuthenticated}
+            onOpenAuth={onOpenAuth}
+            videoData={videoData}
+            customParts={customParts}
+            completedClips={completedClips}
+            textSettings={textSettings}
+            onTextChange={onTextChange}
+            ytSettings={ytSettings}
+            fbSettings={fbSettings}
+            isFbConnected={isFbConnected}
+            isFbPageConnected={isFbPageConnected}
+            fbAccount={fbAccount}
+            renderFbTemplate={renderFbTemplate}
+            publishToFacebookPipeline={publishToFacebookPipeline}
+            onSwitchToPlatform={setActiveTab}
+          />
+        )}
+
+        {activeTab === 'storage' && (
+          <StoragePanel
+            isAuthenticated={isAuthenticated}
           />
         )}
       </div>
     </div>
   );
 }
+

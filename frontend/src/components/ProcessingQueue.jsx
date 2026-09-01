@@ -328,56 +328,12 @@ export default function ProcessingQueue({
           )}
         </div>
 
-        {/* Multi-Platform Publish Target Options */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-900">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-              Upload Platforms:
-            </span>
-
-            {/* YouTube Checkbox */}
-            <label className={`inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg border text-xs cursor-pointer select-none transition-all ${
-              autoUploadYouTube && isConnected
-                ? 'bg-red-500/15 border-red-500/40 text-red-300 font-bold'
-                : 'bg-slate-900 border-slate-800 text-slate-400'
-            }`}>
-              <input
-                type="checkbox"
-                checked={autoUploadYouTube && isConnected}
-                disabled={!isConnected}
-                onChange={(e) => setAutoUploadYouTube(e.target.checked)}
-                className="rounded bg-slate-950 border-slate-700 text-red-500"
-              />
-              <Youtube className="w-3.5 h-3.5 text-red-500" />
-              <span>
-                {isConnected
-                  ? (autoUploadYouTube ? '⚡ Auto-Schedule YouTube' : 'YouTube (Manual Mode)')
-                  : 'YouTube (Disconnected)'}
-              </span>
-            </label>
-
-            {/* Facebook Checkbox */}
-            <label className={`inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg border text-xs cursor-pointer select-none transition-all ${
-              autoPublishFacebook && isFbConnected
-                ? 'bg-blue-500/15 border-blue-500/40 text-blue-300 font-bold'
-                : 'bg-slate-900 border-slate-800 text-slate-400'
-            }`}>
-              <input
-                type="checkbox"
-                checked={autoPublishFacebook && isFbConnected}
-                disabled={!isFbConnected}
-                onChange={(e) => setAutoPublishFacebook(e.target.checked)}
-                className="rounded bg-slate-950 border-slate-700 text-blue-400"
-              />
-              <Share2 className="w-3.5 h-3.5 text-blue-400" />
-              <span>Facebook Reels {isFbConnected ? '✓' : '(Disconnected)'}</span>
-            </label>
-          </div>
-
+        {/* Generate / Render Action Button */}
+        <div className="flex items-center justify-end pt-3 border-t border-slate-900">
           <button
             onClick={handleTriggerGenerate}
             disabled={isProcessing}
-            className="w-full sm:w-auto px-5 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 active:scale-98 disabled:opacity-50 text-white font-bold text-xs sm:text-sm rounded-xl shadow-lg shadow-orange-500/25 flex items-center justify-center space-x-2 transition-all cursor-pointer touch-manipulation"
+            className="w-full sm:w-auto px-6 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 active:scale-98 disabled:opacity-50 text-white font-bold text-xs sm:text-sm rounded-xl shadow-lg shadow-orange-500/25 flex items-center justify-center space-x-2 transition-all cursor-pointer touch-manipulation"
           >
             {isProcessing ? (
               <>
@@ -386,8 +342,8 @@ export default function ProcessingQueue({
               </>
             ) : (
               <>
-                <PlayCircle className="w-4 h-4" />
-                <span>Generate Clips</span>
+                <Zap className="w-4 h-4 fill-current" />
+                <span>Render &amp; Export Selected Clips</span>
               </>
             )}
           </button>
@@ -432,8 +388,8 @@ export default function ProcessingQueue({
                   </div>
 
                   <div className="flex items-center space-x-2 text-[11px] text-slate-400 font-mono mt-1">
-                    <span>{formatTime(job.startTime)} &rarr; {formatTime(job.endTime)}</span>
-                    <span>&bull;</span>
+                    <span>{formatTime(job.startTime)} → {formatTime(job.endTime)}</span>
+                    <span>•</span>
                     <span>{formatTime(job.duration)}</span>
                   </div>
 

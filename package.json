@@ -11,7 +11,7 @@
     "build:frontend": "npm --prefix frontend run build",
     "preview": "npm --prefix frontend run preview",
     "deploy": "npm run deploy:all",
-    "deploy:frontend": "npm --prefix frontend run build && npx wrangler deploy --config frontend/wrangler.jsonc",
+    "deploy:frontend": "npm --prefix frontend run deploy",
     "deploy:backend": "npm --prefix backend run deploy",
     "deploy:all": "npm run deploy:backend && npm run deploy:frontend",
     "db:migrate": "npm --prefix backend run db:migrate",

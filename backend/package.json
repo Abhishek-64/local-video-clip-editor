@@ -4,12 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "npx wrangler dev -c wrangler.toml",
-    "deploy": "npx wrangler deploy -c wrangler.toml",
-    "db:migrate": "npx wrangler d1 migrations apply videoclip-db --remote -c wrangler.toml",
-    "db:migrate:local": "npx wrangler d1 migrations apply videoclip-db --local -c wrangler.toml",
-    "db:execute:local": "npx wrangler d1 execute videoclip-db --local --file=schema.sql -c wrangler.toml",
-    "db:execute:remote": "npx wrangler d1 execute videoclip-db --remote --file=schema.sql -c wrangler.toml"
+    "dev": "wrangler dev -c wrangler.toml",
+    "deploy": "wrangler deploy -c wrangler.toml",
+    "db:migrate": "wrangler d1 migrations apply videoclip-db --remote -c wrangler.toml",
+    "db:migrate:local": "wrangler d1 migrations apply videoclip-db --local -c wrangler.toml",
+    "db:execute:local": "wrangler d1 execute videoclip-db --local --file=schema.sql -c wrangler.toml",
+    "db:execute:remote": "wrangler d1 execute videoclip-db --remote --file=schema.sql -c wrangler.toml"
   },
   "dependencies": {
     "hono": "^4.6.3"

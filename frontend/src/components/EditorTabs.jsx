@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Crop, Image as ImageIcon, Type, Sparkles, Volume2, SlidersHorizontal, Youtube, Scissors, Share2, Instagram, Database, Layers, Clock, History, ChevronLeft, X, Maximize2, Minimize2 } from 'lucide-react';
 import CropEditor from './CropEditor';
 import BackgroundEditor from './BackgroundEditor';
@@ -143,6 +143,21 @@ export default function EditorTabs({
     setInternalActiveTab(tabId);
   };
 
+  const normalizedTab =
+    (activeTab === 'history' || activeTab === 'upload-history' || activeTab === 'scheduled')
+      ? 'queue'
+      : (activeTab === 'background')
+      ? 'backdrop'
+      : activeTab;
+
+  useEffect(() => {
+    if (activeTab === 'history' || activeTab === 'upload-history') {
+      setQueueEditorSubTab('history');
+    } else if (activeTab === 'scheduled') {
+      setQueueEditorSubTab('scheduled');
+    }
+  }, [activeTab]);
+
   // Resilient close handler for both prop naming conventions
   const handleClose = () => {
     if (typeof onCloseMobileSheet === 'function') {
@@ -170,8 +185,10 @@ export default function EditorTabs({
     { id: 'queue', label: 'Queue & History', icon: Layers }
   ];
 
-  const activeTabObj = tabs.find(t => t.id === activeTab) || tabs[0];
-  const ActiveTabIcon = activeTabObj?.icon;
+  const activeTabObj = tabs.find(t => t.id === normalizedTab) || tabs[0];
+  const isHistoryDirectView = activeTab === 'history' || activeTab === 'upload-history';
+  const DisplayIcon = isHistoryDirectView ? History : activeTabObj?.icon;
+  const displayTitle = isHistoryDirectView ? 'Upload History' : activeTabObj?.label;
 
   return (
     <div className={isMobileSheet ? "bg-slate-900 flex flex-col h-full" : "bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-lg"}>
@@ -193,8 +210,8 @@ export default function EditorTabs({
           </button>
 
           <div className="flex items-center space-x-2 min-w-0 px-2">
-            {ActiveTabIcon && <ActiveTabIcon className="w-4 h-4 text-orange-400 shrink-0" />}
-            <span className="text-sm font-bold text-white truncate">{activeTabObj?.label}</span>
+            {DisplayIcon && <DisplayIcon className="w-4 h-4 text-orange-400 shrink-0" />}
+            <span className="text-sm font-bold text-white truncate">{displayTitle}</span>
           </div>
 
           <div className="flex items-center space-x-1">
@@ -239,7 +256,7 @@ export default function EditorTabs({
         <div className="flex space-x-1 min-w-max pb-0.5">
           {tabs.map((t) => {
             const Icon = t.icon;
-            const isActive = activeTab === t.id;
+            const isActive = normalizedTab === t.id;
             return (
               <button
                 key={t.id}
@@ -299,7 +316,7 @@ export default function EditorTabs({
 
       {/* Active Tab Panel Body */}
       <div className={`p-3.5 sm:p-5 ${isMobileSheet ? 'overflow-y-auto flex-1 pb-20' : ''}`}>
-        {activeTab === 'split-cut' && (
+        {normalizedTab === 'split-cut' && (
           <SplitCutEditor
             duration={duration}
             currentTime={currentTime}
@@ -316,7 +333,7 @@ export default function EditorTabs({
           />
         )}
 
-        {activeTab === 'crop' && (
+        {normalizedTab === 'crop' && (
           <CropEditor
             cropSettings={cropSettings}
             onChange={onCropChange}
@@ -326,7 +343,7 @@ export default function EditorTabs({
           />
         )}
 
-        {activeTab === 'backdrop' && (
+        {(normalizedTab === 'backdrop' || activeTab === 'background') && (
           <BackgroundEditor
             bgSettings={bgSettings}
             onChange={onBgChange}
@@ -335,7 +352,7 @@ export default function EditorTabs({
           />
         )}
 
-        {activeTab === 'text' && (
+        {normalizedTab === 'text' && (
           <TextEditor
             textSettings={textSettings}
             onChange={onTextChange}
@@ -347,14 +364,14 @@ export default function EditorTabs({
           />
         )}
 
-        {activeTab === 'logo' && (
+        {normalizedTab === 'logo' && (
           <LogoEditor
             logoSettings={logoSettings}
             onChange={onLogoChange}
           />
         )}
 
-        {activeTab === 'effects' && (
+        {normalizedTab === 'effects' && (
           <EffectsPanel
             effectsSettings={effectsSettings}
             onChange={onEffectsChange}
@@ -362,7 +379,7 @@ export default function EditorTabs({
           />
         )}
 
-        {activeTab === 'audio' && (
+        {normalizedTab === 'audio' && (
           <AudioPanel
             audioSettings={audioSettings}
             onChange={onAudioChange}
@@ -370,7 +387,7 @@ export default function EditorTabs({
           />
         )}
 
-        {activeTab === 'export' && (
+        {normalizedTab === 'export' && (
           <ExportPanel
             exportSettings={exportSettings}
             onChange={onExportChange}
@@ -390,7 +407,7 @@ export default function EditorTabs({
           />
         )}
 
-        {activeTab === 'youtube' && (
+        {normalizedTab === 'youtube' && (
           <YouTubePanel
             ytAccount={ytAccount}
             isConnected={isConnected}
@@ -414,7 +431,7 @@ export default function EditorTabs({
           />
         )}
 
-        {activeTab === 'facebook' && (
+        {normalizedTab === 'facebook' && (
           <FacebookPanel
             fbAccount={fbAccount}
             availablePages={availablePages}
@@ -460,7 +477,7 @@ export default function EditorTabs({
           />
         )}
 
-        {activeTab === 'instagram' && (
+        {normalizedTab === 'instagram' && (
           <InstagramPanel
             igAccount={igAccount}
             availableAccounts={availableIgAccounts}
@@ -506,14 +523,14 @@ export default function EditorTabs({
           />
         )}
 
-        {activeTab === 'storage' && (
+        {normalizedTab === 'storage' && (
           <StoragePanel
             isAuthenticated={isAuthenticated}
             showToast={showToast}
           />
         )}
 
-        {activeTab === 'queue' && (
+        {normalizedTab === 'queue' && (
           <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-800">
               <div className="flex items-center space-x-2">

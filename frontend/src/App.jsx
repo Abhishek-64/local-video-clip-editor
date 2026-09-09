@@ -26,7 +26,7 @@ import sharedUploadCache from './services/sharedUploadCache';
 import {
   Check, Info, X, Film, Palette, Layers, Sparkles,
   Scissors, Crop, Image as ImageIcon, Type, Volume2, SlidersHorizontal,
-  Youtube, Share2, Instagram, Database, Sliders, ChevronRight
+  Youtube, Share2, Instagram, Database, Sliders, ChevronRight, History
 } from 'lucide-react';
 
 export default function App() {
@@ -1835,9 +1835,9 @@ export default function App() {
                   <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-6">
                     {[
                       { id: 'split-cut', label: 'Split & Cut', icon: Scissors, color: 'text-amber-400' },
-                      { id: 'auto-split', label: 'Auto Split', icon: Sparkles, color: 'text-orange-400' },
+                      { id: 'history', label: 'Upload History', icon: History, color: 'text-amber-400' },
                       { id: 'crop', label: '9:16 Crop', icon: Crop, color: 'text-cyan-400' },
-                      { id: 'background', label: 'Backdrop', icon: ImageIcon, color: 'text-blue-400' },
+                      { id: 'backdrop', label: 'Backdrop', icon: ImageIcon, color: 'text-blue-400' },
                       { id: 'text', label: 'Text/Titles', icon: Type, color: 'text-emerald-400' },
                       { id: 'logo', label: 'Logo', icon: ImageIcon, color: 'text-violet-400' },
                       { id: 'effects', label: 'Effects', icon: SlidersHorizontal, color: 'text-pink-400' },
@@ -1848,7 +1848,9 @@ export default function App() {
                       { id: 'instagram', label: 'Instagram', icon: Instagram, color: 'text-purple-400' },
                     ].map((item) => {
                       const Icon = item.icon;
-                      const isActive = activeEditorTab === item.id;
+                      const isActive = activeEditorTab === item.id ||
+                        (item.id === 'backdrop' && activeEditorTab === 'background') ||
+                        (item.id === 'history' && (activeEditorTab === 'queue' || activeEditorTab === 'upload-history'));
                       return (
                         <button
                           key={item.id}

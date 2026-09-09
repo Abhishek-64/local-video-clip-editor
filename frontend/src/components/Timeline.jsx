@@ -521,10 +521,10 @@ export default function Timeline({
       {/* ── 2. The Main Interactive Multi-Segment Range Scrubber Track ── */}
       <div className="relative bg-slate-950 rounded-xl p-2.5 sm:p-3 border border-slate-800 space-y-2">
         {/* Horizontally Scrollable Track Wrapper on Mobile Screens (< sm) */}
-        <div className="overflow-x-auto no-scrollbar touch-pan-x pb-1 -mx-0.5 px-0.5">
+        <div className="overflow-hidden pb-1">
           <div
             ref={trackRef}
-            className="relative h-14 sm:h-16 min-w-[540px] sm:min-w-0 w-full bg-slate-950 rounded-xl overflow-hidden border border-slate-800 cursor-pointer select-none shadow-inner"
+            className="relative h-14 sm:h-16 w-full bg-slate-950 rounded-xl overflow-hidden border border-slate-800 cursor-pointer select-none shadow-inner"
             onClick={(e) => {
               if (!duration || !onCurrentTimeChange || dragState?.isDragging) return;
               const rect = e.currentTarget.getBoundingClientRect();

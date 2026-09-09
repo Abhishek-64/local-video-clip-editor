@@ -69,11 +69,19 @@ function getBitrateBps(bitratePreset = 'high') {
   }
 }
 
+// Stable cache for wrapped text lines to eliminate redundant text measurements during export
+const TEXT_LAYOUT_CACHE = new Map();
+
 /**
  * Auto-wrap and fit text within a maximum allowed canvas width.
  * Prevents text from overflowing canvas bounds on any resolution.
  */
 function wrapAndFitText(ctx, rawText, maxAllowedWidth, initialFontSize, font, minFontSize = 18) {
+  const cacheKey = `${rawText}_${font}_${initialFontSize}_${Math.round(maxAllowedWidth)}`;
+  if (TEXT_LAYOUT_CACHE.has(cacheKey)) {
+    return TEXT_LAYOUT_CACHE.get(cacheKey);
+  }
+
   let currentFontSize = initialFontSize;
   const paragraphs = String(rawText).split('\n');
 
@@ -123,12 +131,20 @@ function wrapAndFitText(ctx, rawText, maxAllowedWidth, initialFontSize, font, mi
     });
   }
 
-  return {
+  const result = {
     lines,
     fontSize: currentFontSize,
     maxLineWidth: maxW,
     lineHeight: Math.round(currentFontSize * 1.28)
   };
+
+  if (TEXT_LAYOUT_CACHE.size > 150) {
+    const oldestKey = TEXT_LAYOUT_CACHE.keys().next().value;
+    TEXT_LAYOUT_CACHE.delete(oldestKey);
+  }
+  TEXT_LAYOUT_CACHE.set(cacheKey, result);
+
+  return result;
 }
 
 import { exportVideoClip } from './exportEngine';

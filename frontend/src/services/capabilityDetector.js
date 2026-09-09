@@ -38,6 +38,7 @@ export async function detectCapabilities() {
   const hasAudioDecoder = typeof window.AudioDecoder !== 'undefined';
 
   let h264EncoderSupported = false;
+  let h264_4k_Supported = false;
   let aacEncoderSupported = false;
 
   if (hasVideoEncoder) {
@@ -52,6 +53,19 @@ export async function detectCapabilities() {
       h264EncoderSupported = Boolean(support && support.supported);
     } catch (e) {
       h264EncoderSupported = false;
+    }
+
+    try {
+      const support4k = await window.VideoEncoder.isConfigSupported({
+        codec: 'avc1.640033', // High Profile Level 5.1
+        width: 2160,
+        height: 3840,
+        bitrate: 35_000_000,
+        framerate: 30
+      });
+      h264_4k_Supported = Boolean(support4k && support4k.supported);
+    } catch (e) {
+      h264_4k_Supported = false;
     }
   }
 
@@ -123,6 +137,7 @@ export async function detectCapabilities() {
     audioEncoder: hasAudioEncoder,
     audioDecoder: hasAudioDecoder,
     h264EncoderSupported,
+    h264_4k_Supported,
     aacEncoderSupported,
     webGL: hasWebGL,
     webGL2: hasWebGL2,

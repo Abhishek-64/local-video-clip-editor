@@ -248,12 +248,20 @@ export async function mixAudioTracksOffline({
       outputRight[i] = Math.tanh(outputRight[i]);
     }
 
-    // Create final AudioBuffer
-    const finalAudioBuffer = offlineCtx.createBuffer(2, totalSamples, sampleRate);
-    finalAudioBuffer.copyToChannel(outputLeft, 0);
-    finalAudioBuffer.copyToChannel(outputRight, 1);
-
-    return finalAudioBuffer;
+    // High-performance, zero-duplication audio container.
+    // Preserves AudioBuffer API (.getChannelData, .sampleRate, .numberOfChannels, .length, .duration)
+    // while eliminating the redundant 230MB copy caused by OfflineAudioContext.createBuffer + copyToChannel.
+    return {
+      numberOfChannels: 2,
+      sampleRate,
+      length: totalSamples,
+      duration: finalDuration,
+      leftChannel: outputLeft,
+      rightChannel: outputRight,
+      getChannelData(channelIndex) {
+        return channelIndex === 0 ? this.leftChannel : this.rightChannel;
+      }
+    };
   } catch (err) {
     console.warn('Offline audio mixing fallback warning:', err);
     return null;

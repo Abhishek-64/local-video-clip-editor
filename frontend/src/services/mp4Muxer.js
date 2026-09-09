@@ -133,39 +133,91 @@ export class MP4Muxer {
   }
 
   addVideoChunk(data, isKeyframe, durationMicroseconds) {
-    const durationInTimescale = Math.max(1, Math.round((durationMicroseconds / 1_000_000) * this.timescale));
+    const rawData = data instanceof Uint8Array ? data : new Uint8Array(data);
+    
+    // In-band SPS/PPS fallback: extract SPS (type 7) and PPS (type 8) if not already set
+    if (!this.sps || !this.pps) {
+      try {
+        let offset = 0;
+        const len = rawData.length;
+        while (offset + 4 < len) {
+          const naluLen = (rawData[offset] << 24) | (rawData[offset + 1] << 16) | (rawData[offset + 2] << 8) | rawData[offset + 3];
+          if (naluLen <= 0 || offset + 4 + naluLen > len) break;
+          const naluType = rawData[offset + 4] & 0x1f;
+          if (naluType === 7 && !this.sps) {
+            this.sps = rawData.slice(offset + 4, offset + 4 + naluLen);
+          } else if (naluType === 8 && !this.pps) {
+            this.pps = rawData.slice(offset + 4, offset + 4 + naluLen);
+          }
+          offset += 4 + naluLen;
+        }
+      } catch (e) {}
+    }
+
+    // Default to nominal frame duration if durationMicroseconds is undefined, null, NaN, or 0
+    const nominalDurationUs = Math.round((1 / (this.fps || 30)) * 1_000_000);
+    const validDurationUs = (typeof durationMicroseconds === 'number' && !isNaN(durationMicroseconds) && durationMicroseconds > 0)
+      ? durationMicroseconds
+      : nominalDurationUs;
+    const durationInTimescale = Math.max(1, Math.round((validDurationUs / 1_000_000) * this.timescale));
+
     this.videoChunks.push({
-      data: data instanceof Uint8Array ? data : new Uint8Array(data),
+      data: rawData,
       isKeyframe,
       duration: durationInTimescale,
-      size: data.byteLength || data.length
+      size: rawData.byteLength || rawData.length
     });
   }
 
   addAudioChunk(data, durationMicroseconds) {
-    const durationInTimescale = Math.max(1, Math.round((durationMicroseconds / 1_000_000) * this.audioTimescale));
+    const rawData = data instanceof Uint8Array ? data : new Uint8Array(data);
+
+    // Standard AAC frame is 1024 PCM samples (ISO/IEC 14496-3)
+    const nominalAudioDurationUs = Math.round((1024 / (this.audioTimescale || 48000)) * 1_000_000);
+    const validDurationUs = (typeof durationMicroseconds === 'number' && !isNaN(durationMicroseconds) && durationMicroseconds > 0)
+      ? durationMicroseconds
+      : nominalAudioDurationUs;
+    const durationInTimescale = Math.max(1, Math.round((validDurationUs / 1_000_000) * this.audioTimescale));
+
     this.audioChunks.push({
-      data: data instanceof Uint8Array ? data : new Uint8Array(data),
+      data: rawData,
       duration: durationInTimescale,
-      size: data.byteLength || data.length
+      size: rawData.byteLength || rawData.length
     });
     this.hasAudio = true;
   }
 
   finalize() {
-    // 1. Calculate durations
-    let totalVideoDuration = this.videoChunks.reduce((acc, c) => acc + c.duration, 0);
-    if (totalVideoDuration === 0) {
-      totalVideoDuration = Math.round((this.videoChunks.length / this.fps) * this.timescale);
+    // 1. Calculate durations safely without NaN or zero propagation
+    const defaultFrameTicks = Math.max(1, Math.round((1 / (this.fps || 30)) * this.timescale));
+    let totalVideoDuration = this.videoChunks.reduce((acc, c) => {
+      const dur = (typeof c.duration === 'number' && !isNaN(c.duration) && c.duration > 0) ? c.duration : defaultFrameTicks;
+      return acc + dur;
+    }, 0);
+
+    if (totalVideoDuration <= 0) {
+      totalVideoDuration = Math.max(1, this.videoChunks.length * defaultFrameTicks);
     }
 
-    let totalAudioDuration = this.audioChunks.reduce((acc, c) => acc + c.duration, 0);
+    const defaultAudioTicks = 1024;
+    let totalAudioDuration = this.audioChunks.reduce((acc, c) => {
+      const dur = (typeof c.duration === 'number' && !isNaN(c.duration) && c.duration > 0) ? c.duration : defaultAudioTicks;
+      return acc + dur;
+    }, 0);
+
+    if (this.hasAudio && totalAudioDuration <= 0) {
+      totalAudioDuration = Math.max(1, this.audioChunks.length * defaultAudioTicks);
+    }
+
     const movieTimescale = 1000;
     const movieDurationInMovieTimescale = Math.max(
-      Math.round((totalVideoDuration / this.timescale) * movieTimescale),
-      this.hasAudio && this.audioChunks.length > 0
-        ? Math.round((totalAudioDuration / this.audioTimescale) * movieTimescale)
-        : 0
+      1,
+      Math.max(
+        Math.round((totalVideoDuration / this.timescale) * movieTimescale),
+        this.hasAudio && this.audioChunks.length > 0
+          ? Math.round((totalAudioDuration / this.audioTimescale) * movieTimescale)
+          : 0
+      )
     );
 
     // 2. Build ftyp box
@@ -179,8 +231,16 @@ export class MP4Muxer {
     });
 
     // 3. Time-synchronized chunk interleaving & offset calculation (zero duplicate memory)
-    const videoChunkOffsets = new Array(this.videoChunks.length);
-    const audioChunkOffsets = new Array(this.audioChunks.length);
+    // Group samples into ~1-second chunks (instead of 1 sample per chunk).
+    // This reduces MP4 chunk offsets from 46,125 down to ~1,200, eliminates fragmented micro-seeks
+    // during browser playback, and prevents playback stuttering/lagging every few seconds.
+    const samplesPerVideoChunk = Math.max(1, Math.min(30, Math.round(this.fps || 30)));
+    const samplesPerAudioChunk = Math.max(1, Math.round((this.audioTimescale || 48000) / 1024));
+
+    const videoChunkOffsets = [];
+    const audioChunkOffsets = [];
+    const videoChunkSampleCounts = [];
+    const audioChunkSampleCounts = [];
     const interleavedDataChunks = [];
 
     let vIdx = 0;
@@ -194,19 +254,29 @@ export class MP4Muxer {
       const hasMoreAudio = this.hasAudio && aIdx < this.audioChunks.length;
 
       if (hasMoreVideo && (!hasMoreAudio || currentVideoTimeSec <= currentAudioTimeSec)) {
-        const vChunk = this.videoChunks[vIdx];
-        videoChunkOffsets[vIdx] = mdatPayloadSize;
-        interleavedDataChunks.push(vChunk.data);
-        mdatPayloadSize += vChunk.size;
-        currentVideoTimeSec += vChunk.duration / this.timescale;
-        vIdx++;
+        videoChunkOffsets.push(mdatPayloadSize);
+        const count = Math.min(samplesPerVideoChunk, this.videoChunks.length - vIdx);
+        videoChunkSampleCounts.push(count);
+
+        for (let i = 0; i < count; i++) {
+          const vChunk = this.videoChunks[vIdx];
+          interleavedDataChunks.push(vChunk.data);
+          mdatPayloadSize += vChunk.size;
+          currentVideoTimeSec += vChunk.duration / this.timescale;
+          vIdx++;
+        }
       } else if (hasMoreAudio) {
-        const aChunk = this.audioChunks[aIdx];
-        audioChunkOffsets[aIdx] = mdatPayloadSize;
-        interleavedDataChunks.push(aChunk.data);
-        mdatPayloadSize += aChunk.size;
-        currentAudioTimeSec += aChunk.duration / this.audioTimescale;
-        aIdx++;
+        audioChunkOffsets.push(mdatPayloadSize);
+        const count = Math.min(samplesPerAudioChunk, this.audioChunks.length - aIdx);
+        audioChunkSampleCounts.push(count);
+
+        for (let i = 0; i < count; i++) {
+          const aChunk = this.audioChunks[aIdx];
+          interleavedDataChunks.push(aChunk.data);
+          mdatPayloadSize += aChunk.size;
+          currentAudioTimeSec += aChunk.duration / this.audioTimescale;
+          aIdx++;
+        }
       }
     }
 
@@ -409,13 +479,29 @@ export class MP4Muxer {
                           })
                         );
 
-                        // stsc (Sample to Chunk) - 1 sample per chunk
+                        // stsc (Video Sample to Chunk)
                         stblBuf.writeBytes(
                           createFullBox('stsc', 0, 0, (buf) => {
-                            buf.writeUint32(1);
-                            buf.writeUint32(1); // first_chunk
-                            buf.writeUint32(1); // samples_per_chunk
-                            buf.writeUint32(1); // sample_description_index
+                            const stscEntries = [];
+                            let lastSamplesPerChunk = -1;
+                            for (let c = 0; c < videoChunkSampleCounts.length; c++) {
+                              const spc = videoChunkSampleCounts[c];
+                              if (spc !== lastSamplesPerChunk) {
+                                stscEntries.push({
+                                  firstChunk: c + 1,
+                                  samplesPerChunk: spc,
+                                  sampleDescriptionIndex: 1
+                                });
+                                lastSamplesPerChunk = spc;
+                              }
+                            }
+
+                            buf.writeUint32(stscEntries.length);
+                            stscEntries.forEach((entry) => {
+                              buf.writeUint32(entry.firstChunk);
+                              buf.writeUint32(entry.samplesPerChunk);
+                              buf.writeUint32(entry.sampleDescriptionIndex);
+                            });
                           })
                         );
 
@@ -606,13 +692,29 @@ export class MP4Muxer {
                             })
                           );
 
-                          // stsc (Audio)
+                          // stsc (Audio Sample to Chunk)
                           stblBuf.writeBytes(
                             createFullBox('stsc', 0, 0, (buf) => {
-                              buf.writeUint32(1);
-                              buf.writeUint32(1);
-                              buf.writeUint32(1);
-                              buf.writeUint32(1);
+                              const stscEntries = [];
+                              let lastSamplesPerChunk = -1;
+                              for (let c = 0; c < audioChunkSampleCounts.length; c++) {
+                                const spc = audioChunkSampleCounts[c];
+                                if (spc !== lastSamplesPerChunk) {
+                                  stscEntries.push({
+                                    firstChunk: c + 1,
+                                    samplesPerChunk: spc,
+                                    sampleDescriptionIndex: 1
+                                  });
+                                  lastSamplesPerChunk = spc;
+                                }
+                              }
+
+                              buf.writeUint32(stscEntries.length);
+                              stscEntries.forEach((entry) => {
+                                buf.writeUint32(entry.firstChunk);
+                                buf.writeUint32(entry.samplesPerChunk);
+                                buf.writeUint32(entry.sampleDescriptionIndex);
+                              });
                             })
                           );
 
@@ -670,9 +772,37 @@ export class MP4Muxer {
     // Generate final moov with accurate offsets
     const finalMoov = buildMoovWithBaseOffset(finalMdatStartOffset);
 
-    // Combine all boxes and data chunks into final binary Blob (zero-copy memory pipeline)
-    return new Blob([ftyp, finalMoov, mdatHeaderBytes, ...interleavedDataChunks], {
+    // Build final Blob without spread operator to eliminate V8 call stack overhead
+    const blobParts = [ftyp, finalMoov, mdatHeaderBytes];
+    for (let i = 0; i < interleavedDataChunks.length; i++) {
+      blobParts.push(interleavedDataChunks[i]);
+    }
+    const finalBlob = new Blob(blobParts, {
       type: 'video/mp4'
     });
+
+    // Release internal chunk buffers immediately to free hundreds of MBs of memory
+    this.videoChunks = [];
+    this.audioChunks = [];
+
+    // Development-only diagnostic log (isolated behind development flag, no production console spam)
+    if (typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production' || (typeof window !== 'undefined' && (window.__ENABLE_MP4_DEBUG__ || window.location?.hostname === 'localhost'))) {
+      const durationSec = totalVideoDuration / this.timescale;
+      const actualBitrate = durationSec > 0 ? Math.round((finalBlob.size * 8) / durationSec) : 0;
+      console.log('[MP4Muxer Container Diagnostic]', {
+        duration: `${durationSec.toFixed(3)}s`,
+        fps: this.fps,
+        frameCount: this.videoChunks.length,
+        bitrate: `${(actualBitrate / 1_000_000).toFixed(2)} Mbps`,
+        width: this.width,
+        height: this.height,
+        fileSize: `${(finalBlob.size / (1024 * 1024)).toFixed(2)} MB`,
+        videoCodec: this.sps ? `H.264 (SPS ${this.sps.length}B, PPS ${this.pps?.length || 0}B)` : 'H.264 Baseline',
+        audioCodec: this.hasAudio ? `AAC (${this.audioChunks.length} frames)` : 'none'
+      });
+    }
+
+    return finalBlob;
   }
 }
+

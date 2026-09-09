@@ -58,7 +58,6 @@ export function useUploadQueue({
   const activeUploadsRef = useRef(new Set());
   const uploadQueueRef = useRef([]); // jobs waiting to upload
   const abortControllersRef = useRef(new Map());
-  const processedExportIdsRef = useRef(new Set()); // track which exports we've already enqueued
 
   // Always keep latest refs to avoid stale closure in upload async callbacks
   const ytSettingsRef = useRef(ytSettings);
@@ -279,46 +278,7 @@ export function useUploadQueue({
     startUploadRef.current = startUpload;
   }, [startUpload]);
 
-  // ── Watch for newly completed exports (Auto-Upload) ──────────────────────────
-
-  useEffect(() => {
-    if (!apiAvailable || !isConnected) return;
-
-    // Filter completed clips that haven't been queued for upload yet
-    const newClips = completedClips.filter(clip => {
-      if (processedExportIdsRef.current.has(clip.id) || !clip.blob) return false;
-      // Auto upload ONLY if explicitly enabled on the clip (clip.autoUpload === true)
-      // or if global YouTube mode is set to 'auto' and clip.autoUpload is not explicitly false
-      const isAutoMode = ytSettings?.yt_default_upload === 'auto';
-      const shouldAutoUpload = clip.autoUpload === true || (isAutoMode && clip.autoUpload !== false);
-      return shouldAutoUpload;
-    });
-
-    for (const clip of newClips) {
-      processedExportIdsRef.current.add(clip.id);
-
-      // Initialize job state with scheduledAt
-      setUploadJobs(prev => ({
-        ...prev,
-        [clip.id]: {
-          status: 'queued',
-          progress: 0,
-          videoId: null,
-          error: null,
-          scheduledAt: clip.scheduledAt || null,
-          blobRef: clip.blob
-        }
-      }));
-
-      uploadQueueRef.current.push(clip);
-    }
-
-    if (newClips.length > 0) {
-      processNextUpload();
-    }
-  }, [completedClips, apiAvailable, isConnected, ytSettings?.yt_default_upload, processNextUpload]);
-
-  // ── Manual upload trigger ─────────────────────────────────────────────────────
+  // ── Manual upload trigger (initiated explicitly by user or modal) ──────────────
 
   const uploadClip = useCallback((clip, overrides = {}) => {
     if (!apiAvailable || !isConnected) return;

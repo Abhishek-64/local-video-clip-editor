@@ -1,11 +1,11 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Instagram, CheckCircle2, AlertCircle, RefreshCw, LogOut, ChevronDown,
-  Tag, Clock, Calendar, Film, Sparkles, ExternalLink, ShieldCheck,
+  Tag, Film, Sparkles, ExternalLink, ShieldCheck,
   Video, Hash, HelpCircle, Check, Lock, ChevronUp, Plus, Youtube,
-  Layers, CheckSquare, Square, ListOrdered, Play, ArrowRight, Share2, Grid,
-  Copy, Sliders, Type, Undo2, Zap
+  Share2, Copy, Type
 } from 'lucide-react';
+
 
 export default function InstagramPanel({
   igAccount,
@@ -47,7 +47,8 @@ export default function InstagramPanel({
   fbAccount,
   renderFbTemplate,
   publishToFacebookPipeline,
-  onSwitchToPlatform
+  onSwitchToPlatform,
+  onSocialRefresh
 }) {
   const [tagInput, setTagInput] = useState('');
   const [selectedAccountDropdownOpen, setSelectedAccountDropdownOpen] = useState(false);
@@ -60,32 +61,6 @@ export default function InstagramPanel({
   // Account ID / Username Connection Form State
   const [accountIdInput, setAccountIdInput] = useState('');
   const [showAccountIdGuide, setShowAccountIdGuide] = useState(false);
-
-  // ── Multi-Clip & Generated Clips Selection State ─────────────────────────────
-  // Modes: 'all' (all completed clips) | 'custom' (multi-select checkboxes)
-  const [selectionMode, setSelectionMode] = useState('all');
-  const [selectedClipIds, setSelectedClipIds] = useState(() =>
-    completedClips.map(c => c.id)
-  );
-
-  // Batch publishing execution state
-  const [isBatchPublishing, setIsBatchPublishing] = useState(false);
-  const [batchCurrentIdx, setBatchCurrentIdx] = useState(0);
-  const [batchTotalCount, setBatchTotalCount] = useState(0);
-  const [batchPublishedPosts, setBatchPublishedPosts] = useState([]);
-  const [batchError, setBatchError] = useState(null);
-  const [activePublishTarget, setActivePublishTarget] = useState('instagram'); // 'instagram' | 'both'
-
-  // Sync selectedClipIds when completedClips changes and user is in 'all' mode
-  useEffect(() => {
-    if (completedClips.length > 0) {
-      if (selectionMode === 'all') {
-        setSelectedClipIds(completedClips.map(c => c.id));
-      }
-    } else {
-      setSelectedClipIds([]);
-    }
-  }, [completedClips.length, selectionMode]);
 
   // Current movie / video name
   const effectiveMovieName = igSettings?.ig_name || textSettings?.movieName || videoData?.file?.name?.replace(/\.[^.]+$/, '') || 'My Movie';
@@ -107,26 +82,6 @@ export default function InstagramPanel({
       updateIgSettings({ ig_name: textSettings.movieName });
     }
   };
-
-  // Resolved list of active target clips to publish (strictly generated clips only)
-  const activeSelectedClips = useMemo(() => {
-    if (completedClips.length === 0) {
-      return [];
-    }
-    if (selectionMode === 'all') {
-      return completedClips.map((clip, idx) => ({
-        ...clip,
-        partNumber: clip.partNumber || (baseStartPart + idx)
-      }));
-    }
-    // 'custom' mode
-    return completedClips
-      .filter(clip => selectedClipIds.includes(clip.id))
-      .map((clip, idx) => ({
-        ...clip,
-        partNumber: clip.partNumber || (baseStartPart + idx)
-      }));
-  }, [selectionMode, completedClips, selectedClipIds, baseStartPart]);
 
   // ── Helper to format caption for any specific part ───────────────────────────
   const getRenderedCaptionForPart = (partNum) => {
@@ -224,22 +179,10 @@ export default function InstagramPanel({
     }
   };
 
-  // ── Toggle clip selection in custom mode ────────────────────────────────────
-  const toggleClipSelection = (clipId) => {
-    if (selectedClipIds.includes(clipId)) {
-      setSelectedClipIds(prev => prev.filter(id => id !== clipId));
-    } else {
-      setSelectedClipIds(prev => [...prev, clipId]);
-    }
-  };
 
-  const selectAllClips = () => {
-    setSelectedClipIds(completedClips.map(c => c.id));
-  };
 
-  const deselectAllClips = () => {
-    setSelectedClipIds([]);
-  };
+
+
 
   // ── Handle Account ID Submit ────────────────────────────────────────────────
   const handleConnectAccountSubmit = async (e) => {
@@ -258,102 +201,34 @@ export default function InstagramPanel({
     }
   };
 
-  // ── Single & Dual Platform Publishing Pipeline Execution ────────────────────
-  const handlePublishExecution = async (target = 'instagram') => {
-    if (activeSelectedClips.length === 0) {
-      alert('Please select at least one clip or video to publish.');
-      return;
-    }
 
-    const clipsToPublish = [...activeSelectedClips];
-    setActivePublishTarget(target);
-    setIsBatchPublishing(true);
-    setBatchTotalCount(clipsToPublish.length);
-    setBatchCurrentIdx(0);
-    setBatchPublishedPosts([]);
-    setBatchError(null);
-
-    const publishedResults = [];
-    const isScheduled = igSettings?.ig_schedule_mode === 'schedule' && igSettings?.ig_schedule_time;
-    const intervalMinutes = parseInt(igSettings?.ig_schedule_interval) || 30;
-
-    for (let i = 0; i < clipsToPublish.length; i++) {
-      const clip = clipsToPublish[i];
-      setBatchCurrentIdx(i + 1);
-
-      try {
-        const partNum = clip.partNumber || (baseStartPart + i);
-        const { caption } = getRenderedCaptionForPart(partNum);
-
-        const videoBlob = clip.blob;
-        if (!videoBlob) {
-          throw new Error(`Video stream for Part ${partNum} is not ready or missing.`);
-        }
-
-        let scheduledAt = null;
-        if (isScheduled) {
-          const baseDate = new Date(igSettings.ig_schedule_time);
-          const clipDate = new Date(baseDate.getTime() + i * intervalMinutes * 60 * 1000);
-          scheduledAt = clipDate.toISOString();
-        }
-
-        // 1. Publish to Instagram (Uploads to B2 once & caches the B2 URL)
-        const igResult = await publishToInstagramPipeline({
-          clipId: clip.id,
-          videoBlob,
-          contentType: igSettings?.ig_content_type || 'reel',
-          caption,
-          shareToFeed: igSettings?.ig_share_to_feed !== false,
-          fileName: clip.name || `clip_part_${partNum}.mp4`,
-          igUserId: igAccount?.ig_user_id,
-          scheduledAt
-        });
-
-        let fbResult = null;
-        // 2. If dual publishing requested: Publish to Facebook using the existing cached B2 download URL
-        if (target === 'both' && publishToFacebookPipeline && isFbPageConnected) {
-          const fbTitle = effectiveMovieName ? `${effectiveMovieName} - Part ${isZeroPad ? String(partNum).padStart(2, '0') : partNum}` : `Part ${partNum}`;
-          const fbCaption = (renderFbTemplate && fbSettings)
-            ? renderFbTemplate(fbSettings?.fb_caption_template || caption, { movieName: effectiveMovieName, partNumber: partNum, zeroPad: isZeroPad, tags: fbSettings?.fb_tags || igSettings?.ig_tags })
-            : caption;
-
-          fbResult = await publishToFacebookPipeline({
-            clipId: clip.id,
-            videoBlob,
-            contentType: 'reel',
-            title: fbTitle,
-            caption: fbCaption,
-            hashtags: fbSettings?.fb_tags || igSettings?.ig_tags || [],
-            fileName: clip.name || `clip_part_${partNum}.mp4`,
-            pageId: fbAccount?.page_id,
-            scheduledAt
-          });
-        }
-
-        publishedResults.push({
-          partNumber: partNum,
-          mediaId: igResult?.mediaId || igResult?.media_id,
-          postUrl: igResult?.postUrl || `https://www.instagram.com/reel/`,
-          fbPostUrl: fbResult?.postUrl || (fbResult?.videoId ? `https://www.facebook.com/watch/?v=${fbResult.videoId}` : null),
-          status: 'success'
-        });
-
-        setBatchPublishedPosts([...publishedResults]);
-      } catch (err) {
-        console.error(`Publishing error on clip ${i + 1}:`, err);
-        setBatchError(`Error on Part ${clip.partNumber || (baseStartPart + i)}: ${err.message}`);
-        break;
-      }
-    }
-
-    setIsBatchPublishing(false);
-  };
-
-  const isBothConnected = isAccountConnected && isFbPageConnected;
-  const isScheduledMode = igSettings?.ig_schedule_mode === 'schedule';
 
   return (
     <div className="space-y-4 sm:space-y-6">
+      {/* Active Upload / Publishing Banner with Real-Time Percentage */}
+      {isPublishing && (
+        <div className="bg-gradient-to-r from-pink-950/80 via-slate-900 to-purple-950/80 border border-pink-500/40 rounded-2xl p-4 shadow-xl flex items-center justify-between gap-3 animate-pulse">
+          <div className="flex items-center space-x-3 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-pink-500/20 border border-pink-500/40 flex items-center justify-center text-pink-400 shrink-0">
+              <Instagram className="w-4 h-4 animate-spin" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-white truncate">
+                {publishStage === 'b2_upload' ? 'Uploading Video to Cloud Platform...' : 'Publishing to Instagram Reels...'}
+              </p>
+              <p className="text-[11px] text-slate-400">
+                {publishStage === 'b2_upload' ? 'Live video byte transfer in progress' : 'Meta Graph API processing container'}
+              </p>
+            </div>
+          </div>
+          <div className="text-right shrink-0">
+            <span className="text-sm font-mono font-bold text-pink-400 bg-pink-500/15 border border-pink-500/30 px-3 py-1 rounded-xl shadow-inner">
+              {publishProgress || 0}%
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* ── SECTION 1: HEADER & OAUTH AUTHENTICATION STATE ── */}
 
       {/* STATE A: NOT AUTHENTICATED WITH META / INSTAGRAM */}
@@ -528,6 +403,7 @@ export default function InstagramPanel({
                 <img
                   src={igAccount.ig_profile_picture_url}
                   alt=""
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
                   className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl border border-pink-500/40 object-cover shrink-0 shadow-md"
                 />
               ) : (
@@ -922,22 +798,6 @@ export default function InstagramPanel({
             </div>
           </div>
 
-          {/* Quick Suggestions Chips */}
-          <div className="flex flex-wrap gap-1.5 items-center pb-1">
-            <span className="text-xs text-slate-500 mr-1">Quick Add:</span>
-            {['reels', 'viral', 'movietok', 'explore', 'trending', 'cinema', 'hollywood', 'clips'].map(suggested => (
-              <button
-                key={suggested}
-                type="button"
-                onClick={() => addTag(suggested)}
-                disabled={(igSettings?.ig_tags || []).includes(suggested)}
-                className="px-2.5 py-1 bg-slate-950 hover:bg-pink-500/20 text-slate-400 hover:text-pink-300 border border-slate-800 disabled:opacity-40 rounded-lg text-xs font-mono cursor-pointer transition-colors"
-              >
-                +#{(igSettings?.ig_tags || []).includes(suggested) ? `${suggested} ✓` : suggested}
-              </button>
-            ))}
-          </div>
-
           {/* Tag Input - Responsive Stack on Mobile */}
           <div className="flex flex-col sm:flex-row gap-2">
             <input
@@ -975,360 +835,9 @@ export default function InstagramPanel({
           </div>
         </div>
 
-        {/* ── SECTION 5: PUBLISH TIMING & SCHEDULING CONTROLS ── */}
-        <div className="p-4 sm:p-5 bg-slate-900 border border-slate-800 rounded-2xl space-y-3 shadow-md">
-          <label className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center space-x-1.5">
-            <Clock className="w-3.5 h-3.5 text-pink-400" />
-            <span>Publish Timing &amp; Scheduling</span>
-          </label>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            <button
-              type="button"
-              onClick={() => updateIgSettings({ ig_schedule_mode: 'now' })}
-              className={`py-2.5 px-4 text-xs font-semibold rounded-xl border text-center transition-all cursor-pointer ${
-                igSettings?.ig_schedule_mode !== 'schedule'
-                  ? 'bg-pink-500/20 border-pink-500 text-pink-300 font-bold shadow-md shadow-pink-500/10'
-                  : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Publish Immediately
-            </button>
-
-            <button
-              type="button"
-              onClick={() => updateIgSettings({ ig_schedule_mode: 'schedule' })}
-              className={`py-2.5 px-4 text-xs font-semibold rounded-xl border text-center transition-all cursor-pointer ${
-                igSettings?.ig_schedule_mode === 'schedule'
-                  ? 'bg-pink-500/20 border-pink-500 text-pink-300 font-bold shadow-md shadow-pink-500/10'
-                  : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Schedule for Later (Meta Automated)
-            </button>
-          </div>
-
-          {igSettings?.ig_schedule_mode === 'schedule' && (
-            <div className="pt-2 grid grid-cols-1 sm:grid-cols-2 gap-3 animate-fadeIn">
-              <div>
-                <label className="text-[11px] font-medium text-slate-400 block mb-1">
-                  Start Date &amp; Time:
-                </label>
-                <input
-                  type="datetime-local"
-                  value={igSettings?.ig_schedule_time || ''}
-                  onChange={(e) => updateIgSettings({ ig_schedule_time: e.target.value })}
-                  className="w-full bg-slate-950 border border-slate-800 text-white text-xs px-3 py-2 rounded-xl outline-none focus:border-pink-500"
-                />
-              </div>
-
-              <div>
-                <label className="text-[11px] font-medium text-slate-400 block mb-1">
-                  Interval Between Parts (Batch Mode):
-                </label>
-                <select
-                  value={igSettings?.ig_schedule_interval || 30}
-                  onChange={(e) => updateIgSettings({ ig_schedule_interval: parseInt(e.target.value) || 30 })}
-                  className="w-full bg-slate-950 border border-slate-800 text-white text-xs px-3 py-2 rounded-xl outline-none focus:border-pink-500 cursor-pointer"
-                >
-                  <option value={15}>15 Minutes</option>
-                  <option value={30}>30 Minutes</option>
-                  <option value={60}>1 Hour</option>
-                  <option value={120}>2 Hours</option>
-                  <option value={360}>6 Hours</option>
-                  <option value={720}>12 Hours</option>
-                  <option value={1440}>1 Day (24 Hours)</option>
-                </select>
-              </div>
-            </div>
-          )}
-        </div>
       </div>
 
-      {/* ── SECTION 6: TARGET CLIPS SELECTION & 1-CLICK BATCH PUBLISHING ── */}
-      <div className="p-4 sm:p-5 bg-gradient-to-tr from-slate-950 via-slate-900 to-slate-950 border border-slate-800 rounded-2xl space-y-4 shadow-xl">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <h4 className="text-sm font-bold text-white flex items-center space-x-2">
-              <Layers className="w-4 h-4 text-pink-400" />
-              <span>Target Clips Selection ({activeSelectedClips.length} Selected)</span>
-            </h4>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Choose whether to publish all completed split clips or specific parts to Instagram Reels.
-            </p>
-          </div>
-
-          {/* Mode Switcher */}
-          {completedClips.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 self-stretch sm:self-auto justify-between sm:justify-start">
-              <button
-                onClick={() => setSelectionMode('all')}
-                className={`flex-1 sm:flex-initial px-3 py-1 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
-                  selectionMode === 'all' ? 'bg-pink-600 text-white' : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                All Clips ({completedClips.length})
-              </button>
-              <button
-                onClick={() => setSelectionMode('custom')}
-                className={`flex-1 sm:flex-initial px-3 py-1 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
-                  selectionMode === 'custom' ? 'bg-pink-600 text-white' : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                Custom
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Custom Checkboxes list when selectionMode === 'custom' */}
-        {completedClips.length > 0 ? (
-          selectionMode === 'custom' && (
-            <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl space-y-2">
-              <div className="flex items-center justify-between text-xs text-slate-400 border-b border-slate-800/80 pb-2">
-                <span>Select clips to include in batch publish:</span>
-                <div className="flex space-x-2">
-                  <button onClick={selectAllClips} className="text-pink-400 hover:text-pink-300 cursor-pointer">Select All</button>
-                  <span>•</span>
-                  <button onClick={deselectAllClips} className="text-slate-400 hover:text-slate-200 cursor-pointer">Clear</button>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-40 overflow-y-auto pt-1">
-                {completedClips.map((clip, idx) => {
-                  const isChecked = selectedClipIds.includes(clip.id);
-                  const partNum = clip.partNumber || (baseStartPart + idx);
-                  return (
-                    <button
-                      key={clip.id}
-                      onClick={() => toggleClipSelection(clip.id)}
-                      className={`flex items-center space-x-2 p-2 rounded-lg border text-left text-xs transition-colors cursor-pointer ${
-                        isChecked
-                          ? 'bg-pink-500/10 border-pink-500/30 text-pink-300 font-semibold'
-                          : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:bg-slate-800'
-                      }`}
-                    >
-                      {isChecked ? <CheckSquare className="w-3.5 h-3.5 text-pink-400 shrink-0" /> : <Square className="w-3.5 h-3.5 text-slate-600 shrink-0" />}
-                      <span className="truncate">Part {isZeroPad ? String(partNum).padStart(2, '0') : partNum}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )
-        ) : (
-          <div className="p-6 bg-slate-950/60 border border-slate-800 rounded-2xl text-center space-y-3">
-            <div className="w-12 h-12 rounded-2xl bg-pink-500/10 border border-pink-500/20 text-pink-400 flex items-center justify-center mx-auto">
-              <Layers className="w-6 h-6" />
-            </div>
-            <div className="space-y-1">
-              <h5 className="text-sm font-bold text-white">No Exported Clips Found</h5>
-              <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                Reels publishing requires exported clips. Go to <strong>Split &amp; Cut</strong> and export your parts first.
-              </p>
-            </div>
-            {onSwitchToPlatform && (
-              <button
-                type="button"
-                onClick={() => onSwitchToPlatform('split-cut')}
-                className="px-4 py-2 bg-gradient-to-r from-pink-600 to-purple-600 hover:opacity-90 active:scale-98 text-white font-semibold text-xs rounded-xl shadow-md transition-all cursor-pointer inline-flex items-center space-x-1.5 touch-manipulation"
-              >
-                <span>Go to Split &amp; Cut ✂️</span>
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* Single & Dual Platform Publish Action Bar */}
-        <div className="p-4 bg-slate-950 rounded-xl border border-slate-800 space-y-4">
-          <div className="space-y-1">
-            <p className="text-xs text-slate-300 font-semibold flex flex-wrap items-center gap-1.5">
-              <span>Ready to {isScheduledMode ? 'Schedule' : 'Publish'}:</span>
-              <span className="text-pink-400">{activeSelectedClips.length} Clip(s)</span>
-              {isBothConnected && (
-                <span className="text-slate-400 text-[11px] font-normal">• Facebook &amp; Instagram Connected</span>
-              )}
-            </p>
-            <p className="text-[11px] text-slate-400 leading-relaxed">
-              Uploads video once → Meta Ingestion → {isScheduledMode ? 'Automated scheduling' : 'Immediate release'}.
-            </p>
-          </div>
-
-          {/* Action Buttons: Dual Publish & Single Publish - Stack on Mobile */}
-          {completedClips.length === 0 ? (
-            <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl text-center space-y-2">
-              <p className="text-xs text-slate-300 font-medium">
-                ⚠️ Please export video clips in <strong>Split &amp; Cut</strong> first. Instagram Reels publishing is only enabled for generated clips.
-              </p>
-            </div>
-          ) : (
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full">
-              {/* Dedicated 1-Click Dual Publish Button (When both FB and IG are connected) */}
-              {isBothConnected && (
-                <button
-                  type="button"
-                  onClick={() => handlePublishExecution('both')}
-                  disabled={isPublishing || isBatchPublishing || activeSelectedClips.length === 0}
-                  className="w-full sm:flex-1 py-3 px-4 bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:opacity-95 active:scale-98 disabled:opacity-50 text-white font-bold text-xs sm:text-sm rounded-xl shadow-lg shadow-purple-500/25 flex items-center justify-center space-x-2 transition-all cursor-pointer touch-manipulation"
-                >
-                  {isPublishing || isBatchPublishing ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>{activePublishTarget === 'both' ? 'Publishing Both FB & IG...' : 'Processing...'}</span>
-                    </>
-                  ) : (
-                    <>
-                      <Zap className="w-4 h-4 text-amber-300 fill-current" />
-                      <span>
-                        {isScheduledMode
-                          ? `Schedule Both FB + IG (${activeSelectedClips.length})`
-                          : `Publish Both FB + IG (${activeSelectedClips.length})`}
-                      </span>
-                    </>
-                  )}
-                </button>
-              )}
-
-              {/* Standard Single Instagram Publish Button */}
-              <button
-                type="button"
-                onClick={() => handlePublishExecution('instagram')}
-                disabled={isPublishing || isBatchPublishing || !isAccountConnected || activeSelectedClips.length === 0}
-                className={`w-full ${
-                  isBothConnected ? 'sm:flex-1' : ''
-                } py-3 px-4 bg-gradient-to-r from-[#f09433] via-[#dc2743] to-[#bc1888] hover:opacity-95 active:scale-98 disabled:opacity-50 text-white font-bold text-xs sm:text-sm rounded-xl shadow-lg shadow-pink-500/25 flex items-center justify-center space-x-2 transition-all cursor-pointer touch-manipulation`}
-              >
-                {isPublishing || isBatchPublishing ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>
-                      {isBatchPublishing
-                        ? `Publishing Part ${batchCurrentIdx} / ${batchTotalCount}...`
-                        : publishStage === 'b2_upload'
-                        ? `Uploading Video (${publishProgress}%)...`
-                        : publishStage === 'ig_processing'
-                        ? 'Processing Reel Container...'
-                        : 'Publishing to Instagram...'}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <Instagram className="w-4 h-4" />
-                    <span>
-                      {isScheduledMode
-                        ? (activeSelectedClips.length > 1 ? `Schedule IG (${activeSelectedClips.length} Reels)` : 'Schedule Instagram Reel')
-                        : (activeSelectedClips.length > 1 ? `Publish IG (${activeSelectedClips.length} Reels)` : 'Publish to Instagram Reels')}
-                    </span>
-                  </>
-                )}
-              </button>
-            </div>
-          )}
-
-          {/* Progress Bar when active */}
-          {(isPublishing || isBatchPublishing) && (
-            <div className="space-y-1.5 pt-2 border-t border-slate-800">
-              <div className="flex justify-between text-xs text-slate-400">
-                <span className="truncate mr-2">
-                  {publishStage === 'b2_upload'
-                    ? 'Step 1/3: Uploading Video stream (Single Upload)...'
-                    : publishStage === 'ig_processing'
-                    ? 'Step 2/3: Meta Graph API Encoding...'
-                    : 'Step 3/3: Finalizing Publishing...'}
-                </span>
-                <span className="font-mono text-pink-400 shrink-0">{publishProgress}%</span>
-              </div>
-              <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-[#f09433] via-[#dc2743] to-[#bc1888] transition-all duration-300"
-                  style={{ width: `${publishProgress}%` }}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Error Banner */}
-          {(publishError || batchError) && (
-            <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl flex items-start space-x-2 text-rose-300 text-xs">
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-              <div className="space-y-0.5 min-w-0">
-                <p className="font-semibold">Publishing encountered an error</p>
-                <p className="text-[11px] text-rose-200/90 leading-relaxed break-words">{publishError || batchError}</p>
-              </div>
-            </div>
-          )}
-
-          {/* Published Result Banner with Dual Links */}
-          {(lastPublishedPost || batchPublishedPosts.length > 0) && (
-            <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl space-y-2 text-xs text-emerald-300">
-              <div className="flex items-center space-x-2 font-bold">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>
-                  {isScheduledMode ? 'Scheduled' : 'Published'} Successfully ({batchPublishedPosts.length || 1} Clip{batchPublishedPosts.length > 1 ? 's' : ''})!
-                </span>
-              </div>
-              <div className="flex flex-wrap gap-2 pt-1">
-                {batchPublishedPosts.length > 0 ? (
-                  batchPublishedPosts.map((post, pIdx) => (
-                    <div key={pIdx} className="flex flex-wrap items-center gap-1.5">
-                      {post.postUrl && (
-                        <a
-                          href={post.postUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-white rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition-colors"
-                        >
-                          <Instagram className="w-3.5 h-3.5 text-pink-400" />
-                          <span>Part {post.partNumber} IG</span>
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
-                      )}
-                      {post.fbPostUrl && (
-                        <a
-                          href={post.fbPostUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="px-3 py-1.5 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 text-white rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition-colors"
-                        >
-                          <Share2 className="w-3.5 h-3.5 text-blue-400" />
-                          <span>Part {post.partNumber} FB</span>
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
-                      )}
-                    </div>
-                  ))
-                ) : (
-                  <div className="flex flex-wrap items-center gap-2">
-                    {lastPublishedPost?.postUrl && (
-                      <a
-                        href={lastPublishedPost.postUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-white rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition-colors"
-                      >
-                        <Instagram className="w-3.5 h-3.5 text-pink-400" />
-                        <span>View Reel on Instagram</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                    )}
-                    {lastPublishedPost?.fbPostUrl && (
-                      <a
-                        href={lastPublishedPost.fbPostUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-3 py-1.5 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 text-white rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition-colors"
-                      >
-                        <Share2 className="w-3.5 h-3.5 text-blue-400" />
-                        <span>View Reel on Facebook</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+      
     </div>
   );
 }

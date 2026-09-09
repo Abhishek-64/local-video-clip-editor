@@ -9,7 +9,14 @@
  * - Sensitive tokens are encrypted server-side and never returned to the frontend.
  */
 
-import { signOAuthState } from './crypto.js';
+import { signOAuthState, decryptToken } from './crypto.js';
+import { b2GetDownloadUrl, b2DeleteFile } from './b2.js';
+import {
+  updateFacebookUploadJob,
+  claimDueFacebookJob,
+  getDueFacebookJobs,
+  isB2FileNeededByOtherJobs
+} from './db.js';
 
 const GRAPH_BASE = 'https://graph.facebook.com';
 
@@ -364,8 +371,15 @@ export async function publishFacebookReel(env, pageAccessToken, pageId, {
 
   if (scheduledAt) {
     const scheduledEpoch = Math.floor(new Date(scheduledAt).getTime() / 1000);
-    finishPayload.video_state = 'SCHEDULED';
-    finishPayload.scheduled_publish_time = scheduledEpoch;
+    const nowEpoch = Math.floor(Date.now() / 1000);
+    // Meta Facebook requires scheduled_publish_time to be between 10 minutes and 75 days in the future
+    if (scheduledEpoch >= nowEpoch + 600 && scheduledEpoch <= nowEpoch + 75 * 86400) {
+      finishPayload.video_state = 'SCHEDULED';
+      finishPayload.scheduled_publish_time = scheduledEpoch;
+    } else {
+      console.warn(`[FB Publish] scheduledAt is within 10 minutes (${Math.round((scheduledEpoch - nowEpoch) / 60)}m) or beyond 75 days. Publishing immediately.`);
+      finishPayload.video_state = 'PUBLISHED';
+    }
   } else {
     finishPayload.video_state = 'PUBLISHED';
   }
@@ -417,8 +431,13 @@ export async function publishFacebookPageVideo(env, pageAccessToken, pageId, {
 
   if (scheduledAt) {
     const scheduledEpoch = Math.floor(new Date(scheduledAt).getTime() / 1000);
-    payload.published = false;
-    payload.scheduled_publish_time = scheduledEpoch;
+    const nowEpoch = Math.floor(Date.now() / 1000);
+    if (scheduledEpoch >= nowEpoch + 600 && scheduledEpoch <= nowEpoch + 75 * 86400) {
+      payload.published = false;
+      payload.scheduled_publish_time = scheduledEpoch;
+    } else {
+      payload.published = true;
+    }
   } else {
     payload.published = true;
   }
@@ -446,3 +465,142 @@ export async function publishFacebookPageVideo(env, pageAccessToken, pageId, {
     data
   };
 }
+
+/**
+ * Processes due scheduled Facebook upload jobs from the D1 database.
+ * Invoked by Cloudflare Worker cron trigger (* * * * *) or maintenance API.
+ */
+export async function processScheduledFacebookJobs(env) {
+  if (!env.DB) return { processed: 0, errors: [] };
+
+  try {
+    const dueJobs = await getDueFacebookJobs(env.DB, 10);
+    const nowIso = new Date().toISOString();
+
+    if (dueJobs.length === 0) {
+      return { processed: 0, errors: [] };
+    }
+
+    console.log(`[FB Scheduler] Found ${dueJobs.length} due scheduled Facebook job(s) at ${nowIso}. Processing...`);
+
+    const secretKey = env.ENCRYPTION_KEY || env.FACEBOOK_APP_SECRET || '7a279df54155e4f8f70991df0a4e9c9c';
+    const errors = [];
+    let processed = 0;
+
+    for (const job of dueJobs) {
+      console.log(`[SCHEDULER] jobId=${job.id} platform=facebook userId=${job.user_id} scheduledAtUtc=${job.scheduled_at} currentTimeUtc=${nowIso} due=true`);
+
+      // 1. Atomic claim: ensure only this worker execution processes the job
+      const claimed = await claimDueFacebookJob(env.DB, job.id);
+      if (!claimed) {
+        console.log(`[SCHEDULER] jobId=${job.id} platform=facebook claimResult=already_claimed`);
+        continue;
+      }
+
+      console.log(`[SCHEDULER] jobId=${job.id} platform=facebook claimResult=success statusBefore=scheduled statusAfter=uploading`);
+
+      try {
+        let encryptedPageToken = job.page_access_token;
+        if (job.page_id && job.available_pages) {
+          try {
+            const pages = JSON.parse(job.available_pages || '[]');
+            const match = pages.find(p => p.page_id === job.page_id);
+            if (match && match.page_access_token) {
+              encryptedPageToken = match.page_access_token;
+            }
+          } catch {}
+        }
+
+        const activePageToken = await decryptToken(encryptedPageToken, secretKey);
+        if (!activePageToken) {
+          throw new Error('Could not decrypt Facebook Page access token.');
+        }
+
+        if (!job.b2_file_name) {
+          throw new Error('Missing B2 file name for scheduled Facebook job.');
+        }
+
+        const b2DownloadUrl = await b2GetDownloadUrl(env, job.b2_file_name, 3600);
+
+        let hashtagsArr = [];
+        try {
+          hashtagsArr = JSON.parse(job.hashtags || '[]');
+        } catch {}
+
+        const hashtagsStr = Array.isArray(hashtagsArr) && hashtagsArr.length > 0
+          ? hashtagsArr.map(t => `#${t.replace(/^#+/, '')}`).join(' ')
+          : '';
+        const fullCaption = `${job.caption ? job.caption.trim() : ''}${hashtagsStr ? (job.caption ? '\n\n' : '') + hashtagsStr : ''}`;
+
+        const publishStart = new Date().toISOString();
+        console.log(`[SCHEDULER] jobId=${job.id} platform=facebook publishStart=${publishStart}`);
+
+        let publishResult;
+        if (job.content_type === 'video') {
+          publishResult = await publishFacebookPageVideo(env, activePageToken, job.page_id, {
+            b2DownloadUrl,
+            title: job.title || '',
+            description: fullCaption || job.description || ''
+          });
+        } else {
+          publishResult = await publishFacebookReel(env, activePageToken, job.page_id, {
+            b2DownloadUrl,
+            caption: fullCaption,
+            title: job.title || ''
+          });
+        }
+
+        const publishEnd = new Date().toISOString();
+        console.log(`[SCHEDULER] jobId=${job.id} platform=facebook publishEnd=${publishEnd} videoId=${publishResult.videoId}`);
+
+        await updateFacebookUploadJob(env.DB, job.id, {
+          status: 'published',
+          facebook_video_id: publishResult.videoId,
+          facebook_post_url: publishResult.postUrl,
+          published_at: new Date().toISOString()
+        });
+
+        // Safe B2 lifecycle check: delete only if no other pending/scheduled jobs need this file
+        if (job.b2_file_name) {
+          const needed = await isB2FileNeededByOtherJobs(env.DB, job.b2_file_name, job.id);
+          if (!needed && job.b2_file_id) {
+            try {
+              await b2DeleteFile(env, job.b2_file_id, job.b2_file_name);
+              console.log(`[FB Scheduler] Cleaned up temporary B2 file: ${job.b2_file_name}`);
+            } catch (delErr) {
+              console.warn('[FB Scheduler] B2 cleanup warning:', delErr.message);
+            }
+          } else {
+            console.log(`[FB Scheduler] Retaining B2 file ${job.b2_file_name} for other dependent jobs.`);
+          }
+        }
+
+        processed++;
+      } catch (err) {
+        console.error(`[SCHEDULER] jobId=${job.id} platform=facebook error="${err.message}"`);
+        errors.push({ jobId: job.id, error: err.message });
+
+        await updateFacebookUploadJob(env.DB, job.id, {
+          status: 'failed',
+          error_message: err.message
+        });
+
+        // On failure, also check if B2 file should be deleted if no other active jobs need it
+        if (job.b2_file_name) {
+          const needed = await isB2FileNeededByOtherJobs(env.DB, job.b2_file_name, job.id);
+          if (!needed && job.b2_file_id) {
+            try {
+              await b2DeleteFile(env, job.b2_file_id, job.b2_file_name);
+            } catch {}
+          }
+        }
+      }
+    }
+
+    return { processed, errors };
+  } catch (err) {
+    console.error('[FB Scheduler] Fatal error executing scheduled jobs query:', err);
+    return { processed: 0, errors: [err.message] };
+  }
+}
+

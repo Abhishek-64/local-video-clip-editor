@@ -22,3 +22,7 @@ B2_BUCKET_ID = "53bc741806513c89ad000d1b"
 [dev]
 port = 8787
 local_protocol = "http"
+
+[triggers]
+crons = ["* * * * *"]
+

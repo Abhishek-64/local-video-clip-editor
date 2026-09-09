@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Crop, Image as ImageIcon, Type, Sparkles, Volume2, SlidersHorizontal, CheckCheck, Youtube, Scissors, Share2, Instagram, Database } from 'lucide-react';
+import { Crop, Image as ImageIcon, Type, Sparkles, Volume2, SlidersHorizontal, Youtube, Scissors, Share2, Instagram, Database, Layers, Clock, History, ChevronLeft, X, Maximize2, Minimize2 } from 'lucide-react';
 import CropEditor from './CropEditor';
 import BackgroundEditor from './BackgroundEditor';
 import TextEditor from './TextEditor';
@@ -12,6 +12,8 @@ import FacebookPanel from './FacebookPanel';
 import InstagramPanel from './InstagramPanel';
 import SplitCutEditor from './SplitCutEditor';
 import StoragePanel from './StoragePanel';
+import ScheduledVideosSection from './ScheduledVideosSection';
+import SocialUploadHistorySection from './SocialUploadHistorySection';
 
 export default function EditorTabs({
   videoData,
@@ -35,7 +37,6 @@ export default function EditorTabs({
   detectedAudio,
   detectedFps,
   detectedQuality,
-  onApplyToAll,
   // Split & Cut Section props
   customParts = [],
   onCustomPartsChange,
@@ -116,13 +117,39 @@ export default function EditorTabs({
   publishIgError = null,
   lastPublishedIgPost = null,
   activeTab: controlledActiveTab,
-  onTabChange
+  onTabChange,
+  onSocialRefresh,
+  showToast,
+  socialRefreshTrigger,
+  onNavigateQueueTab,
+  // YouTube Upload History props
+  uploadHistory = [],
+  uploadJobs = {},
+  isLoadingHistory = false,
+  onRetryUpload,
+  refreshHistory,
+  // Mobile sheet props
+  isMobileSheet = false,
+  isFullScreen = true,
+  onToggleFullScreen,
+  onCloseMobileSheet,
+  onCloseSheet
 }) {
   const [internalActiveTab, setInternalActiveTab] = useState('split-cut');
+  const [queueEditorSubTab, setQueueEditorSubTab] = useState('scheduled');
   const activeTab = controlledActiveTab !== undefined ? controlledActiveTab : internalActiveTab;
   const setActiveTab = (tabId) => {
     if (onTabChange) onTabChange(tabId);
     setInternalActiveTab(tabId);
+  };
+
+  // Resilient close handler for both prop naming conventions
+  const handleClose = () => {
+    if (typeof onCloseMobileSheet === 'function') {
+      onCloseMobileSheet();
+    } else if (typeof onCloseSheet === 'function') {
+      onCloseSheet();
+    }
   };
 
   const cutSectionsCount = (customParts || []).filter(p => p.isDeleted).length;
@@ -139,11 +166,74 @@ export default function EditorTabs({
     { id: 'youtube', label: 'YouTube', icon: Youtube },
     { id: 'facebook', label: 'Facebook', icon: Share2 },
     { id: 'instagram', label: 'Instagram', icon: Instagram },
-    { id: 'storage', label: 'Storage & DB', icon: Database }
+    { id: 'storage', label: 'Storage & DB', icon: Database },
+    { id: 'queue', label: 'Queue & History', icon: Layers }
   ];
 
+  const activeTabObj = tabs.find(t => t.id === activeTab) || tabs[0];
+  const ActiveTabIcon = activeTabObj?.icon;
+
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-lg">
+    <div className={isMobileSheet ? "bg-slate-900 flex flex-col h-full" : "bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-lg"}>
+      {/* Mobile Sheet Top Bar with Back, Fullscreen Toggle & Close buttons */}
+      {isMobileSheet && (
+        <div className="flex items-center justify-between px-3.5 py-2.5 bg-slate-950 border-b border-slate-800 shrink-0 sticky top-0 z-20">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleClose();
+            }}
+            aria-label="Back to video preview"
+            className="flex items-center space-x-1.5 px-3 py-2 text-xs font-semibold text-slate-200 hover:text-white bg-slate-800 hover:bg-slate-700 active:bg-slate-600 rounded-xl cursor-pointer touch-manipulation min-h-[44px] shadow-sm transition-colors"
+          >
+            <ChevronLeft className="w-4 h-4 text-orange-400 shrink-0" />
+            <span>Back</span>
+          </button>
+
+          <div className="flex items-center space-x-2 min-w-0 px-2">
+            {ActiveTabIcon && <ActiveTabIcon className="w-4 h-4 text-orange-400 shrink-0" />}
+            <span className="text-sm font-bold text-white truncate">{activeTabObj?.label}</span>
+          </div>
+
+          <div className="flex items-center space-x-1">
+            {onToggleFullScreen && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onToggleFullScreen();
+                }}
+                aria-label={isFullScreen ? "Exit full screen" : "Open full screen"}
+                className="w-11 h-11 text-slate-300 hover:text-white hover:bg-slate-800 active:bg-slate-700 rounded-xl flex items-center justify-center cursor-pointer touch-manipulation shrink-0 transition-colors"
+                title={isFullScreen ? "Exit Full Screen" : "Full Screen"}
+              >
+                {isFullScreen ? (
+                  <Minimize2 className="w-4 h-4 text-slate-300" />
+                ) : (
+                  <Maximize2 className="w-4 h-4 text-slate-300" />
+                )}
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleClose();
+              }}
+              aria-label="Close edit sheet"
+              className="w-11 h-11 text-slate-300 hover:text-white hover:bg-slate-800 active:bg-slate-700 rounded-xl flex items-center justify-center cursor-pointer touch-manipulation shrink-0 transition-colors"
+            >
+              <X className="w-5 h-5 text-slate-300 hover:text-white" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Tab Navigation Header with Smooth Horizontal Momentum Scroll */}
       <div className="flex items-center justify-between px-2 sm:px-4 pt-2.5 sm:pt-3 border-b border-slate-800 bg-slate-950/70 overflow-x-auto no-scrollbar touch-manipulation">
         <div className="flex space-x-1 min-w-max pb-0.5">
@@ -164,6 +254,8 @@ export default function EditorTabs({
                       ? 'bg-slate-900 border-slate-800 text-pink-400 border-b-2 border-b-pink-500 shadow-sm'
                       : t.id === 'storage'
                       ? 'bg-slate-900 border-slate-800 text-indigo-400 border-b-2 border-b-indigo-500 shadow-sm'
+                      : t.id === 'queue'
+                      ? 'bg-slate-900 border-slate-800 text-amber-400 border-b-2 border-b-amber-500 shadow-sm'
                       : 'bg-slate-900 border-slate-800 text-orange-400 border-b-2 border-b-orange-500 shadow-sm'
                     : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/40'
                 }`}
@@ -178,6 +270,8 @@ export default function EditorTabs({
                       ? 'text-pink-400'
                       : t.id === 'storage'
                       ? 'text-indigo-400'
+                      : t.id === 'queue'
+                      ? 'text-amber-400'
                       : 'text-orange-400'
                     : 'text-slate-400'
                 }`} />
@@ -201,21 +295,10 @@ export default function EditorTabs({
             );
           })}
         </div>
-
-        {onApplyToAll && (
-          <button
-            onClick={onApplyToAll}
-            className="hidden md:flex items-center space-x-1.5 px-3 py-1.5 text-xs font-semibold text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-lg transition-colors cursor-pointer ml-2 shrink-0 touch-manipulation"
-            title="Apply current preset to all queued clips"
-          >
-            <CheckCheck className="w-3.5 h-3.5" />
-            <span>Apply to All</span>
-          </button>
-        )}
       </div>
 
       {/* Active Tab Panel Body */}
-      <div className="p-3.5 sm:p-5">
+      <div className={`p-3.5 sm:p-5 ${isMobileSheet ? 'overflow-y-auto flex-1 pb-20' : ''}`}>
         {activeTab === 'split-cut' && (
           <SplitCutEditor
             duration={duration}
@@ -296,6 +379,14 @@ export default function EditorTabs({
             detectedFps={detectedFps}
             textSettings={textSettings}
             onTextChange={onTextChange}
+            movieName={movieName}
+            videoData={videoData}
+            ytSettings={ytSettings}
+            fbSettings={fbSettings}
+            igSettings={igSettings}
+            onUpdateYtSettings={updateYtSettings}
+            onUpdateFbSettings={updateFbSettings}
+            onUpdateIgSettings={updateIgSettings}
           />
         )}
 
@@ -365,6 +456,7 @@ export default function EditorTabs({
             renderIgTemplate={renderIgTemplate}
             publishToInstagramPipeline={publishToInstagramPipeline}
             onSwitchToPlatform={setActiveTab}
+            onSocialRefresh={onSocialRefresh}
           />
         )}
 
@@ -410,13 +502,78 @@ export default function EditorTabs({
             renderFbTemplate={renderFbTemplate}
             publishToFacebookPipeline={publishToFacebookPipeline}
             onSwitchToPlatform={setActiveTab}
+            onSocialRefresh={onSocialRefresh}
           />
         )}
 
         {activeTab === 'storage' && (
           <StoragePanel
             isAuthenticated={isAuthenticated}
+            showToast={showToast}
           />
+        )}
+
+        {activeTab === 'queue' && (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-800">
+              <div className="flex items-center space-x-2">
+                <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                  <Layers className="w-4 h-4" />
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                <button
+                  onClick={() => setQueueEditorSubTab('scheduled')}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center space-x-1.5 ${
+                    queueEditorSubTab === 'scheduled'
+                      ? 'bg-orange-500 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>Scheduled Videos</span>
+                </button>
+                <button
+                  onClick={() => setQueueEditorSubTab('history')}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center space-x-1.5 ${
+                    queueEditorSubTab === 'history'
+                      ? 'bg-orange-500 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <History className="w-3.5 h-3.5" />
+                  <span>Upload History</span>
+                </button>
+              </div>
+            </div>
+
+            {queueEditorSubTab === 'scheduled' ? (
+              <ScheduledVideosSection
+                refreshTrigger={socialRefreshTrigger || onSocialRefresh}
+                showToast={showToast}
+              />
+            ) : (
+              <SocialUploadHistorySection
+                refreshTrigger={socialRefreshTrigger || onSocialRefresh}
+                showToast={showToast}
+                uploadHistory={uploadHistory}
+                uploadJobs={uploadJobs}
+                isLoadingHistory={isLoadingHistory}
+                onRetryUpload={onRetryUpload}
+                refreshHistory={refreshHistory}
+                completedClips={completedClips}
+                publishToFacebookPipeline={publishToFacebookPipeline}
+                publishToInstagramPipeline={publishToInstagramPipeline}
+                fbSettings={fbSettings}
+                igSettings={igSettings}
+                fbAccount={fbAccount}
+                igAccount={igAccount}
+                isFbConnected={isFbConnected}
+                isIgConnected={isIgConnected}
+              />
+            )}
+          </div>
         )}
       </div>
     </div>

@@ -3,7 +3,7 @@ import {
   PlayCircle, Download, CheckCircle2, Clock, XCircle, AlertCircle, Trash2,
   StopCircle, RefreshCw, Hash, Sliders, Youtube, ExternalLink, Upload,
   Calendar, RotateCcw, Sparkles, Send, Check, ChevronDown, ChevronUp, Edit3,
-  Globe, Lock, ShieldCheck, Zap, Share2
+  Globe, Lock, ShieldCheck, Zap, Share2, Instagram
 } from 'lucide-react';
 import { formatTime } from '../utils/time';
 import {
@@ -43,7 +43,22 @@ export default function ProcessingQueue({
   fbPublishProgress = 0,
   fbPublishStage = '',
   fbPublishingClipId = null,
-  fbPublishedMap = {}
+  fbPublishedMap = {},
+  // Instagram upload state
+  isIgConnected = false,
+  igAccount = null,
+  igSettings = {},
+  onPublishIgClip = null,
+  isPublishingIg = false,
+  igPublishProgress = 0,
+  igPublishStage = '',
+  igPublishingClipId = null,
+  igPublishedMap = {},
+  onOpenPublish,
+  onOpenPreRenderModal,
+  onDownloadAllZip,
+  isZipping = false,
+  zipProgress = 0
 }) {
   // Option: 'all' | 'first-n' | 'range'
   const [generateOption, setGenerateOption] = useState('all');
@@ -51,65 +66,74 @@ export default function ProcessingQueue({
   const [rangeStart, setRangeStart] = useState(1);
   const [rangeEnd, setRangeEnd] = useState(Math.min(3, totalPossibleParts));
 
-  // Target platform checkboxes for generation (defaults to true ONLY if auto-schedule mode is active in settings)
-  const isAutoModeActive = isConnected && ytSettings?.yt_default_upload === 'auto';
-  const [autoUploadYouTube, setAutoUploadYouTube] = useState(() => isAutoModeActive);
-  const [autoPublishFacebook, setAutoPublishFacebook] = useState(isFbConnected);
+  const completedJobs = (queue || []).filter(j => j.status === 'completed' && (j.outputUrl || j.blob));
 
-  // Sync YouTube checkbox when YouTube settings or connection changes
-  useEffect(() => {
-    setAutoUploadYouTube(Boolean(isConnected && ytSettings?.yt_default_upload === 'auto'));
-  }, [isConnected, ytSettings?.yt_default_upload]);
-
-  // Modal for editing an individual clip's scheduled publish time
-  const [editingJob, setEditingJob] = useState(null);
-  const [editScheduledTime, setEditScheduledTime] = useState('');
-
-  const isAutoUploadActive = Boolean(isConnected && autoUploadYouTube);
-  const scheduleInterval = ytSettings?.schedule_interval || '1hour';
+  const getPendingClipsToRender = () => {
+    let count = totalPossibleParts;
+    let start = 1;
+    if (generateOption === 'all') {
+      count = totalPossibleParts;
+      start = 1;
+    } else if (generateOption === 'first-n') {
+      count = Math.min(firstNCount, totalPossibleParts);
+      start = 1;
+    } else if (generateOption === 'range') {
+      start = rangeStart;
+      count = Math.max(1, rangeEnd - rangeStart + 1);
+    }
+    const clips = [];
+    for (let i = 0; i < count; i++) {
+      const partNum = start + i;
+      clips.push({
+        id: `pending-${partNum}`,
+        partNumber: partNum,
+        name: `Part ${String(partNum).padStart(2, '0')}`,
+        duration: 60
+      });
+    }
+    return clips;
+  };
 
   const handleTriggerGenerate = () => {
-    onGenerateQueue({
-      mode: generateOption,
-      count: firstNCount,
-      start: rangeStart,
-      end: rangeEnd,
-      autoSchedule: isAutoUploadActive,
-      autoPublishFacebook: autoPublishFacebook && isFbConnected,
-      scheduleStartTime: pipelineStartTime,
-      scheduleInterval: scheduleInterval
-    });
-  };
-
-  const openEditModal = (job, currentScheduledAt) => {
-    setEditingJob(job);
-    setEditScheduledTime(
-      currentScheduledAt
-        ? toDateTimeLocalString(new Date(currentScheduledAt))
-        : toDateTimeLocalString(new Date(Date.now() + 3600000))
-    );
-  };
-
-  const handleSaveIndividualSchedule = () => {
-    if (!editingJob) return;
-    const isoString = new Date(editScheduledTime).toISOString();
-    editingJob.scheduledAt = isoString;
-    if (uploadJobs[editingJob.id]) {
-      uploadJobs[editingJob.id].scheduledAt = isoString;
+    if (onOpenPreRenderModal) {
+      const pendingClips = getPendingClipsToRender();
+      onOpenPreRenderModal(pendingClips, {
+        mode: generateOption,
+        count: firstNCount,
+        start: rangeStart,
+        end: rangeEnd
+      });
+    } else {
+      onGenerateQueue({
+        mode: generateOption,
+        count: firstNCount,
+        start: rangeStart,
+        end: rangeEnd
+      });
     }
-    setEditingJob(null);
   };
 
   const getStatusBadge = (status, progress, job) => {
     const uploadState = uploadJobs[job?.id];
     const fbPublishedUrl = fbPublishedMap[job?.id];
     const isCurrentlyPublishingFb = isPublishingFb && fbPublishingClipId === job?.id;
+    const isCurrentlyPublishingIg = isPublishingIg && igPublishingClipId === job?.id;
+    const igPublishedUrl = igPublishedMap?.[job?.id];
 
     if (isCurrentlyPublishingFb) {
       return (
         <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-blue-500/20 text-blue-300 border border-blue-500/30 animate-pulse shrink-0">
-          <RefreshCw className="w-3 h-3 mr-1 animate-spin" />
-          FB Reels Ingesting...
+          <Share2 className="w-3 h-3 mr-1 animate-spin text-blue-400" />
+          FB Uploading {fbPublishProgress || 0}%
+        </span>
+      );
+    }
+
+    if (isCurrentlyPublishingIg) {
+      return (
+        <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-pink-500/20 text-pink-300 border border-pink-500/30 animate-pulse shrink-0">
+          <Instagram className="w-3 h-3 mr-1 animate-spin text-pink-400" />
+          IG Uploading {igPublishProgress || 0}%
         </span>
       );
     }
@@ -129,6 +153,21 @@ export default function ProcessingQueue({
       );
     }
 
+    if (igPublishedUrl) {
+      return (
+        <a
+          href={igPublishedUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-pink-500/20 text-pink-300 border border-pink-500/30 hover:bg-pink-500/30 transition-colors shrink-0"
+        >
+          <Instagram className="w-3 h-3 mr-1 text-pink-400" />
+          <span>Instagram Reel ↗</span>
+        </a>
+      );
+    }
+
     if (uploadState) {
       switch (uploadState.status) {
         case 'queued':
@@ -139,8 +178,8 @@ export default function ProcessingQueue({
           );
         case 'uploading':
           return (
-            <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-blue-500/20 text-blue-300 border border-blue-500/30 animate-pulse shrink-0">
-              <Upload className="w-3 h-3 mr-1 animate-bounce" /> Uploading {uploadState.progress || 0}%
+            <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-red-500/20 text-red-300 border border-red-500/30 animate-pulse shrink-0">
+              <Upload className="w-3 h-3 mr-1 animate-bounce text-red-400" /> YouTube Uploading {uploadState.progress || 0}%
             </span>
           );
         case 'uploaded':
@@ -216,19 +255,41 @@ export default function ProcessingQueue({
               </span>
             )}
           </h3>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Render video cuts in high quality and publish directly to YouTube &amp; Facebook.
-          </p>
         </div>
 
-        {queue.length > 0 && (
-          <button
-            onClick={onClearQueue}
-            className="px-2.5 sm:px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors cursor-pointer touch-manipulation"
-          >
-            Clear Queue
-          </button>
-        )}
+        <div className="flex items-center space-x-2">
+          {completedJobs.length > 0 && onDownloadAllZip && (
+            <button
+              onClick={onDownloadAllZip}
+              disabled={isZipping}
+              className="px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 active:scale-98 disabled:opacity-50 rounded-lg shadow-sm flex items-center space-x-1.5 transition-all cursor-pointer touch-manipulation"
+              title="Download all ready clips as ZIP"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>{isZipping ? `Zipping (${zipProgress}%)` : `Download All (${completedJobs.length}) ZIP`}</span>
+            </button>
+          )}
+
+          {completedJobs.length > 0 && onOpenPublish && (
+            <button
+              onClick={() => onOpenPublish(completedJobs)}
+              className="px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:opacity-95 active:scale-98 rounded-lg shadow-sm shadow-purple-500/20 flex items-center space-x-1.5 transition-all cursor-pointer touch-manipulation"
+              title="Publish or schedule all ready clips"
+            >
+              <Share2 className="w-3.5 h-3.5" />
+              <span>Publish / Schedule Ready ({completedJobs.length})</span>
+            </button>
+          )}
+
+          {queue.length > 0 && (
+            <button
+              onClick={onClearQueue}
+              className="px-2.5 sm:px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors cursor-pointer touch-manipulation"
+            >
+              Clear Queue
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Part Selection & Generation Controls */}
@@ -343,7 +404,7 @@ export default function ProcessingQueue({
             ) : (
               <>
                 <Zap className="w-4 h-4 fill-current" />
-                <span>Render &amp; Export Selected Clips</span>
+                <span>Render &amp; Schedule Selected Clips</span>
               </>
             )}
           </button>
@@ -359,6 +420,7 @@ export default function ProcessingQueue({
             const scheduledAt = job.scheduledAt || uploadState?.scheduledAt;
             const uploadFailed = uploadState?.status === 'upload_failed';
             const isFbPublishing = isPublishingFb && fbPublishingClipId === job.id;
+            const isIgPublishing = isPublishingIg && igPublishingClipId === job.id;
 
             return (
               <div
@@ -372,19 +434,6 @@ export default function ProcessingQueue({
                       {job.name || `Part ${String(job.partNumber).padStart(2, '0')}`}
                     </span>
                     {getStatusBadge(job.status, job.progress, job)}
-
-                    {/* Scheduled Publish Time Badge */}
-                    {scheduledAt && (
-                      <span
-                        onClick={() => openEditModal(job, scheduledAt)}
-                        className="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-purple-500/15 text-purple-300 border border-purple-500/30 hover:bg-purple-500/25 transition-all cursor-pointer"
-                        title="Click to adjust scheduled release time"
-                      >
-                        <Calendar className="w-3 h-3 text-purple-400" />
-                        <span>Scheduled: {formatScheduledDateTime(scheduledAt)}</span>
-                        <Edit3 className="w-2.5 h-2.5 opacity-60 ml-0.5" />
-                      </span>
-                    )}
                   </div>
 
                   <div className="flex items-center space-x-2 text-[11px] text-slate-400 font-mono mt-1">
@@ -393,21 +442,44 @@ export default function ProcessingQueue({
                     <span>{formatTime(job.duration)}</span>
                   </div>
 
-                  {/* Progress Bar for Rendering, YouTube, or Facebook */}
-                  {(job.status === 'processing' || isUploading || isFbPublishing) && (
+                  {/* Local Video Rendering Progress Line */}
+                  {job.status === 'processing' && (
                     <div className="w-full bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
                       <div
-                        className={`h-full transition-all duration-300 ${
-                          isFbPublishing
-                            ? 'bg-gradient-to-r from-blue-500 to-sky-400'
-                            : isUploading
-                            ? 'bg-gradient-to-r from-red-500 to-rose-400'
-                            : 'bg-gradient-to-r from-amber-500 to-orange-400'
-                        }`}
-                        style={{
-                          width: `${isFbPublishing ? (fbPublishProgress || 50) : isUploading ? (uploadState.progress || 0) : (job.progress || 0)}%`
-                        }}
+                        className="h-full bg-gradient-to-r from-amber-500 to-orange-400 transition-all duration-300"
+                        style={{ width: `${job.progress || 0}%` }}
                       />
+                    </div>
+                  )}
+
+                  {/* Platform Upload Progress (Shows Percentage Instead of the Line) */}
+                  {(isUploading || isFbPublishing || isIgPublishing) && (
+                    <div className="flex items-center justify-between mt-2 pt-1.5 border-t border-slate-800/80 text-xs font-mono">
+                      <div className="flex items-center space-x-1.5 text-slate-300">
+                        {isFbPublishing ? (
+                          <>
+                            <Share2 className="w-3.5 h-3.5 text-blue-400 animate-pulse" />
+                            <span className="font-semibold text-slate-200">Uploading to Facebook Reels:</span>
+                          </>
+                        ) : isIgPublishing ? (
+                          <>
+                            <Instagram className="w-3.5 h-3.5 text-pink-400 animate-pulse" />
+                            <span className="font-semibold text-slate-200">Uploading to Instagram Reels:</span>
+                          </>
+                        ) : (
+                          <>
+                            <Youtube className="w-3.5 h-3.5 text-red-400 animate-pulse" />
+                            <span className="font-semibold text-slate-200">Uploading to YouTube:</span>
+                          </>
+                        )}
+                      </div>
+                      <span className="text-xs font-mono font-bold text-white px-2 py-0.5 rounded bg-slate-900 border border-slate-700 shadow-inner">
+                        {isFbPublishing
+                          ? `${fbPublishProgress || 0}%`
+                          : isIgPublishing
+                          ? `${igPublishProgress || 0}%`
+                          : `${uploadState?.progress || 0}%`}
+                      </span>
                     </div>
                   )}
 
@@ -438,7 +510,7 @@ export default function ProcessingQueue({
                     </button>
                   )}
 
-                  {job.status === 'completed' && job.outputUrl && (
+                  {job.status === 'completed' && (job.outputUrl || job.blob) && (
                     <>
                       <button
                         onClick={() => onPreviewClip(job)}
@@ -456,26 +528,15 @@ export default function ProcessingQueue({
                     </>
                   )}
 
-                  {/* YouTube Upload Action */}
-                  {job.status === 'completed' && isConnected && !uploadState && onUploadClip && (
+                  {/* Central Unified Publish / Schedule Action */}
+                  {job.status === 'completed' && (job.outputUrl || job.blob) && onOpenPublish && (
                     <button
-                      onClick={() => onUploadClip(job)}
-                      className="px-2.5 py-1 bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 text-red-300 rounded-lg text-xs font-semibold flex items-center space-x-1 transition-colors cursor-pointer touch-manipulation"
-                    >
-                      <Youtube className="w-3.5 h-3.5" />
-                      <span>YouTube</span>
-                    </button>
-                  )}
-
-                  {/* Facebook Reels Upload Action */}
-                  {job.status === 'completed' && isFbConnected && onPublishFbClip && (
-                    <button
-                      onClick={() => onPublishFbClip(job)}
-                      disabled={isPublishingFb}
-                      className="px-2.5 py-1 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-300 rounded-lg text-xs font-semibold flex items-center space-x-1 transition-colors cursor-pointer touch-manipulation disabled:opacity-50"
+                      onClick={() => onOpenPublish(job)}
+                      className="px-2.5 py-1 text-xs font-semibold text-white bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:opacity-95 active:scale-98 border border-purple-500/40 rounded-lg flex items-center space-x-1 transition-all cursor-pointer touch-manipulation shadow-sm shadow-purple-500/20"
+                      title="Publish or schedule clip to YouTube, Facebook, or Instagram"
                     >
                       <Share2 className="w-3.5 h-3.5" />
-                      <span>Facebook</span>
+                      <span>Publish / Schedule</span>
                     </button>
                   )}
 
@@ -492,54 +553,6 @@ export default function ProcessingQueue({
               </div>
             );
           })}
-        </div>
-      )}
-
-      {/* Edit Scheduled Publish Time Modal */}
-      {editingJob && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl animate-scaleUp">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-              <div className="flex items-center space-x-2 text-purple-400">
-                <Calendar className="w-5 h-5" />
-                <h4 className="font-bold text-sm text-white">Adjust Scheduled Release Time</h4>
-              </div>
-              <button
-                onClick={() => setEditingJob(null)}
-                className="text-slate-400 hover:text-white cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-xs text-slate-300 font-semibold">{editingJob.name}</p>
-              <p className="text-xs text-slate-400">
-                Choose the exact date and local time when this clip will automatically go public on YouTube.
-              </p>
-              <input
-                type="datetime-local"
-                value={editScheduledTime}
-                onChange={(e) => setEditScheduledTime(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 focus:border-purple-500 text-white text-xs px-3 py-2 rounded-xl outline-none font-mono mt-2"
-              />
-            </div>
-
-            <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-800">
-              <button
-                onClick={() => setEditingJob(null)}
-                className="px-3.5 py-1.5 text-xs text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-xl transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSaveIndividualSchedule}
-                className="px-4 py-1.5 text-xs font-bold text-white bg-purple-600 hover:bg-purple-500 rounded-xl transition-all shadow-md shadow-purple-600/20 cursor-pointer"
-              >
-                Save Schedule
-              </button>
-            </div>
-          </div>
         </div>
       )}
     </div>

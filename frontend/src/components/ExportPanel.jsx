@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { detectCapabilities } from '../services/capabilityDetector';
 import { sanitizeFilename } from '../utils/filename';
+import { cleanVideoFilename } from '../utils/titleCleaner';
 
 export default function ExportPanel({
   exportSettings = {},
@@ -23,7 +24,15 @@ export default function ExportPanel({
   detectedQuality,
   detectedFps,
   textSettings = {},
-  onTextChange
+  onTextChange,
+  movieName,
+  videoData,
+  ytSettings = {},
+  fbSettings = {},
+  igSettings = {},
+  onUpdateYtSettings,
+  onUpdateFbSettings,
+  onUpdateIgSettings
 }) {
   const [capabilities, setCapabilities] = useState(null);
 
@@ -44,6 +53,25 @@ export default function ExportPanel({
     { label: 'Part First', value: 'Part_{part}_{movie}' },
     { label: 'Short', value: '{movie}_{part}' }
   ];
+
+  const handleMovieNameChange = (val) => {
+    updateSetting('movieName', val);
+    if (onTextChange && textSettings) {
+      onTextChange({
+        ...textSettings,
+        movieName: val
+      });
+    }
+    if (onUpdateYtSettings) {
+      onUpdateYtSettings({ yt_name: val });
+    }
+    if (onUpdateFbSettings) {
+      onUpdateFbSettings({ fb_name: val });
+    }
+    if (onUpdateIgSettings) {
+      onUpdateIgSettings({ ig_name: val });
+    }
+  };
 
   const handleFileTemplateChange = (val) => {
     updateSetting('fileTemplate', val);
@@ -66,7 +94,9 @@ export default function ExportPanel({
     handleFileTemplateChange(overlayTpl);
   };
 
-  const movieTitle = textSettings?.movieName || 'My Movie';
+  const movieTitle = (exportSettings?.movieName !== undefined
+    ? exportSettings.movieName
+    : (textSettings?.movieName || movieName || ytSettings?.yt_name || igSettings?.ig_name || fbSettings?.fb_name || (videoData?.preset?.movieName || (videoData?.file?.name ? cleanVideoFilename(videoData.file.name) : '')) || 'My Movie')) || 'My Movie';
   const startPart = Math.max(1, parseInt(textSettings?.startPart) || 1);
   const partFormatted = textSettings?.zeroPad !== false ? String(startPart).padStart(2, '0') : String(startPart);
   const activeFileTemplate = exportSettings.fileTemplate || textSettings?.fileTemplate || textSettings?.template || '{movie} - Part {part}';
@@ -147,40 +177,8 @@ export default function ExportPanel({
               <span className="text-xs font-bold text-white truncate block">
                 {capabilities?.isHardwareAccelerated ? 'Hardware Acceleration Active' : 'Deterministic Export Engine'}
               </span>
-              <p className="text-[10px] sm:text-[11px] text-slate-400 truncate">
-                {capabilities?.webCodecs
-                  ? 'WebCodecs GPU H.264 Encoder + Offline Audio Mixer'
-                  : 'Fast Hardware Stream Recorder + GPU Canvas'}
-              </p>
             </div>
           </div>
-          <span className="text-[11px] text-emerald-400 font-medium flex items-center shrink-0">
-            <CheckCircle2 className="w-3.5 h-3.5 mr-1 inline" /> 100% Private Local
-          </span>
-        </div>
-
-        {/* Capability Chips */}
-        <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-orange-500/20">
-          {capabilities?.h264EncoderSupported && (
-            <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded font-mono">
-              ⚡ WebCodecs H.264
-            </span>
-          )}
-          {capabilities?.webGL && (
-            <span className="text-[10px] bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded font-mono">
-              🎮 WebGL Shader Pipeline
-            </span>
-          )}
-          {detectedQuality && (
-            <span className="text-[10px] bg-orange-500/20 text-orange-300 px-1.5 py-0.5 rounded font-mono">
-              🎬 {detectedQuality.label}
-            </span>
-          )}
-          {detectedFps && (
-            <span className="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded font-mono">
-              ⚡ {detectedFps.label}
-            </span>
-          )}
         </div>
       </div>
 
@@ -198,9 +196,6 @@ export default function ExportPanel({
                   Local File Naming
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400 truncate">
-                Controls downloaded MP4 filenames (Independent from on-screen video text)
-              </p>
             </div>
           </div>
 
@@ -215,8 +210,39 @@ export default function ExportPanel({
           </button>
         </div>
 
-        <div className="space-y-2.5">
+        <div className="space-y-3">
+          {/* 1. File Name / Series Title Field */}
           <div className="space-y-1.5">
+            <div className="flex flex-wrap items-center justify-between gap-1.5">
+              <label className="text-xs font-semibold text-slate-200 flex items-center space-x-1.5">
+                <span>File Name / Series Title:</span>
+              </label>
+              {videoData?.file?.name && (
+                <button
+                  type="button"
+                  onClick={() => handleMovieNameChange(cleanVideoFilename(videoData.file.name))}
+                  className="text-[10px] text-blue-300 hover:text-white bg-slate-900 hover:bg-slate-800 border border-blue-500/30 rounded-lg px-2 py-0.5 transition-colors cursor-pointer flex items-center space-x-1 shrink-0 touch-manipulation"
+                  title="Use original loaded video filename"
+                >
+                  <Sparkles className="w-2.5 h-2.5 text-blue-400" />
+                  <span>Use Video Name</span>
+                </button>
+              )}
+            </div>
+            <input
+              type="text"
+              value={exportSettings.movieName !== undefined ? exportSettings.movieName : (textSettings?.movieName || '')}
+              onChange={(e) => handleMovieNameChange(e.target.value)}
+              placeholder="e.g. Inception, Epic Moments, My Clip"
+              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs sm:text-sm text-white focus:border-blue-500 focus:outline-none shadow-inner"
+            />
+            <p className="text-[10px] text-slate-400 leading-tight">
+              Directly replaces the <code className="text-blue-400 font-mono">{'{movie}'}</code> token in export filenames.
+            </p>
+          </div>
+
+          {/* 2. File Naming Template Field */}
+          <div className="space-y-1.5 pt-2 border-t border-slate-800/80">
             <div className="flex items-center justify-between">
               <label className="text-xs font-semibold text-slate-300">File Naming Template:</label>
               <div className="flex items-center space-x-1">

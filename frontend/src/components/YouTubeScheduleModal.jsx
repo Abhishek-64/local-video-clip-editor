@@ -33,9 +33,7 @@ export default function YouTubeScheduleModal({
   onUpload,
   isBatch = false
 }) {
-  if (!isOpen || !clip) return null;
-
-  const clipPartNumber = clip.partNumber || 1;
+  const clipPartNumber = clip?.partNumber || 1;
   const isZeroPad = ytSettings?.yt_zero_pad !== false;
   const partStr = isZeroPad ? String(clipPartNumber).padStart(2, '0') : String(clipPartNumber);
   const activeYtName = youtubeName || ytSettings?.yt_name || movieName || 'Movie';
@@ -48,7 +46,7 @@ export default function YouTubeScheduleModal({
 
   const computeHashtags = (tagsList) => formatTagsAsHashtagString(tagsList) || '#Shorts #Viral';
 
-  const computeTitle = (c, tagsList) => c?.titleOverride || (ytSettings.yt_title_template
+  const computeTitle = (c, tagsList) => c?.titleOverride || (ytSettings?.yt_title_template
     ? ytSettings.yt_title_template
         .replace(/\{movie\}/gi, activeYtName)
         .replace(/\{part\}/gi, partStr)
@@ -59,7 +57,7 @@ export default function YouTubeScheduleModal({
   const computeDescription = (c, tagsList) => {
     if (c?.descriptionOverride) return c.descriptionOverride;
     const ht = computeHashtags(tagsList);
-    let desc = ytSettings.yt_description_template
+    let desc = ytSettings?.yt_description_template
       ? ytSettings.yt_description_template
           .replace(/\{movie\}/gi, activeYtName)
           .replace(/\{part\}/gi, partStr)
@@ -83,7 +81,7 @@ export default function YouTubeScheduleModal({
   const [scheduleType, setScheduleType] = useState('schedule'); // 'schedule' | 'immediate'
   
   // Default scheduled time: clip.scheduledAt if available, otherwise Tomorrow at 18:00 (6 PM)
-  const defaultDate = clip.scheduledAt ? new Date(clip.scheduledAt) : (() => {
+  const defaultDate = clip?.scheduledAt ? new Date(clip.scheduledAt) : (() => {
     const d = new Date();
     d.setDate(d.getDate() + 1);
     d.setHours(18, 0, 0, 0);
@@ -93,10 +91,10 @@ export default function YouTubeScheduleModal({
   const [scheduledDateTime, setScheduledDateTime] = useState(toDateTimeLocalString(defaultDate));
   const [title, setTitle] = useState(initialTitle);
   const [description, setDescription] = useState(initialDescription);
-  const [visibility, setVisibility] = useState(ytSettings.yt_visibility || 'public');
+  const [visibility, setVisibility] = useState(ytSettings?.yt_visibility || 'public');
   const [tags, setTags] = useState(initialTags);
   const [tagInput, setTagInput] = useState('');
-  const [madeForKids, setMadeForKids] = useState(Boolean(ytSettings.yt_made_for_kids));
+  const [madeForKids, setMadeForKids] = useState(Boolean(ytSettings?.yt_made_for_kids));
 
   // Sync state if clip changes
   useEffect(() => {
@@ -111,6 +109,8 @@ export default function YouTubeScheduleModal({
       }
     }
   }, [clip?.id]);
+
+  if (!isOpen || !clip) return null;
 
   // Quick Schedule Presets
   const applyPreset = (preset) => {

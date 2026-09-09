@@ -33,6 +33,7 @@ export function generateClipFilename(
 ) {
   let movieName = 'My Movie';
   let partNumber = 1;
+  let totalParts = 1;
   let template = '{movie} - Part {part}';
   let zeroPad = true;
   let extension = 'mp4';
@@ -40,12 +41,14 @@ export function generateClipFilename(
   if (typeof optionsOrMovieName === 'object' && optionsOrMovieName !== null) {
     movieName = optionsOrMovieName.movieName || optionsOrMovieName.text || optionsOrMovieName.title || 'My Movie';
     partNumber = optionsOrMovieName.partNumber ?? 1;
+    totalParts = optionsOrMovieName.totalParts ?? (maybeTotalParts || 1);
     template = optionsOrMovieName.fileTemplate || optionsOrMovieName.template || '{movie} - Part {part}';
     zeroPad = optionsOrMovieName.zeroPad !== undefined ? optionsOrMovieName.zeroPad : true;
     extension = optionsOrMovieName.extension || optionsOrMovieName.format || 'mp4';
   } else {
     movieName = String(optionsOrMovieName || 'My Movie');
     partNumber = maybePartNumber ?? 1;
+    totalParts = maybeTotalParts || 1;
     extension = maybeExtension || 'mp4';
     zeroPad = maybeZeroPad !== undefined ? Boolean(maybeZeroPad) : true;
   }
@@ -56,6 +59,11 @@ export function generateClipFilename(
     .replace(/\{title\}/gi, movieName || 'My Movie')
     .replace(/\{text\}/gi, movieName || 'My Movie')
     .replace(/\{part\}/gi, formattedPart);
+
+  // If there are multiple parts and the template does not contain part placeholder, append part suffix
+  if (totalParts > 1 && !template.match(/\{part\}/i)) {
+    name = `${name} - Part ${formattedPart}`;
+  }
 
   const cleanName = sanitizeFilename(name);
   return `${cleanName}.${extension}`;

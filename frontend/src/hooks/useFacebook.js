@@ -279,8 +279,8 @@ export function useFacebook({ isAuthenticated = false } = {}) {
       pageId = null
     } = opts;
 
-    if (!videoBlob || !(videoBlob instanceof Blob)) {
-      throw new Error('No valid video blob available to publish.');
+    if ((!videoBlob || !(videoBlob instanceof Blob)) && (!opts.b2FileId || !opts.b2FileName)) {
+      throw new Error('No valid video blob or B2 asset available to publish.');
     }
 
     if (!isConnected || !fbAccount) {
@@ -292,43 +292,57 @@ export function useFacebook({ isAuthenticated = false } = {}) {
     setPublishError(null);
     setLastPublishedPost(null);
 
-    const cacheKey = opts.clipId || videoBlob;
-    const cachedUpload = sharedUploadCache.getCachedUpload(cacheKey);
+    const cacheKey = opts.clipId || (videoBlob && videoBlob.size ? `${fileName}_${videoBlob.size}` : videoBlob);
+    let cachedUpload = videoBlob ? sharedUploadCache.getCachedUpload(videoBlob, cacheKey) : null;
 
-    let b2FileId = cachedUpload?.b2FileId;
-    let b2FileName = cachedUpload?.b2FileName;
+    let b2FileId = opts.b2FileId || cachedUpload?.b2FileId;
+    let b2FileName = opts.b2FileName || cachedUpload?.b2FileName;
 
     try {
       if (!b2FileName) {
-        // Step 1: Obtain Backblaze B2 Upload Endpoint
-        setPublishStage('b2_upload');
-        const target = await getB2UploadTarget();
-        if (!target || !target.uploadUrl) {
-          throw new Error('Failed to obtain Backblaze B2 upload target.');
+        // Check if another platform (e.g. Instagram) is actively uploading this clip right now
+        const inFlight = sharedUploadCache.getInFlightUpload(videoBlob, cacheKey);
+        if (inFlight) {
+          setPublishStage('b2_upload');
+          setPublishProgress(50);
+          const uploadRes = await inFlight;
+          b2FileId = uploadRes.b2FileId;
+          b2FileName = uploadRes.b2FileName;
+          setPublishProgress(100);
+        } else {
+          // Step 1: Obtain Backblaze B2 Upload Endpoint
+          setPublishStage('b2_upload');
+
+          const uploadPromise = (async () => {
+            const target = await getB2UploadTarget();
+            if (!target || !target.uploadUrl) {
+              throw new Error('Failed to obtain Backblaze B2 upload target.');
+            }
+
+            const tempFileName = `social_${Date.now()}_${Math.random().toString(36).substring(2, 7)}_${fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+
+            // Step 2: Upload Video to Backblaze B2 with progress tracking
+            const b2Res = await uploadToB2(
+              target.uploadUrl,
+              target.authorizationToken,
+              videoBlob,
+              tempFileName,
+              (percent) => {
+                setPublishProgress(percent);
+              }
+            );
+
+            return {
+              b2FileId: b2Res.fileId || tempFileName,
+              b2FileName: b2Res.fileName || tempFileName
+            };
+          })();
+
+          // Register in-flight upload to deduplicate simultaneous requests
+          const uploadRes = await sharedUploadCache.trackUpload(videoBlob, uploadPromise, cacheKey);
+          b2FileId = uploadRes.b2FileId;
+          b2FileName = uploadRes.b2FileName;
         }
-
-        const tempFileName = `fb_${Date.now()}_${Math.random().toString(36).substring(2, 7)}_${fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-
-        // Step 2: Upload Video to Backblaze B2 with progress tracking
-        const b2Res = await uploadToB2(
-          target.uploadUrl,
-          target.authorizationToken,
-          videoBlob,
-          tempFileName,
-          (percent) => {
-            setPublishProgress(percent);
-          }
-        );
-
-        b2FileId = b2Res.fileId || tempFileName;
-        b2FileName = b2Res.fileName || tempFileName;
-
-        // Cache the uploaded file so Instagram or other platforms can reuse it immediately
-        sharedUploadCache.setCachedUpload(cacheKey, {
-          b2FileId,
-          b2FileName,
-          b2Url: b2Res.downloadUrl
-        });
       } else {
         // Already uploaded to B2! Skip upload and proceed directly
         setPublishStage('fb_processing');

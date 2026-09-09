@@ -67,8 +67,13 @@ import {
   updateInstagramUploadJob,
   getInstagramUploadJob,
   getInstagramUploadJobs,
+  getScheduledSocialJobs,
+  getCompletedSocialHistory,
+  cancelScheduledSocialJob,
+  clearCompletedSocialHistory,
   clearUserDataByScope,
-  wipeAllUserData
+  wipeAllUserData,
+  isB2FileNeededByOtherJobs
 } from './db.js';
 
 import {
@@ -86,7 +91,8 @@ import {
   validateAndGetPageToken,
   verifyPagePublishCapability,
   publishFacebookReel,
-  publishFacebookPageVideo
+  publishFacebookPageVideo,
+  processScheduledFacebookJobs
 } from './facebook.js';
 
 import {
@@ -95,8 +101,20 @@ import {
   fetchInstagramAccounts,
   validateAndGetInstagramAccount,
   verifyInstagramPublishCapability,
-  publishInstagramReel
+  publishInstagramReel,
+  processScheduledInstagramJobs
 } from './instagram.js';
+
+/**
+ * Normalize any datetime string or epoch to a strict ISO-8601 UTC timestamp.
+ * Returns null if invalid or not provided.
+ */
+function normalizeToUtcIso(dateInput) {
+  if (!dateInput) return null;
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
 
 import {
   generateRandomHex,
@@ -1126,6 +1144,9 @@ app.post('/api/facebook/publish', withUser, async (c) => {
     return c.json({ error: 'Facebook Page Access Token could not be decrypted. Please reconnect your Page.' }, 400);
   }
 
+  const normalizedScheduledAt = normalizeToUtcIso(scheduledAt);
+  const isFutureSchedule = normalizedScheduledAt && (new Date(normalizedScheduledAt).getTime() > Date.now() + 60000);
+
   // Create initial D1 job record
   const job = await createFacebookUploadJob(c.env.DB, {
     user_id: userId,
@@ -1136,11 +1157,25 @@ app.post('/api/facebook/publish', withUser, async (c) => {
     caption,
     description,
     hashtags,
-    scheduled_at: scheduledAt,
-    status: 'processing',
+    scheduled_at: normalizedScheduledAt,
+    status: isFutureSchedule ? 'scheduled' : 'processing',
     b2_file_id: b2FileId,
     b2_file_name: b2FileName
   });
+
+  // If scheduled in the future, do not publish to Meta immediately.
+  // Video remains safely stored in Backblaze B2, and the Cloudflare Worker cron publishes it when scheduled_at arrives.
+  if (isFutureSchedule) {
+    console.log(`[SCHEDULER] Facebook Reel queued for background schedule at ${normalizedScheduledAt} (jobId=${job.id})`);
+    return c.json({
+      success: true,
+      jobId: job.id,
+      page_id: activePageId,
+      status: 'scheduled',
+      scheduled_at: normalizedScheduledAt,
+      message: `Reel scheduled for ${new Date(normalizedScheduledAt).toLocaleString()}. Video file queued in Backblaze B2.`
+    });
+  }
 
   try {
     // 1. Generate authorized download link from B2
@@ -1158,26 +1193,28 @@ app.post('/api/facebook/publish', withUser, async (c) => {
         b2DownloadUrl,
         caption: fullCaption,
         title,
-        scheduledAt
+        scheduledAt: null // Immediate publish
       });
     } else {
       publishResult = await publishFacebookPageVideo(c.env, activePageToken, activePageId, {
         b2DownloadUrl,
         title,
         description: fullCaption || description,
-        scheduledAt
+        scheduledAt: null
       });
     }
 
-    // 2. Immediately cleanup temporary file from Backblaze B2
-    await b2DeleteFile(c.env, b2FileId, b2FileName);
+    // 2. Safe retention of temporary file in Backblaze B2:
+    // Do NOT delete immediately. Retain for dependent platforms (e.g. Instagram Reels sharing this upload),
+    // and to allow Meta transcoders to stream all necessary chunks. Cleaned up safely by retention cron.
+    console.log(`[FB Ingest] Video published successfully (${publishResult.videoId}). Retaining B2 file ${b2FileName} for dependent platforms & Meta transcoding.`);
 
     // 3. Update job in D1
     const updatedJob = await updateFacebookUploadJob(c.env.DB, job.id, {
       status: publishResult.status || 'published',
       facebook_video_id: publishResult.videoId,
       facebook_post_url: publishResult.postUrl,
-      published_at: scheduledAt ? null : new Date().toISOString()
+      published_at: new Date().toISOString()
     });
 
     return c.json({
@@ -1189,11 +1226,6 @@ app.post('/api/facebook/publish', withUser, async (c) => {
     });
   } catch (err) {
     console.error('Facebook publish error:', err);
-
-    // Attempt B2 cleanup on error as well
-    try {
-      await b2DeleteFile(c.env, b2FileId, b2FileName);
-    } catch {}
 
     await updateFacebookUploadJob(c.env.DB, job.id, {
       status: 'failed',
@@ -1849,6 +1881,9 @@ app.post('/api/instagram/publish', withUser, async (c) => {
     return c.json({ error: 'Instagram Access Token could not be decrypted. Please reconnect your account.' }, 400);
   }
 
+  const normalizedScheduledAt = normalizeToUtcIso(scheduledAt);
+  const isFutureSchedule = normalizedScheduledAt && (new Date(normalizedScheduledAt).getTime() > Date.now() + 60000);
+
   // Create initial D1 job record
   const job = await createInstagramUploadJob(c.env.DB, {
     user_id: userId,
@@ -1859,11 +1894,26 @@ app.post('/api/instagram/publish', withUser, async (c) => {
     caption,
     description,
     hashtags,
-    scheduled_at: scheduledAt,
-    status: 'processing',
+    scheduled_at: normalizedScheduledAt,
+    status: isFutureSchedule ? 'scheduled' : 'processing',
     b2_file_id: b2FileId,
     b2_file_name: b2FileName
   });
+
+  // If scheduled in the future, do not publish to Meta immediately.
+  // Meta Instagram API does NOT support native scheduled_publish_time for standard apps.
+  // We keep the video safely in Backblaze B2, and our background scheduler publishes it at scheduled_at.
+  if (isFutureSchedule) {
+    console.log(`[SCHEDULER] Instagram Reel queued for background schedule at ${normalizedScheduledAt} (jobId=${job.id})`);
+    return c.json({
+      success: true,
+      jobId: job.id,
+      ig_user_id: activeIgUserId,
+      status: 'scheduled',
+      scheduled_at: normalizedScheduledAt,
+      message: `Reel scheduled for ${new Date(normalizedScheduledAt).toLocaleString()}. Video file queued in Backblaze B2.`
+    });
+  }
 
   try {
     // 1. Generate authorized download link from B2
@@ -1880,11 +1930,13 @@ app.post('/api/instagram/publish', withUser, async (c) => {
       b2DownloadUrl,
       caption: fullCaption,
       shareToFeed,
-      scheduledAt
+      scheduledAt: null // Immediate publish
     });
 
-    // 3. Immediately cleanup temporary file from Backblaze B2
-    await b2DeleteFile(c.env, b2FileId, b2FileName);
+    // 3. Safe retention of temporary file in Backblaze B2:
+    // Do NOT delete immediately. Retain for dependent platforms and to allow Meta transcoders
+    // to stream all necessary chunks. Cleaned up safely by retention cron.
+    console.log(`[IG Ingest] Video published successfully (${publishResult.mediaId}). Retaining B2 file ${b2FileName} for dependent platforms & Meta transcoding.`);
 
     // 4. Update job in D1
     await updateInstagramUploadJob(c.env.DB, job.id, {
@@ -1892,7 +1944,7 @@ app.post('/api/instagram/publish', withUser, async (c) => {
       instagram_container_id: publishResult.containerId,
       instagram_media_id: publishResult.mediaId,
       instagram_post_url: publishResult.postUrl,
-      published_at: scheduledAt ? null : new Date().toISOString()
+      published_at: new Date().toISOString()
     });
 
     return c.json({
@@ -1904,11 +1956,6 @@ app.post('/api/instagram/publish', withUser, async (c) => {
     });
   } catch (err) {
     console.error('Instagram publish error:', err);
-
-    // Attempt B2 cleanup on error as well
-    try {
-      await b2DeleteFile(c.env, b2FileId, b2FileName);
-    } catch {}
 
     await updateInstagramUploadJob(c.env.DB, job.id, {
       status: 'failed',
@@ -1956,6 +2003,170 @@ app.get('/api/uploads', withUser, async (c) => {
   const userId = c.get('userId');
   const jobs = await getUploadJobs(c.env.DB, userId);
   return c.json(jobs);
+});
+
+/**
+ * GET /api/history/all
+ * Returns unified upload history across YouTube, Facebook, and Instagram.
+ */
+app.get('/api/history/all', withUser, async (c) => {
+  const userId = c.get('userId');
+  const [youtubeJobs, facebookJobs, instagramJobs] = await Promise.all([
+    getUploadJobs(c.env.DB, userId),
+    getFacebookUploadJobs(c.env.DB, userId),
+    getInstagramUploadJobs(c.env.DB, userId)
+  ]);
+  return c.json({
+    success: true,
+    youtube: youtubeJobs || [],
+    facebook: facebookJobs || [],
+    instagram: instagramJobs || []
+  });
+});
+
+/**
+ * POST /api/history/clear
+ * Clear upload history by platform scope ('youtube' | 'facebook' | 'instagram' | 'all')
+ */
+app.post('/api/history/clear', withUser, async (c) => {
+  const userId = c.get('userId');
+  let body = {};
+  try {
+    body = await c.req.json();
+  } catch {}
+
+  const platform = body.platform || body.scope || 'all';
+  let targetScope = 'history';
+  if (platform === 'youtube' || platform === 'youtube_history') targetScope = 'youtube_history';
+  else if (platform === 'facebook' || platform === 'facebook_history') targetScope = 'facebook_history';
+  else if (platform === 'instagram' || platform === 'instagram_history') targetScope = 'instagram_history';
+  else targetScope = 'history';
+
+  const result = await clearUserDataByScope(c.env.DB, userId, targetScope);
+  return c.json({ success: true, platform, targetScope, result });
+});
+
+// ─── Social Publishing Sections (Scheduled Videos & Upload History) ──────────
+
+/**
+ * GET /api/social/scheduled
+ * Section 1: Returns only active scheduled publishing jobs (scheduled, pending, uploading, processing).
+ * Never returns completed (published, failed, cancelled) jobs.
+ */
+app.get('/api/social/scheduled', withUser, async (c) => {
+  const userId = c.get('userId');
+  const jobs = await getScheduledSocialJobs(c.env.DB, userId);
+  return c.json({ success: true, scheduled: jobs });
+});
+
+/**
+ * GET /api/social/history
+ * Section 2: Returns only completed/terminal publishing jobs (published, failed, cancelled).
+ * Supports filters: ?platform=all|facebook|instagram & status=all|published|failed|cancelled
+ */
+app.get('/api/social/history', withUser, async (c) => {
+  const userId = c.get('userId');
+  const platform = c.req.query('platform') || 'all';
+  const status = c.req.query('status') || 'all';
+  const limit = parseInt(c.req.query('limit')) || 100;
+
+  const history = await getCompletedSocialHistory(c.env.DB, userId, { platform, status, limit });
+  return c.json({ success: true, history });
+});
+
+/**
+ * GET /api/social/preview-url
+ * Section 1: Generates a secure, temporary signed download URL for previewing a scheduled B2 video.
+ * Does NOT expose master B2 credentials or private keys. Valid for 1 hour.
+ */
+app.get('/api/social/preview-url', withUser, async (c) => {
+  const userId = c.get('userId');
+  const platform = c.req.query('platform') || 'facebook';
+  const jobId = c.req.query('jobId');
+  const b2FileNameParam = c.req.query('fileName');
+
+  let b2FileName = b2FileNameParam;
+
+  if (jobId) {
+    const job = platform === 'instagram'
+      ? await getInstagramUploadJob(c.env.DB, jobId)
+      : await getFacebookUploadJob(c.env.DB, jobId);
+
+    if (!job || job.user_id !== userId) {
+      return c.json({ error: 'Job not found or unauthorized' }, 404);
+    }
+    b2FileName = job.b2_file_name;
+  }
+
+  if (!b2FileName) {
+    return c.json({ error: 'No video file associated with this job' }, 400);
+  }
+
+  try {
+    const previewUrl = await b2GetDownloadUrl(c.env, b2FileName, 3600);
+    return c.json({ success: true, previewUrl, b2FileName });
+  } catch (err) {
+    console.error('[API] Failed to generate B2 preview URL:', err);
+    return c.json({ error: `Failed to generate preview URL: ${err.message}` }, 500);
+  }
+});
+
+/**
+ * POST /api/social/cancel
+ * Section 1: Cancels an active scheduled publishing job for a specific platform.
+ * Only works if job status is 'scheduled' or 'pending'.
+ * Safely retains B2 file if needed by other platforms; deletes B2 if no jobs remain.
+ */
+app.post('/api/social/cancel', withUser, async (c) => {
+  const userId = c.get('userId');
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Invalid JSON body' }, 400);
+  }
+
+  const { platform, jobId } = body;
+  if (!platform || !jobId) {
+    return c.json({ error: 'platform and jobId are required' }, 400);
+  }
+
+  const cancelRes = await cancelScheduledSocialJob(c.env.DB, userId, platform, jobId);
+  if (!cancelRes.success) {
+    return c.json({ error: cancelRes.error || 'Failed to cancel schedule' }, 400);
+  }
+
+  // Safe B2 lifecycle check: delete file only if no other active jobs need it
+  if (cancelRes.b2_file_name) {
+    try {
+      const needed = await isB2FileNeededByOtherJobs(c.env.DB, cancelRes.b2_file_name, jobId);
+      if (!needed && cancelRes.b2_file_id) {
+        await b2DeleteFile(c.env, cancelRes.b2_file_id, cancelRes.b2_file_name);
+        console.log(`[Cancel Schedule] Cleaned up unused B2 file: ${cancelRes.b2_file_name}`);
+      }
+    } catch (b2Err) {
+      console.warn('[Cancel Schedule] B2 cleanup warning:', b2Err.message);
+    }
+  }
+
+  return c.json({ success: true, message: 'Schedule cancelled successfully', job: cancelRes.job });
+});
+
+/**
+ * POST /api/social/history/clear
+ * Section 3: Safely clears completed publishing history (published, failed, cancelled).
+ * STRICTLY PROTECTS all active scheduled, pending, and uploading jobs!
+ */
+app.post('/api/social/history/clear', withUser, async (c) => {
+  const userId = c.get('userId');
+  let body = {};
+  try {
+    body = await c.req.json();
+  } catch {}
+
+  const platform = body.platform || 'all';
+  const result = await clearCompletedSocialHistory(c.env.DB, userId, platform);
+  return c.json({ success: true, ...result });
 });
 
 /**
@@ -2144,9 +2355,14 @@ app.get('/api/schedule', withUser, async (c) => {
  * List all saved templates for the current user.
  */
 app.get('/api/templates', withUser, async (c) => {
-  const userId = c.get('userId');
-  const templates = await getTemplates(c.env.DB, userId);
-  return c.json({ success: true, templates });
+  try {
+    const userId = c.get('userId');
+    const templates = await getTemplates(c.env.DB, userId);
+    return c.json({ success: true, templates: templates || [] });
+  } catch (err) {
+    console.error('GET /api/templates error:', err);
+    return c.json({ success: true, templates: [] });
+  }
 });
 
 /**
@@ -2154,11 +2370,16 @@ app.get('/api/templates', withUser, async (c) => {
  * Get a specific saved template.
  */
 app.get('/api/templates/:id', withUser, async (c) => {
-  const userId = c.get('userId');
-  const id = c.req.param('id');
-  const template = await getTemplateById(c.env.DB, userId, id);
-  if (!template) return c.json({ error: 'Template not found' }, 404);
-  return c.json({ success: true, template });
+  try {
+    const userId = c.get('userId');
+    const id = c.req.param('id');
+    const template = await getTemplateById(c.env.DB, userId, id);
+    if (!template) return c.json({ error: 'Template not found' }, 404);
+    return c.json({ success: true, template });
+  } catch (err) {
+    console.error('GET /api/templates/:id error:', err);
+    return c.json({ error: 'Template not found' }, 404);
+  }
 });
 
 /**
@@ -2390,6 +2611,41 @@ app.post('/api/admin/cleanup', async (c) => {
   return c.json({ success: true, report });
 });
 
+/**
+ * POST /api/instagram/process-scheduled
+ * Manually trigger processing of due scheduled Instagram posts.
+ */
+app.post('/api/instagram/process-scheduled', async (c) => {
+  const result = await processScheduledInstagramJobs(c.env);
+  return c.json({ success: true, result });
+});
+
+/**
+ * POST /api/facebook/process-scheduled
+ * Manually trigger processing of due scheduled Facebook posts.
+ */
+app.post('/api/facebook/process-scheduled', async (c) => {
+  const result = await processScheduledFacebookJobs(c.env);
+  return c.json({ success: true, result });
+});
+
+/**
+ * POST /api/scheduler/run
+ * Manually trigger all scheduled jobs (Instagram + Facebook + cleanup).
+ */
+app.post('/api/scheduler/run', async (c) => {
+  console.log('[API SCHEDULER] Triggering full scheduler pass...');
+  const igResult = await processScheduledInstagramJobs(c.env);
+  const fbResult = await processScheduledFacebookJobs(c.env);
+  const cleanupResult = await runAutoCleanup(c.env.DB);
+  return c.json({
+    success: true,
+    instagram: igResult,
+    facebook: fbResult,
+    cleanup: cleanupResult
+  });
+});
+
 // ─── 404 Fallback ─────────────────────────────────────────────────────────────
 
 app.notFound((c) => c.json({ error: 'Not found' }, 404));
@@ -2399,13 +2655,70 @@ app.onError((err, c) => {
   return c.json({ error: 'Internal server error', message: err?.message, stack: err?.stack }, 500);
 });
 
+/**
+ * Automatically cleans up temporary Backblaze B2 files older than 2 hours
+ * that are no longer required by any active (pending, scheduled, uploading, processing) jobs.
+ */
+export async function cleanupStaleB2Uploads(env) {
+  if (!env.B2_BUCKET_ID || !env.B2_APPLICATION_KEY) return;
+  try {
+    const files = await b2ListFileNames(env, 100);
+    const twoHoursAgo = Date.now() - (2 * 60 * 60 * 1000);
+    let deletedCount = 0;
+
+    for (const f of files) {
+      if (f.uploadTimestamp && f.uploadTimestamp < twoHoursAgo) {
+        const needed = await isB2FileNeededByOtherJobs(env.DB, f.fileName);
+        if (!needed) {
+          try {
+            await b2DeleteFile(env, f.fileId, f.fileName);
+            deletedCount++;
+          } catch (delErr) {
+            console.warn(`[B2 Stale Cleanup] Failed to delete ${f.fileName}:`, delErr.message);
+          }
+        }
+      }
+    }
+    if (deletedCount > 0) {
+      console.log(`[B2 Stale Cleanup] Cleaned up ${deletedCount} expired temporary files.`);
+    }
+  } catch (err) {
+    console.warn('[B2 Stale Cleanup] Error running stale cleanup:', err.message);
+  }
+}
+
 export default {
   fetch: app.fetch,
   async scheduled(event, env, ctx) {
+    const doScheduledTasks = async () => {
+      try {
+        console.log('[CRON SCHEDULER] Running scheduled Instagram processor...');
+        await processScheduledInstagramJobs(env);
+      } catch (err) {
+        console.error('Scheduled Instagram processor error:', err);
+      }
+      try {
+        console.log('[CRON SCHEDULER] Running scheduled Facebook processor...');
+        await processScheduledFacebookJobs(env);
+      } catch (err) {
+        console.error('Scheduled Facebook processor error:', err);
+      }
+      try {
+        await runAutoCleanup(env.DB);
+      } catch (err) {
+        console.error('Scheduled DB cleanup error:', err);
+      }
+      try {
+        await cleanupStaleB2Uploads(env);
+      } catch (err) {
+        console.error('Scheduled B2 cleanup error:', err);
+      }
+    };
+
     if (ctx && ctx.waitUntil) {
-      ctx.waitUntil(runAutoCleanup(env.DB));
+      ctx.waitUntil(doScheduledTasks());
     } else {
-      await runAutoCleanup(env.DB);
+      await doScheduledTasks();
     }
   }
 };

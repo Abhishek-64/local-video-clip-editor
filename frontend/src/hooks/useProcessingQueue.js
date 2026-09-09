@@ -1,13 +1,55 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { processVideoClip } from '../services/videoProcessingEngine';
 import { downloadClipsAsZip } from '../services/zipService';
+import { clipResourceManager } from '../services/export/exportResourceManager';
 
-export function useProcessingQueue() {
+export const EXPORT_SCHEDULER_CONFIG = {
+  longDurationSec: 120,    // 2 minutes or longer is classified as a heavy export
+  longFrameCount: 3600,    // 3600 frames or more
+  maxHeavyConcurrency: 1,  // Strict exclusive execution for long/heavy exports to avoid hardware context thrashing
+  normalConcurrency: 2     // Concurrency for light/short clips if device and settings permit
+};
+
+/**
+ * Calculate estimated job workload and complexity
+ */
+export function calculateJobComplexity(job) {
+  if (!job) return { duration: 0, fps: 30, estimatedFrames: 0, estimatedPixels: 0, isHeavy: false };
+  const duration = Math.max(0, parseFloat(job.duration || (job.endTime - job.startTime) || 0));
+  const fps = parseFloat(job.exportSettings?.fps || job.settings?.export?.fps || 30) || 30;
+  const estimatedFrames = Math.round(duration * fps);
+  const resolution = job.exportSettings?.resolution || job.settings?.export?.resolution || '1080p';
+  const width = resolution === '4k' ? 3840 : resolution === '1440p' ? 2560 : resolution === '720p' ? 1280 : 1920;
+  const height = resolution === '4k' ? 2160 : resolution === '1440p' ? 1440 : resolution === '720p' ? 720 : 1080;
+  const estimatedPixels = width * height * estimatedFrames;
+  const isFaceTracking = Boolean(job.cropSettings?.faceTracking || job.settings?.crop?.faceTracking);
+
+  const isHeavy =
+    duration >= EXPORT_SCHEDULER_CONFIG.longDurationSec ||
+    estimatedFrames >= EXPORT_SCHEDULER_CONFIG.longFrameCount ||
+    estimatedPixels >= (1920 * 1080 * 3600);
+
+  return {
+    duration,
+    fps,
+    estimatedFrames,
+    estimatedPixels,
+    isHeavy,
+    isFaceTracking
+  };
+}
+
+export function useProcessingQueue({ onClipCompleted } = {}) {
   const [queue, setQueue] = useState([]);
   const [completedClips, setCompletedClips] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isZipping, setIsZipping] = useState(false);
   const [zipProgress, setZipProgress] = useState(0);
+
+  const onClipCompletedRef = useRef(onClipCompleted);
+  useEffect(() => {
+    onClipCompletedRef.current = onClipCompleted;
+  }, [onClipCompleted]);
 
   const queueRef = useRef([]);
   const completedClipsRef = useRef([]);
@@ -80,19 +122,12 @@ export function useProcessingQueue() {
         } catch (e) {}
       });
       abortControllersRef.current.clear();
-
-      completedClipsRef.current.forEach((clip) => {
-        if (clip.outputUrl) {
-          try {
-            URL.revokeObjectURL(clip.outputUrl);
-          } catch (e) {}
-        }
-      });
+      clipResourceManager.cleanupAll();
     };
   }, []);
 
   /**
-   * Internal runner to process next pending jobs in queue
+   * Internal runner to process next pending jobs in queue with adaptive scheduler
    */
   const triggerQueueProcessor = useCallback(() => {
     if (isDestroyedRef.current) return;
@@ -108,15 +143,32 @@ export function useProcessingQueue() {
 
     setIsProcessing(true);
 
-    // Determine concurrency limit from first job export config (capped between 1 and 2 for browser canvas/GPU stability)
-    const concurrencyLimit = Math.max(
-      1,
-      Math.min(2, parseInt(waitingJobs[0]?.exportSettings?.concurrency || waitingJobs[0]?.settings?.export?.concurrency || 1, 10))
-    );
+    // Inspect active running jobs
+    const runningJobs = queueRef.current.filter((j) => j.status === 'processing');
+    const hasRunningHeavyJob = runningJobs.some((j) => calculateJobComplexity(j).isHeavy);
+
+    // If a heavy long export is currently running, no subsequent job can start until it releases resources
+    if (hasRunningHeavyJob && activeWorkersRef.current >= EXPORT_SCHEDULER_CONFIG.maxHeavyConcurrency) {
+      return;
+    }
+
+    // Determine adaptive concurrency limit
+    const nextWaiting = waitingJobs[0];
+    const nextComplexity = calculateJobComplexity(nextWaiting);
+    const userConcurrency = parseInt(nextWaiting?.exportSettings?.concurrency || nextWaiting?.settings?.export?.concurrency || 1, 10);
+
+    const concurrencyLimit = nextComplexity.isHeavy
+      ? EXPORT_SCHEDULER_CONFIG.maxHeavyConcurrency
+      : Math.max(1, Math.min(EXPORT_SCHEDULER_CONFIG.normalConcurrency, userConcurrency));
 
     while (activeWorkersRef.current < concurrencyLimit) {
       const nextJob = queueRef.current.find((j) => j.status === 'waiting');
       if (!nextJob) break;
+
+      // If next job is heavy and another job is already running, wait for the heavy exclusive slot
+      if (calculateJobComplexity(nextJob).isHeavy && activeWorkersRef.current > 0) {
+        break;
+      }
 
       // Mark this job as processing
       nextJob.status = 'processing';
@@ -154,7 +206,12 @@ export function useProcessingQueue() {
         export: job.exportSettings || {}
       };
 
+      let lastProgressUpdate = 0;
+      let lastReportedPct = 0;
+
       const result = await processVideoClip({
+        jobId: job.id,
+        clipId: job.id,
         videoSource,
         startTime: job.startTime,
         endTime: job.endTime,
@@ -166,7 +223,14 @@ export function useProcessingQueue() {
           const target = queueRef.current.find((j) => j.id === job.id);
           if (target && target.status === 'processing') {
             target.progress = pct;
-            setQueue([...queueRef.current]);
+            const now = performance.now();
+            // Throttled UI progress updates: target ~6-8 updates/sec (125ms interval)
+            // Always guarantee 0%, 100%, and updates when progress moves by at least 1%
+            if (pct === 100 || (pct !== lastReportedPct && now - lastProgressUpdate >= 125)) {
+              lastProgressUpdate = now;
+              lastReportedPct = pct;
+              setQueue([...queueRef.current]);
+            }
           }
         },
         signal: controller.signal
@@ -177,11 +241,21 @@ export function useProcessingQueue() {
         status: 'completed',
         progress: 100,
         outputUrl: result.url,
+        thumbnailUrl: result.thumbnailUrl,
+        thumbnailBlob: result.thumbnailBlob,
         blob: result.blob,
         format: result.format,
         size: result.size,
         duration: result.duration
       };
+
+      // Register with centralized resource manager
+      clipResourceManager.registerClip(completedJob.id, {
+        blob: result.blob,
+        url: result.url,
+        thumbnailBlob: result.thumbnailBlob,
+        thumbnailUrl: result.thumbnailUrl
+      });
 
       // Update in queue
       queueRef.current = queueRef.current.map((j) =>
@@ -191,6 +265,15 @@ export function useProcessingQueue() {
 
       // Add to completedClips
       setCompletedClips((prev) => [...prev, completedJob]);
+
+      // Trigger completion callback if supplied
+      if (onClipCompletedRef.current) {
+        try {
+          onClipCompletedRef.current(completedJob);
+        } catch (callbackErr) {
+          console.error('[useProcessingQueue] onClipCompleted error:', callbackErr);
+        }
+      }
     } catch (err) {
       if (isDestroyedRef.current) return;
 
@@ -268,14 +351,8 @@ export function useProcessingQueue() {
    */
   const setAndStartQueue = useCallback(
     (newJobs, videoSource, concurrency = 1) => {
-      // Revoke previous URLs
-      completedClipsRef.current.forEach((clip) => {
-        if (clip.outputUrl) {
-          try {
-            URL.revokeObjectURL(clip.outputUrl);
-          } catch (e) {}
-        }
-      });
+      // Revoke previous URLs via centralized resource manager
+      clipResourceManager.cleanupAll();
 
       const formattedJobs = (newJobs || []).map((j, idx) => ({
         status: 'waiting',
@@ -317,6 +394,17 @@ export function useProcessingQueue() {
   }, []);
 
   /**
+   * Remove an individual completed clip and revoke its object URLs immediately
+   */
+  const removeClip = useCallback((id) => {
+    clipResourceManager.revokeClip(id);
+    completedClipsRef.current = completedClipsRef.current.filter((c) => c.id !== id);
+    setCompletedClips((prev) => prev.filter((c) => c.id !== id));
+    queueRef.current = queueRef.current.filter((j) => j.id !== id);
+    setQueue((prev) => prev.filter((j) => j.id !== id));
+  }, []);
+
+  /**
    * Clear all queue items and revoke object URLs
    */
   const clearQueue = useCallback(() => {
@@ -328,13 +416,7 @@ export function useProcessingQueue() {
     abortControllersRef.current.clear();
     activeWorkersRef.current = 0;
 
-    completedClipsRef.current.forEach((c) => {
-      if (c.outputUrl) {
-        try {
-          URL.revokeObjectURL(c.outputUrl);
-        } catch (e) {}
-      }
-    });
+    clipResourceManager.cleanupAll();
 
     queueRef.current = [];
     setQueue([]);
@@ -347,12 +429,12 @@ export function useProcessingQueue() {
    */
   const downloadClip = useCallback((clip) => {
     if (!clip) return;
-    if (!clip.outputUrl && !clip.blob) {
+    const url = clip.outputUrl || clipResourceManager.getVideoUrl(clip.id, clip.blob);
+    if (!url) {
       console.warn('Clip is not ready for download yet');
       return;
     }
 
-    const url = clip.outputUrl || URL.createObjectURL(clip.blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = clip.name || `clip-${clip.partNumber || 1}.mp4`;
@@ -398,6 +480,7 @@ export function useProcessingQueue() {
     setAndStartQueue,
     cancelJob,
     clearQueue,
+    removeClip,
     downloadClip,
     downloadAllZip
   };

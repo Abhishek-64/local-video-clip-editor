@@ -148,9 +148,8 @@ export class FaceTrackerSmoother {
         this.currentY = this.currentY * (1 - this.alpha) + detectedFace.y * this.alpha;
       }
     } else {
-      // If lost, slowly drift back towards center (0.5, 0.5)
-      this.currentX = this.currentX * 0.97 + 0.5 * 0.03;
-      this.currentY = this.currentY * 0.97 + 0.45 * 0.03;
+      // When detection fails, use previous valid tracking position without jumping or drifting (Section 15)
+      // Preserves currentX and currentY
     }
 
     return {

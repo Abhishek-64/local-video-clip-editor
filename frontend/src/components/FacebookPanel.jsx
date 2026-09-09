@@ -6,6 +6,8 @@ import {
   Layers, CheckSquare, Square, ListOrdered, Play, ArrowRight, Instagram, Zap,
   Type, Undo2, Copy
 } from 'lucide-react';
+import { toDateTimeLocalString } from '../utils/scheduler';
+
 
 export default function FacebookPanel({
   fbAccount,
@@ -47,7 +49,8 @@ export default function FacebookPanel({
   igAccount,
   renderIgTemplate,
   publishToInstagramPipeline,
-  onSwitchToPlatform
+  onSwitchToPlatform,
+  onSocialRefresh
 }) {
   const [tagInput, setTagInput] = useState('');
   const [selectedPageDropdownOpen, setSelectedPageDropdownOpen] = useState(false);
@@ -149,6 +152,24 @@ export default function FacebookPanel({
     setSelectedClipIds([]);
   };
 
+  // ── Schedule Helpers & Presets ──────────────────────────────────────────────
+  const getRecommendedScheduleTime = (minutesFromNow = 30) => {
+    const d = new Date(Date.now() + minutesFromNow * 60 * 1000);
+    const remainder = d.getMinutes() % 5;
+    if (remainder !== 0) {
+      d.setMinutes(d.getMinutes() + (5 - remainder));
+    }
+    d.setSeconds(0, 0);
+    return toDateTimeLocalString(d);
+  };
+
+  const minScheduleTime = useMemo(() => {
+    return toDateTimeLocalString(new Date(Date.now() + 20 * 60 * 1000));
+  }, []);
+
+
+
+
   // ── Handle Page ID Submit ───────────────────────────────────────────────────
   const handleConnectPageSubmit = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
@@ -171,6 +192,7 @@ export default function FacebookPanel({
 
   // ── Batch / Multi-Clip Publishing Pipeline Execution ────────────────────────
   const handlePublishExecution = async (target = 'facebook') => {
+    if (isBatchPublishing || isPublishing) return;
     if (activeSelectedClips.length === 0) {
       alert('Please select at least one clip or video to publish.');
       return;
@@ -185,8 +207,11 @@ export default function FacebookPanel({
     setBatchError(null);
 
     const publishedResults = [];
-    const isScheduled = fbSettings?.fb_schedule_mode === 'schedule' && fbSettings?.fb_schedule_time;
-    const intervalMinutes = parseInt(fbSettings?.fb_schedule_interval) || 30;
+    const isFbScheduled = fbSettings?.fb_schedule_mode === 'schedule' && fbSettings?.fb_schedule_time;
+    const fbIntervalMinutes = parseInt(fbSettings?.fb_schedule_interval) || 30;
+
+    const isIgScheduled = igSettings?.ig_schedule_mode === 'schedule' && igSettings?.ig_schedule_time;
+    const igIntervalMinutes = parseInt(igSettings?.ig_schedule_interval) || 30;
 
     for (let i = 0; i < clipsToPublish.length; i++) {
       const clip = clipsToPublish[i];
@@ -202,11 +227,23 @@ export default function FacebookPanel({
         continue;
       }
 
-      let scheduledAt = null;
-      if (isScheduled) {
+      // Compute Facebook scheduledAt independently
+      let fbScheduledAt = null;
+      if (isFbScheduled) {
         const baseDate = new Date(fbSettings.fb_schedule_time);
-        const clipDate = new Date(baseDate.getTime() + i * intervalMinutes * 60 * 1000);
-        scheduledAt = clipDate.toISOString();
+        const clipDate = new Date(baseDate.getTime() + i * fbIntervalMinutes * 60 * 1000);
+        fbScheduledAt = clipDate.toISOString();
+      }
+
+      // Compute Instagram scheduledAt independently
+      let igScheduledAt = null;
+      if (isIgScheduled) {
+        const baseDate = new Date(igSettings.ig_schedule_time);
+        const clipDate = new Date(baseDate.getTime() + i * igIntervalMinutes * 60 * 1000);
+        igScheduledAt = clipDate.toISOString();
+      } else if (isFbScheduled) {
+        // Fallback to Facebook schedule time only if user didn't explicitly set Instagram schedule
+        igScheduledAt = fbScheduledAt;
       }
 
       // Automatically compute part-specific metadata
@@ -222,7 +259,7 @@ export default function FacebookPanel({
           caption: partCaption,
           title: partTitle,
           hashtags: fbSettings?.fb_tags || [],
-          scheduledAt,
+          scheduledAt: fbScheduledAt,
           fileName,
           partNumber: partNum
         });
@@ -242,7 +279,7 @@ export default function FacebookPanel({
             shareToFeed: igSettings?.ig_share_to_feed !== false,
             fileName,
             igUserId: igAccount?.ig_user_id,
-            scheduledAt
+            scheduledAt: igScheduledAt
           });
         }
 
@@ -250,9 +287,11 @@ export default function FacebookPanel({
           partNumber: partNum,
           clipName: clip.name || fileName,
           postUrl: result?.postUrl,
-          igPostUrl: igResult?.postUrl || `https://www.instagram.com/reel/`,
+          igPostUrl: igResult?.postUrl || (igResult?.status === 'scheduled' ? null : `https://www.instagram.com/reel/`),
           status: result?.status || 'published',
-          videoId: result?.video_id || result?.videoId
+          videoId: result?.video_id || result?.videoId,
+          scheduledAt: fbScheduledAt,
+          igScheduledAt: igScheduledAt
         });
         setBatchPublishedPosts([...publishedResults]);
       } catch (err) {
@@ -263,6 +302,7 @@ export default function FacebookPanel({
     }
 
     setIsBatchPublishing(false);
+    if (onSocialRefresh) onSocialRefresh();
   };
 
   if (!apiAvailable) {
@@ -322,6 +362,30 @@ export default function FacebookPanel({
 
   return (
     <div className="space-y-5 sm:space-y-6 animate-fadeIn">
+      {/* Active Upload / Publishing Banner with Real-Time Percentage */}
+      {isPublishing && (
+        <div className="bg-gradient-to-r from-blue-950/80 via-slate-900 to-indigo-950/80 border border-blue-500/40 rounded-2xl p-4 shadow-xl flex items-center justify-between gap-3 animate-pulse">
+          <div className="flex items-center space-x-3 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-blue-400 shrink-0">
+              <Share2 className="w-4 h-4 animate-spin" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-white truncate">
+                {publishStage === 'b2_upload' ? 'Uploading Video to Cloud Platform...' : 'Ingesting to Facebook Reels...'}
+              </p>
+              <p className="text-[11px] text-slate-400">
+                {publishStage === 'b2_upload' ? 'Live video byte transfer in progress' : 'Meta Graph API processing'}
+              </p>
+            </div>
+          </div>
+          <div className="text-right shrink-0">
+            <span className="text-sm font-mono font-bold text-blue-400 bg-blue-500/15 border border-blue-500/30 px-3 py-1 rounded-xl shadow-inner">
+              {publishProgress || 0}%
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* ── 1. ACCOUNT & PAGE CONNECTION CARD ──────────────────────────── */}
       
       {/* STATE A: NOT AUTHENTICATED WITH FACEBOOK YET */}
@@ -499,6 +563,7 @@ export default function FacebookPanel({
                 <img
                   src={fbAccount.page_thumbnail}
                   alt=""
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
                   className="w-11 h-11 rounded-xl border border-blue-500/40 object-cover shrink-0 shadow-md"
                 />
               ) : (
@@ -676,157 +741,7 @@ export default function FacebookPanel({
         </div>
       </div>
 
-      {/* ── 3. MULTIPLE CLIP SELECTION & GENERATED CLIPS (AUTO-PART) ───── */}
-      <div className="space-y-3 bg-slate-950/70 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-lg">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <div>
-            <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center space-x-2">
-              <Layers className="w-4 h-4 text-blue-400" />
-              <span>Select Video / Exported Clips to Publish</span>
-            </h4>
-            <p className="text-[11px] text-slate-400 mt-0.5">
-              Select single, multiple, or all generated parts. Sequential parts automatically apply part numbers.
-            </p>
-          </div>
-
-          {/* Mode Switcher Buttons */}
-          {completedClips.length > 0 && (
-            <div className="flex items-center space-x-1 bg-slate-900 p-1 rounded-xl border border-slate-800 shrink-0">
-              <button
-                type="button"
-                onClick={() => setSelectionMode('all')}
-                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
-                  selectionMode === 'all'
-                    ? 'bg-blue-600 text-white shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                All ({completedClips.length})
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setSelectionMode('custom')}
-                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
-                  selectionMode === 'custom'
-                    ? 'bg-blue-600 text-white shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                Select Parts
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* CLIPS DISPLAY & INTERACTIVE CHECKBOXES */}
-        {completedClips.length > 0 ? (
-          <div className="space-y-2.5">
-            {selectionMode === 'custom' && (
-              <div className="flex items-center justify-between text-xs px-1">
-                <span className="text-slate-400 font-medium">
-                  {selectedClipIds.length} of {completedClips.length} parts selected
-                </span>
-                <div className="flex items-center space-x-2">
-                  <button
-                    type="button"
-                    onClick={selectAllClips}
-                    className="text-[11px] text-blue-400 hover:text-blue-300 font-semibold cursor-pointer"
-                  >
-                    Select All
-                  </button>
-                  <span className="text-slate-600">•</span>
-                  <button
-                    type="button"
-                    onClick={deselectAllClips}
-                    className="text-[11px] text-slate-400 hover:text-slate-300 font-semibold cursor-pointer"
-                  >
-                    Deselect All
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* List of Clips */}
-            <div className="max-h-60 overflow-y-auto space-y-1.5 pr-1 no-scrollbar">
-              {completedClips.map((clip, idx) => {
-                const partNum = clip.partNumber || (baseStartPart + idx);
-                const isSelected = selectionMode === 'all' || (selectionMode === 'custom' && selectedClipIds.includes(clip.id));
-                const sizeMb = clip.blob?.size ? (clip.blob.size / (1024 * 1024)).toFixed(1) : null;
-
-                return (
-                  <div
-                    key={clip.id}
-                    onClick={() => {
-                      if (selectionMode === 'custom') {
-                        toggleClipSelection(clip.id);
-                      }
-                    }}
-                    className={`p-3 rounded-xl border transition-all flex items-center justify-between gap-3 ${
-                      selectionMode === 'custom' ? 'cursor-pointer' : 'cursor-default'
-                    } ${
-                      isSelected
-                        ? 'bg-blue-950/30 border-blue-500/50 text-white shadow-sm'
-                        : 'bg-slate-900/50 border-slate-800/80 text-slate-400 opacity-60 hover:opacity-90'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-3 min-w-0">
-                      {selectionMode === 'custom' && (
-                        <div className="shrink-0 text-blue-400">
-                          {isSelected ? <CheckSquare className="w-4 h-4 text-blue-400" /> : <Square className="w-4 h-4 text-slate-500" />}
-                        </div>
-                      )}
-
-                      <div className="w-8 h-8 rounded-lg bg-blue-500/20 text-blue-300 border border-blue-500/30 flex items-center justify-center font-mono font-bold text-xs shrink-0">
-                        {isZeroPad ? String(partNum).padStart(2, '0') : partNum}
-                      </div>
-
-                      <div className="min-w-0">
-                        <div className="flex items-center space-x-2">
-                          <span className="text-xs font-bold text-white truncate">
-                            {clip.name}
-                          </span>
-                          <span className="px-1.5 py-0.2 bg-blue-500/20 text-blue-300 rounded text-[9px] font-mono shrink-0">
-                            Part {isZeroPad ? String(partNum).padStart(2, '0') : partNum}
-                          </span>
-                        </div>
-                        <p className="text-[10px] text-slate-400 mt-0.5">
-                          {sizeMb ? `${sizeMb} MB • ` : ''}
-                          {clip.duration ? `${Math.round(clip.duration)}s • ` : ''}
-                          Ready for automated Facebook Reel ingest
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ) : (
-          <div className="p-6 bg-slate-900/60 border border-slate-800 rounded-2xl text-center space-y-3">
-            <div className="w-12 h-12 rounded-2xl bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center mx-auto">
-              <Layers className="w-6 h-6" />
-            </div>
-            <div className="space-y-1">
-              <h5 className="text-sm font-bold text-white">No Exported Clips Found</h5>
-              <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                Reels publishing requires exported clips. Go to <strong>Split &amp; Cut</strong> and export your parts first.
-              </p>
-            </div>
-            {onSwitchToPlatform && (
-              <button
-                type="button"
-                onClick={() => onSwitchToPlatform('split-cut')}
-                className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 active:scale-98 text-white font-semibold text-xs rounded-xl shadow-md transition-all cursor-pointer inline-flex items-center space-x-1.5 touch-manipulation"
-              >
-                <span>Go to Split &amp; Cut ✂️</span>
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* ── 4. FACEBOOK METADATA, TITLE & PART FIELDS ──────────────────── */}
+      {/* ── 3. FACEBOOK METADATA, TITLE & PART FIELDS ──────────────────── */}
       <div className="space-y-4 bg-slate-950/60 border border-slate-800 rounded-2xl p-4 sm:p-5">
         {/* Field 1: Facebook Video / Series Title */}
         <div className="space-y-1.5">
@@ -1090,262 +1005,6 @@ export default function FacebookPanel({
           </div>
         </div>
 
-        {/* Field 7: Publish Timing (Now vs Schedule) */}
-        <div className="space-y-2 pt-1 border-t border-slate-800/80">
-          <label className="text-xs font-semibold text-slate-300 flex items-center space-x-1.5">
-            <Clock className="w-3.5 h-3.5 text-blue-400" />
-            <span>Publish Timing</span>
-          </label>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => updateFbSettings({ fb_schedule_mode: 'now' })}
-              className={`py-2 px-3 text-xs font-semibold rounded-xl border text-center transition-all cursor-pointer ${
-                fbSettings?.fb_schedule_mode === 'now'
-                  ? 'bg-blue-500/20 border-blue-500 text-blue-300 font-bold'
-                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Publish Now
-            </button>
-
-            <button
-              type="button"
-              onClick={() => updateFbSettings({ fb_schedule_mode: 'schedule' })}
-              className={`py-2 px-3 text-xs font-semibold rounded-xl border text-center transition-all cursor-pointer ${
-                fbSettings?.fb_schedule_mode === 'schedule'
-                  ? 'bg-blue-500/20 border-blue-500 text-blue-300 font-bold'
-                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Schedule for Later
-            </button>
-          </div>
-
-          {fbSettings?.fb_schedule_mode === 'schedule' && (
-            <div className="pt-2">
-              <input
-                type="datetime-local"
-                value={fbSettings?.fb_schedule_time || ''}
-                onChange={(e) => updateFbSettings({ fb_schedule_time: e.target.value })}
-                className="w-full bg-slate-900 border border-slate-700 text-white text-xs px-3.5 py-2.5 rounded-xl outline-none focus:border-blue-500"
-              />
-              <p className="text-[10px] text-slate-500 mt-1">
-                * Meta requires scheduled Reels/videos to be set at least 20 minutes in the future.
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ── 5. PUBLISH ACTION & BATCH PIPELINE STATUS ─────────────────── */}
-      <div className="space-y-3 pt-2">
-        {/* Progress Pipeline Display */}
-        {(isPublishing || isBatchPublishing) && (
-          <div className="p-4 bg-blue-950/40 border border-blue-500/40 rounded-2xl space-y-2.5 animate-pulse">
-            <div className="flex items-center justify-between text-xs font-semibold text-blue-300">
-              <span className="flex items-center space-x-2">
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                <span>
-                  {batchTotalCount > 1
-                    ? `Publishing Part ${batchCurrentIdx} of ${batchTotalCount} (${publishStage || 'Ingesting'})...`
-                    : publishStage === 'b2_upload'
-                    ? `Uploading video to Backblaze B2 temporary storage (${publishProgress}%)...`
-                    : 'Ingesting & Finalizing with Meta Graph API...'}
-                </span>
-              </span>
-              <span>{publishProgress}%</span>
-            </div>
-            <div className="w-full bg-slate-900 rounded-full h-2 overflow-hidden">
-              <div
-                className="bg-gradient-to-r from-blue-500 to-indigo-500 h-2 rounded-full transition-all duration-300"
-                style={{ width: `${publishProgress}%` }}
-              />
-            </div>
-          </div>
-        )}
-
-        {(publishError || batchError) && (
-          <div className="p-3.5 bg-rose-500/10 border border-rose-500/30 rounded-2xl flex items-start space-x-2.5 text-rose-300 text-xs">
-            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-            <div className="flex-1 space-y-1">
-              <p className="font-semibold">{publishError || batchError}</p>
-              {(publishError?.includes('#200') || batchError?.includes('#200')) && (
-                <p className="text-[11px] text-rose-200/80">
-                  Please click <strong>Re-auth</strong> in Step 1 to reconnect Facebook and ensure your Page is selected in permissions.
-                </p>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Batch Published Posts List */}
-        {batchPublishedPosts.length > 0 && (
-          <div className="p-4 bg-emerald-950/40 border border-emerald-500/40 rounded-2xl space-y-3 shadow-lg">
-            <div className="flex items-center space-x-2 text-emerald-300 text-xs font-bold">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              <span>{batchPublishedPosts.length} Reel(s) Published Successfully!</span>
-            </div>
-
-            <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-              {batchPublishedPosts.map((post, pIdx) => (
-                <div
-                  key={post.videoId || pIdx}
-                  className="p-2.5 bg-slate-900/80 border border-emerald-500/20 rounded-xl flex items-center justify-between gap-2 text-xs"
-                >
-                  <div className="flex items-center space-x-2 min-w-0">
-                    <span className="px-1.5 py-0.5 bg-emerald-500/20 text-emerald-300 rounded font-mono font-bold text-[10px]">
-                      Part {post.partNumber}
-                    </span>
-                    <span className="text-white truncate font-medium">{post.clipName}</span>
-                  </div>
-
-                  <div className="flex items-center space-x-1.5 shrink-0">
-                    {post.postUrl && (
-                      <a
-                        href={post.postUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white font-bold text-[11px] rounded-lg flex items-center space-x-1 transition-colors"
-                      >
-                        <Share2 className="w-3 h-3" />
-                        <span>FB Reel</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                    )}
-                    {post.igPostUrl && (
-                      <a
-                        href={post.igPostUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="px-2.5 py-1 bg-gradient-to-r from-pink-600 to-purple-600 hover:opacity-90 text-white font-bold text-[11px] rounded-lg flex items-center space-x-1 transition-colors"
-                      >
-                        <Instagram className="w-3 h-3" />
-                        <span>IG Reel</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Single Last Published Post Display (if not in batch list) */}
-        {lastPublishedPost && batchPublishedPosts.length === 0 && (
-          <div className="p-4 bg-emerald-950/40 border border-emerald-500/40 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg">
-            <div className="flex items-center space-x-2.5">
-              <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
-                <CheckCircle2 className="w-5 h-5" />
-              </div>
-              <div>
-                <p className="text-xs font-bold text-emerald-300">
-                  {lastPublishedPost.status === 'scheduled' ? 'Reel Scheduled Successfully!' : 'Reel Published Successfully!'}
-                </p>
-                <p className="text-[10px] text-slate-400">
-                  Temporary B2 storage uploaded once &amp; verified by Meta.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center space-x-2 shrink-0">
-              {lastPublishedPost.postUrl && (
-                <a
-                  href={lastPublishedPost.postUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl shadow-md flex items-center justify-center space-x-1.5 transition-all"
-                >
-                  <Share2 className="w-3.5 h-3.5" />
-                  <span>Open on Facebook</span>
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
-              )}
-              {lastPublishedPost.igPostUrl && (
-                <a
-                  href={lastPublishedPost.igPostUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="px-3.5 py-2 bg-gradient-to-r from-pink-600 to-purple-600 hover:opacity-90 text-white font-bold text-xs rounded-xl shadow-md flex items-center justify-center space-x-1.5 transition-all"
-                >
-                  <Instagram className="w-3.5 h-3.5" />
-                  <span>Open on Instagram</span>
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Dual / Single Action Buttons Bar */}
-        {completedClips.length === 0 ? (
-          <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-2xl text-center space-y-2">
-            <p className="text-xs text-slate-300 font-medium">
-              ⚠️ Please export video clips in <strong>Split &amp; Cut</strong> first. Facebook Reels publishing is only enabled for generated clips.
-            </p>
-          </div>
-        ) : (
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-            {/* Dedicated 1-Click Dual Publish Button (When both FB and IG are connected) */}
-            {isPageConnected && isIgAccountConnected && (
-              <button
-                type="button"
-                onClick={() => handlePublishExecution('both')}
-                disabled={isPublishing || isBatchPublishing || activeSelectedClips.length === 0}
-                className="flex-1 py-3.5 px-4 bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:opacity-95 active:scale-98 disabled:opacity-50 text-white font-bold text-xs sm:text-sm rounded-2xl shadow-xl shadow-purple-500/20 flex items-center justify-center space-x-2 transition-all cursor-pointer touch-manipulation"
-              >
-                {isPublishing || isBatchPublishing ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>{activePublishTarget === 'both' ? 'Publishing to Both FB & IG...' : 'Processing...'}</span>
-                  </>
-                ) : (
-                  <>
-                    <Zap className="w-4 h-4 text-amber-300 fill-current" />
-                    <span>
-                      {fbSettings?.fb_schedule_mode === 'schedule'
-                        ? `Schedule Both FB + IG (${activeSelectedClips.length})`
-                        : `Publish to Both FB + IG (${activeSelectedClips.length})`}
-                    </span>
-                  </>
-                )}
-              </button>
-            )}
-
-            {/* Standard Facebook Publish Button */}
-            <button
-              type="button"
-              onClick={() => handlePublishExecution('facebook')}
-              disabled={!isConnected || isPublishing || isBatchPublishing || activeSelectedClips.length === 0}
-              className={`${
-                isPageConnected && isIgAccountConnected ? 'flex-1' : 'w-full'
-              } py-3.5 px-4 bg-gradient-to-r from-[#1877F2] to-indigo-600 hover:from-[#166fe5] hover:to-indigo-500 active:scale-98 disabled:opacity-50 text-white font-bold text-xs sm:text-sm rounded-2xl shadow-xl shadow-blue-500/20 flex items-center justify-center space-x-2 transition-all cursor-pointer touch-manipulation`}
-            >
-              {isPublishing || isBatchPublishing ? (
-                <>
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>
-                    {activeSelectedClips.length > 1
-                      ? `Publishing Part ${batchCurrentIdx || 1} of ${batchTotalCount || activeSelectedClips.length}...`
-                      : 'Publishing to Facebook...'}
-                  </span>
-                </>
-              ) : (
-                <>
-                  <Share2 className="w-4 h-4" />
-                  <span>
-                    {activeSelectedClips.length > 1
-                      ? `Publish ${activeSelectedClips.length} Clips to Facebook`
-                      : fbSettings?.fb_schedule_mode === 'schedule'
-                      ? `Schedule ${fbSettings?.fb_content_type === 'reel' ? 'Reel' : 'Video'}`
-                      : `Publish ${fbSettings?.fb_content_type === 'reel' ? 'Reel' : 'Video'} to Facebook`}
-                  </span>
-                </>
-              )}
-            </button>
-          </div>
-        )}
       </div>
     </div>
   );

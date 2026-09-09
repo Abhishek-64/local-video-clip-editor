@@ -9,22 +9,13 @@
  * - Metadata Templates & Tags
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   Youtube, CheckCircle2, XCircle, Link, Unlink, Settings2,
-  Clock, Calendar, Tag, Eye, Zap, Info, RefreshCw,
-  Sparkles, Lock, Sliders, ChevronDown, Film, Copy, Share2, Video, Instagram
+  Tag, Eye, Zap, Info, RefreshCw,
+  Sparkles, Lock, Film, Copy, Share2, Video, Instagram
 } from 'lucide-react';
 
-import {
-  SCHEDULE_INTERVALS,
-  toDateTimeLocalString,
-  getDefaultScheduleStartTime,
-  calculateBatchScheduleTimes,
-  formatScheduledDateTime,
-  formatRelativeOffset,
-  formatIntervalLabel
-} from '../utils/scheduler';
 import {
   parseTagsInput,
   formatTagsAsHashtagString
@@ -69,93 +60,7 @@ export default function YouTubePanel({
   onSwitchToPlatform
 }) {
   const [tagInput, setTagInput] = useState('');
-  const scheduleMode = ytSettings?.yt_default_upload || 'manual';
 
-  // Start Time state
-  const [localStartTime, setLocalStartTime] = useState(() =>
-    pipelineStartTime || toDateTimeLocalString(getDefaultScheduleStartTime())
-  );
-
-  // Custom Interval State
-  const currentInterval = ytSettings?.schedule_interval || '1hour';
-  const isCustomInterval = currentInterval.startsWith('custom_') || !SCHEDULE_INTERVALS.some(i => i.id === currentInterval);
-
-  const [selectedIntervalOption, setSelectedIntervalOption] = useState(() =>
-    isCustomInterval ? 'custom' : currentInterval
-  );
-
-  const [customValue, setCustomValue] = useState(() => {
-    if (currentInterval.startsWith('custom_')) {
-      const match = currentInterval.match(/^custom_(\d+)/);
-      return match ? parseInt(match[1], 10) : 90;
-    }
-    return 90;
-  });
-
-  const [customUnit, setCustomUnit] = useState(() => {
-    if (currentInterval.startsWith('custom_')) {
-      const match = currentInterval.match(/^custom_\d+([mhd])/);
-      return match ? match[1] : 'm';
-    }
-    return 'm';
-  });
-
-  // Sync Start Time changes
-  const handleStartTimeChange = (val) => {
-    setLocalStartTime(val);
-    if (setPipelineStartTime) {
-      setPipelineStartTime(val);
-    }
-  };
-
-  const applyQuickPreset = (preset) => {
-    const d = new Date();
-    switch (preset) {
-      case 'plus1hour':
-        d.setHours(d.getHours() + 1);
-        break;
-      case 'tonight':
-        d.setHours(20, 0, 0, 0);
-        if (d <= new Date()) d.setDate(d.getDate() + 1);
-        break;
-      case 'tomorrow':
-        d.setDate(d.getDate() + 1);
-        d.setHours(18, 0, 0, 0);
-        break;
-      case 'in2days':
-        d.setDate(d.getDate() + 2);
-        d.setHours(18, 0, 0, 0);
-        break;
-      default:
-        break;
-    }
-    const formatted = toDateTimeLocalString(d);
-    handleStartTimeChange(formatted);
-  };
-
-  // Interval Menu Selection
-  const handleIntervalSelect = (opt) => {
-    setSelectedIntervalOption(opt);
-    if (opt === 'custom') {
-      const customId = `custom_${customValue}${customUnit}`;
-      updateYtSettings({ schedule_interval: customId });
-    } else {
-      updateYtSettings({ schedule_interval: opt });
-    }
-  };
-
-  const handleCustomValueChange = (val) => {
-    const num = Math.max(1, parseInt(val) || 1);
-    setCustomValue(num);
-    const customId = `custom_${num}${customUnit}`;
-    updateYtSettings({ schedule_interval: customId });
-  };
-
-  const handleCustomUnitChange = (unit) => {
-    setCustomUnit(unit);
-    const customId = `custom_${customValue}${unit}`;
-    updateYtSettings({ schedule_interval: customId });
-  };
 
 
   const addTag = () => {
@@ -379,176 +284,7 @@ export default function YouTubePanel({
             </div>
           </div>
 
-          {/* ── 2. AUTOMATED SCHEDULE PIPELINE ───────────────────── */}
-          <div className="space-y-3.5 bg-slate-950/80 border border-purple-500/30 rounded-2xl p-4 shadow-lg">
-            <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-800">
-              <div className="flex items-center space-x-2">
-                <Calendar className="w-4 h-4 text-purple-400" />
-                <span className="text-xs font-bold text-white tracking-wide">
-                  Automated Schedule Pipeline
-                </span>
-              </div>
 
-              {/* Upload Mode Selector */}
-              <div className="flex items-center space-x-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => updateYtSettings({ yt_default_upload: 'auto' })}
-                  className={`px-2.5 py-1 text-[11px] rounded-lg font-bold transition-all cursor-pointer touch-manipulation ${
-                    scheduleMode === 'auto'
-                      ? 'bg-purple-600 text-white shadow-sm'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  ⚡ Auto-Schedule
-                </button>
-                <button
-                  type="button"
-                  onClick={() => updateYtSettings({ yt_default_upload: 'manual' })}
-                  className={`px-2.5 py-1 text-[11px] rounded-lg font-medium transition-all cursor-pointer touch-manipulation ${
-                    scheduleMode === 'manual'
-                      ? 'bg-slate-800 text-slate-200 shadow-sm'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  Manual Upload
-                </button>
-              </div>
-            </div>
-
-            {scheduleMode === 'auto' && (
-              <div className="space-y-3.5 animate-fadeIn">
-                {/* Field 1: Starting Schedule Date & Time ("From the starting") */}
-                <div className="space-y-1.5">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <label className="text-[11px] font-bold text-slate-300 flex items-center space-x-1.5">
-                      <Clock className="w-3.5 h-3.5 text-purple-400" />
-                      <span>Starting Schedule Date &amp; Time (First Part Publish Time):</span>
-                    </label>
-
-                    {/* Quick Starting Presets */}
-                    <div className="flex items-center space-x-1 flex-wrap gap-1">
-                      {[
-                        { id: 'plus1hour', label: '+1 Hour' },
-                        { id: 'tonight', label: 'Tonight 8 PM' },
-                        { id: 'tomorrow', label: 'Tomorrow 6 PM' },
-                        { id: 'in2days', label: 'In 2 Days' }
-                      ].map((p) => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          onClick={() => applyQuickPreset(p.id)}
-                          className="px-2 py-0.5 text-[10px] bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 rounded-lg transition-colors cursor-pointer touch-manipulation"
-                        >
-                          {p.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <input
-                    type="datetime-local"
-                    value={localStartTime}
-                    onChange={(e) => handleStartTimeChange(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 text-white text-xs font-mono px-3 py-2 rounded-xl focus:border-purple-500 focus:outline-none shadow-inner"
-                  />
-                </div>
-
-                {/* Field 2: Interval Menu (All options + Custom interval) */}
-                <div className="space-y-2">
-                  <label className="text-[11px] font-bold text-slate-300 flex items-center justify-between">
-                    <span className="flex items-center space-x-1.5">
-                      <Sliders className="w-3.5 h-3.5 text-purple-400" />
-                      <span>Interval Between Consecutive Clips:</span>
-                    </span>
-                    <span className="text-[10px] text-purple-300 font-mono font-bold bg-purple-500/15 border border-purple-500/30 px-2 py-0.5 rounded-full">
-                      {formatIntervalLabel(ytSettings?.schedule_interval)}
-                    </span>
-                  </label>
-
-                  {/* Interval Menu Dropdown */}
-                  <select
-                    value={selectedIntervalOption}
-                    onChange={(e) => handleIntervalSelect(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 text-xs text-white rounded-xl px-3 py-2.5 focus:border-purple-500 focus:outline-none font-medium cursor-pointer"
-                  >
-                    {SCHEDULE_INTERVALS.map((int) => (
-                      <option key={int.id} value={int.id}>
-                        {int.label}
-                      </option>
-                    ))}
-                    <option value="custom">⚙️ Custom Interval (Specify duration &amp; unit)...</option>
-                  </select>
-
-                  {/* Custom Interval Configurator */}
-                  {selectedIntervalOption === 'custom' && (
-                    <div className="bg-slate-900/90 border border-purple-500/40 rounded-xl p-3 flex items-center space-x-2 animate-fadeIn">
-                      <span className="text-xs text-slate-300 shrink-0 font-medium">Every:</span>
-                      <input
-                        type="number"
-                        min="1"
-                        max="999"
-                        value={customValue}
-                        onChange={(e) => handleCustomValueChange(e.target.value)}
-                        className="w-20 bg-slate-950 border border-purple-500/50 text-white font-mono font-bold text-xs text-center px-2 py-1.5 rounded-lg focus:outline-none focus:border-purple-400"
-                      />
-                      <select
-                        value={customUnit}
-                        onChange={(e) => handleCustomUnitChange(e.target.value)}
-                        className="bg-slate-950 border border-slate-700 text-white text-xs px-2.5 py-1.5 rounded-lg focus:outline-none focus:border-purple-500 cursor-pointer"
-                      >
-                        <option value="m">Minutes</option>
-                        <option value="h">Hours</option>
-                        <option value="d">Days</option>
-                      </select>
-                      <span className="text-[11px] text-purple-300 font-mono pl-1">
-                        (= {customValue} {customUnit === 'm' ? 'minutes' : customUnit === 'h' ? 'hours' : 'days'} spacing)
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Live Preview Timeline */}
-                <div className="space-y-1.5 pt-1">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                    Calculated Publish Schedule Preview:
-                  </span>
-                  <div className="flex items-center space-x-2 overflow-x-auto pb-1 text-xs font-mono scrollbar-thin">
-                    {calculateBatchScheduleTimes(localStartTime, ytSettings?.schedule_interval || '1hour', 4).map((time, idx) => (
-                      <div
-                        key={idx}
-                        className="bg-slate-900 border border-purple-500/30 rounded-xl px-3 py-1.5 shrink-0 flex items-center space-x-2 shadow-sm"
-                      >
-                        <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 text-[10px] font-bold">
-                          Part {(ytSettings?.yt_start_part || 1) + idx}
-                        </span>
-                        <span className="text-white text-[11px] font-bold">
-                          {formatScheduledDateTime(time)}
-                        </span>
-                        {idx > 0 && (
-                          <span className="text-[10px] text-purple-400 bg-purple-950/80 px-1.5 py-0.5 rounded font-mono">
-                            {formatRelativeOffset(idx, ytSettings?.schedule_interval || '1hour')}
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {scheduleMode === 'manual' && (
-              <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 space-y-1.5 animate-fadeIn">
-                <div className="flex items-center space-x-2 text-amber-400">
-                  <Info className="w-4 h-4 shrink-0" />
-                  <span className="text-xs font-bold">Manual Upload Mode Active</span>
-                </div>
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Exported clips will <strong className="text-slate-300">not</strong> be automatically queued or scheduled for upload. You can download clips, preview them, or manually upload/schedule them with custom titles and release dates from the <strong className="text-slate-300">Generated Clips</strong> panel.
-                </p>
-              </div>
-            )}
-          </div>
 
           {/* ── 3. SHORTS PRESET ─────────────────────────────────── */}
           <div className="bg-gradient-to-r from-red-500/10 via-orange-500/5 to-slate-900 border border-red-500/25 rounded-xl p-3 flex items-center justify-between gap-2">

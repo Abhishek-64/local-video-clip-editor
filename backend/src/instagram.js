@@ -11,7 +11,15 @@
  * - Smart Backoff Container Status Polling and Reel Media Publishing
  */
 
-import { signOAuthState } from './crypto.js';
+import { signOAuthState, decryptToken } from './crypto.js';
+import { b2GetDownloadUrl, b2DeleteFile } from './b2.js';
+import {
+  updateInstagramUploadJob,
+  claimDueInstagramJob,
+  getDueInstagramJobs,
+  getProcessingInstagramJobs,
+  isB2FileNeededByOtherJobs
+} from './db.js';
 
 const GRAPH_BASE = 'https://graph.facebook.com';
 
@@ -372,19 +380,12 @@ export async function verifyInstagramPublishCapability(env, accessToken, igUserI
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
- * Publish an Instagram Reel via Meta Graph API Container Ingestion Workflow
- *
- * 4-Phase Flow:
- * Phase 1: POST /{ig_user_id}/media -> returns container_id
- * Phase 2: Smart Backoff Poll /{container_id} until status_code === 'FINISHED'
- * Phase 3: POST /{ig_user_id}/media_publish -> returns media_id
- * Phase 4: GET /{media_id}?fields=permalink -> returns permalink
+ * Phase 1: Create Instagram Reel Media Container on Meta
  */
-export async function publishInstagramReel(env, accessToken, igUserId, {
+export async function createInstagramReelContainer(env, accessToken, igUserId, {
   b2DownloadUrl,
   caption = '',
-  shareToFeed = true,
-  scheduledAt = null
+  shareToFeed = true
 }) {
   const version = getGraphVersion(env);
   const cleanIgUserId = String(igUserId || '').trim();
@@ -397,7 +398,6 @@ export async function publishInstagramReel(env, accessToken, igUserId, {
     throw new Error('Video download URL is required for Instagram ingestion.');
   }
 
-  // ── Phase 1: Create Instagram Reel Media Container ──
   const containerUrl = `${GRAPH_BASE}/${version}/${cleanIgUserId}/media`;
   const containerPayload = {
     media_type: 'REELS',
@@ -406,12 +406,6 @@ export async function publishInstagramReel(env, accessToken, igUserId, {
     share_to_feed: shareToFeed !== false,
     access_token: accessToken
   };
-
-  // If scheduling, Meta requires scheduled_publish_time at container creation (UNIX epoch seconds)
-  if (scheduledAt) {
-    const scheduledEpoch = Math.floor(new Date(scheduledAt).getTime() / 1000);
-    containerPayload.scheduled_publish_time = scheduledEpoch;
-  }
 
   console.log('[IG Publish] Step 1: Creating Reel container for igUserId:', cleanIgUserId);
   const containerRes = await fetch(containerUrl, {
@@ -432,6 +426,8 @@ export async function publishInstagramReel(env, accessToken, igUserId, {
 
       if (code === 200 || code === 10) {
         friendlyMessage = `Instagram Permission Error (Code ${code}): The connected account does not have permission to publish Reels. Ensure 'instagram_content_publish' is granted and account is a Professional Creator/Business account.`;
+      } else if (code === 3) {
+        friendlyMessage = `Meta Whitelist Error (Code 3): Your Meta App is in Development Mode and this Instagram account is not whitelisted. In Meta for Developers, go to App Roles > Roles > Add Instagram Tester, then accept the invite in Instagram Settings > Apps and Websites. Alternatively, switch your Meta App to Live Mode.`;
       } else if (message) {
         friendlyMessage = `Meta API Error (${code}${subcode ? `:${subcode}` : ''}): ${message}${traceId ? ` [trace: ${traceId}]` : ''}`;
       }
@@ -446,50 +442,42 @@ export async function publishInstagramReel(env, accessToken, igUserId, {
     throw new Error('Meta did not return a valid Instagram container_id.');
   }
 
-  console.log('[IG Publish] Step 1 ✓ Container created:', containerId, 'Now polling status with smart backoff...');
+  return containerId;
+}
 
-  // ── Phase 2: Poll Container Status until Meta Finishes Ingestion & Encoding ──
-  let isFinished = false;
-  const maxAttempts = 30;
-  let attempt = 0;
-  let delayMs = 2500;
+/**
+ * Phase 2: Check Instagram Reel Container Processing Status
+ */
+export async function checkInstagramContainerStatus(env, accessToken, containerId) {
+  const version = getGraphVersion(env);
+  const statusUrl = `${GRAPH_BASE}/${version}/${containerId}?fields=status_code,status&access_token=${accessToken}`;
+  const statusRes = await fetch(statusUrl);
 
-  while (!isFinished && attempt < maxAttempts) {
-    attempt++;
-    await sleep(delayMs);
-    // Gradually back off polling interval (2.5s -> 3.5s -> 4.5s max)
-    delayMs = Math.min(4500, delayMs + 300);
-
-    const statusUrl = `${GRAPH_BASE}/${version}/${containerId}?fields=status_code,status&access_token=${accessToken}`;
-    const statusRes = await fetch(statusUrl);
-
-    if (statusRes.ok) {
-      const statusData = await statusRes.json();
-      const statusCode = statusData.status_code;
-      console.log(`[IG Publish] Polling attempt ${attempt}/${maxAttempts} - status:`, statusCode);
-
-      if (statusCode === 'FINISHED') {
-        isFinished = true;
-        break;
-      } else if (statusCode === 'ERROR') {
-        const errMsg = statusData.status || 'Meta video transcoding encountered an error.';
-        throw new Error(`Instagram video processing failed: ${errMsg}`);
-      } else if (statusCode === 'EXPIRED') {
-        throw new Error('Instagram media container expired before publishing completed. Please try again.');
-      }
-    } else {
-      console.warn('[IG Publish] Status poll warning:', await statusRes.text());
-    }
+  if (!statusRes.ok) {
+    const errText = await statusRes.text();
+    return { isFinished: false, isError: false, isExpired: false, error: errText, statusCode: 'UNKNOWN' };
   }
 
-  if (!isFinished) {
-    throw new Error('Instagram video processing timed out while waiting for Meta to encode the video stream.');
-  }
+  const statusData = await statusRes.json();
+  const statusCode = statusData.status_code;
 
-  console.log('[IG Publish] Step 2 ✓ Container processing FINISHED. Step 3: Publishing media container...');
+  return {
+    statusCode,
+    statusText: statusData.status,
+    isFinished: statusCode === 'FINISHED',
+    isError: statusCode === 'ERROR',
+    isExpired: statusCode === 'EXPIRED'
+  };
+}
 
-  // ── Phase 3: Publish Container ──
+/**
+ * Phase 3 & 4: Publish Media Container & Retrieve Permalink
+ */
+export async function publishInstagramMediaContainer(env, accessToken, igUserId, containerId) {
+  const version = getGraphVersion(env);
+  const cleanIgUserId = String(igUserId || '').trim();
   const publishUrl = `${GRAPH_BASE}/${version}/${cleanIgUserId}/media_publish`;
+
   const publishRes = await fetch(publishUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -512,9 +500,6 @@ export async function publishInstagramReel(env, accessToken, igUserId, {
   const publishData = await publishRes.json();
   const mediaId = publishData.id;
 
-  console.log('[IG Publish] Step 3 ✓ Media published with ID:', mediaId);
-
-  // ── Phase 4: Retrieve Permalink ──
   let permalink = `https://www.instagram.com/reel/`;
   try {
     const mediaInfoUrl = `${GRAPH_BASE}/${version}/${mediaId}?fields=id,permalink,shortcode&access_token=${accessToken}`;
@@ -525,16 +510,265 @@ export async function publishInstagramReel(env, accessToken, igUserId, {
         permalink = mediaInfoData.permalink;
       }
     }
-  } catch (e) {
-    console.warn('[IG Publish] Failed to fetch permalink, using default:', e.message);
+  } catch (e) {}
+
+  return {
+    mediaId,
+    postUrl: permalink,
+    publishData
+  };
+}
+
+/**
+ * Publish an Instagram Reel (Single call, polls with short bounded timeout)
+ */
+export async function publishInstagramReel(env, accessToken, igUserId, {
+  b2DownloadUrl,
+  caption = '',
+  shareToFeed = true,
+  scheduledAt = null
+}) {
+  const containerId = await createInstagramReelContainer(env, accessToken, igUserId, {
+    b2DownloadUrl,
+    caption,
+    shareToFeed
+  });
+
+  console.log('[IG Publish] Step 1 ✓ Container created:', containerId, 'Now polling status...');
+
+  let isFinished = false;
+  const maxAttempts = 15; // Max ~35 seconds polling for immediate publish
+  let attempt = 0;
+  let delayMs = 2000;
+
+  while (!isFinished && attempt < maxAttempts) {
+    attempt++;
+    await sleep(delayMs);
+    delayMs = Math.min(3500, delayMs + 300);
+
+    const statusInfo = await checkInstagramContainerStatus(env, accessToken, containerId);
+    console.log(`[IG Publish] Polling attempt ${attempt}/${maxAttempts} - status:`, statusInfo.statusCode);
+
+    if (statusInfo.isFinished) {
+      isFinished = true;
+      break;
+    } else if (statusInfo.isError) {
+      throw new Error(`Instagram video processing failed: ${statusInfo.statusText || 'Meta transcoding error'}`);
+    } else if (statusInfo.isExpired) {
+      throw new Error('Instagram media container expired before publishing completed. Please try again.');
+    }
   }
+
+  if (!isFinished) {
+    throw new Error('Instagram video processing timed out while waiting for Meta to encode the video stream.');
+  }
+
+  console.log('[IG Publish] Step 2 ✓ Container FINISHED. Step 3: Publishing media container...');
+  const pub = await publishInstagramMediaContainer(env, accessToken, igUserId, containerId);
 
   return {
     success: true,
-    mediaId,
+    mediaId: pub.mediaId,
     containerId,
-    postUrl: permalink,
+    postUrl: pub.postUrl,
     status: scheduledAt ? 'scheduled' : 'published',
-    publishData
+    publishData: pub.publishData
   };
+}
+
+/**
+ * Processes due scheduled Instagram upload jobs from the D1 database.
+ * Invoked by Cloudflare Worker cron trigger (* * * * *) or manual maintenance API.
+ */
+export async function processScheduledInstagramJobs(env) {
+  if (!env.DB) return { processed: 0, errors: [] };
+
+  const secretKey = env.ENCRYPTION_KEY || env.FACEBOOK_APP_SECRET || '7a279df54155e4f8f70991df0a4e9c9c';
+  const errors = [];
+  let processed = 0;
+  const nowIso = new Date().toISOString();
+
+  // ── Phase 1: Check existing processing containers from previous cron ticks ──
+  try {
+    const processingJobs = await getProcessingInstagramJobs(env.DB, 10);
+    for (const job of processingJobs) {
+      console.log(`[SCHEDULER] jobId=${job.id} platform=instagram checkingProcessingContainer=${job.instagram_container_id}`);
+      try {
+        const activeToken = await decryptToken(job.access_token, secretKey);
+        if (!activeToken) throw new Error('Could not decrypt Instagram access token.');
+
+        const statusInfo = await checkInstagramContainerStatus(env, activeToken, job.instagram_container_id);
+        console.log(`[SCHEDULER] jobId=${job.id} platform=instagram containerStatus=${statusInfo.statusCode}`);
+
+        if (statusInfo.isFinished) {
+          const pub = await publishInstagramMediaContainer(env, activeToken, job.ig_user_id, job.instagram_container_id);
+
+          await updateInstagramUploadJob(env.DB, job.id, {
+            status: 'published',
+            instagram_media_id: pub.mediaId,
+            instagram_post_url: pub.postUrl,
+            published_at: new Date().toISOString()
+          });
+
+          // Check B2 lifecycle
+          if (job.b2_file_name) {
+            const needed = await isB2FileNeededByOtherJobs(env.DB, job.b2_file_name, job.id);
+            if (!needed && job.b2_file_id) {
+              try {
+                await b2DeleteFile(env, job.b2_file_id, job.b2_file_name);
+                console.log(`[IG Scheduler] Cleaned up temporary B2 file: ${job.b2_file_name}`);
+              } catch (delErr) {
+                console.warn('[IG Scheduler] B2 cleanup warning:', delErr.message);
+              }
+            } else {
+              console.log(`[IG Scheduler] Retaining B2 file ${job.b2_file_name} for other dependent jobs.`);
+            }
+          }
+
+          processed++;
+          console.log(`[SCHEDULER] jobId=${job.id} platform=instagram publishEnd=${new Date().toISOString()} mediaId=${pub.mediaId}`);
+        } else if (statusInfo.isError || statusInfo.isExpired) {
+          const errMsg = statusInfo.statusText || (statusInfo.isExpired ? 'Media container expired.' : 'Video encoding failed on Meta.');
+          await updateInstagramUploadJob(env.DB, job.id, {
+            status: 'failed',
+            error_message: errMsg
+          });
+
+          if (job.b2_file_name) {
+            const needed = await isB2FileNeededByOtherJobs(env.DB, job.b2_file_name, job.id);
+            if (!needed && job.b2_file_id) {
+              try {
+                await b2DeleteFile(env, job.b2_file_id, job.b2_file_name);
+              } catch {}
+            }
+          }
+        }
+      } catch (procErr) {
+        console.error(`[SCHEDULER] jobId=${job.id} platform=instagram processingCheckError="${procErr.message}"`);
+      }
+    }
+  } catch (err) {
+    console.error('[IG Scheduler] Error checking in-progress containers:', err.message);
+  }
+
+  // ── Phase 2: Query newly due scheduled Instagram jobs ──
+  try {
+    const dueJobs = await getDueInstagramJobs(env.DB, 10);
+    if (dueJobs.length === 0) {
+      return { processed, errors };
+    }
+
+    console.log(`[IG Scheduler] Found ${dueJobs.length} due scheduled Instagram job(s) at ${nowIso}. Processing...`);
+
+    for (const job of dueJobs) {
+      console.log(`[SCHEDULER] jobId=${job.id} platform=instagram userId=${job.user_id} scheduledAtUtc=${job.scheduled_at} currentTimeUtc=${nowIso} due=true`);
+
+      // 1. Atomic claim: ensure only this worker execution processes the job
+      const claimed = await claimDueInstagramJob(env.DB, job.id);
+      if (!claimed) {
+        console.log(`[SCHEDULER] jobId=${job.id} platform=instagram claimResult=already_claimed`);
+        continue;
+      }
+
+      console.log(`[SCHEDULER] jobId=${job.id} platform=instagram claimResult=success statusBefore=scheduled statusAfter=uploading`);
+
+      try {
+        const activeToken = await decryptToken(job.access_token, secretKey);
+        if (!activeToken) throw new Error('Could not decrypt Instagram access token.');
+        if (!job.b2_file_name) throw new Error('Missing B2 file name for scheduled Instagram job.');
+
+        const b2DownloadUrl = await b2GetDownloadUrl(env, job.b2_file_name, 3600);
+
+        let hashtagsArr = [];
+        try {
+          hashtagsArr = JSON.parse(job.hashtags || '[]');
+        } catch {}
+
+        const hashtagsStr = Array.isArray(hashtagsArr) && hashtagsArr.length > 0
+          ? hashtagsArr.map(t => `#${t.replace(/^#+/, '')}`).join(' ')
+          : '';
+        const fullCaption = `${job.caption ? job.caption.trim() : ''}${hashtagsStr ? (job.caption ? '\n\n' : '') + hashtagsStr : ''}`;
+
+        const publishStart = new Date().toISOString();
+        console.log(`[SCHEDULER] jobId=${job.id} platform=instagram publishStart=${publishStart}`);
+
+        // Phase 1: Create Container
+        const containerId = await createInstagramReelContainer(env, activeToken, job.ig_user_id, {
+          b2DownloadUrl,
+          caption: fullCaption,
+          shareToFeed: true
+        });
+
+        // Save container ID and set status to processing
+        await updateInstagramUploadJob(env.DB, job.id, {
+          status: 'processing',
+          instagram_container_id: containerId
+        });
+
+        // Quick check (up to 2 attempts, ~5 seconds total) in case short video is already ready
+        let quickFinished = false;
+        for (let i = 0; i < 2; i++) {
+          await sleep(2500);
+          const st = await checkInstagramContainerStatus(env, activeToken, containerId);
+          if (st.isFinished) {
+            quickFinished = true;
+            break;
+          }
+        }
+
+        if (quickFinished) {
+          const pub = await publishInstagramMediaContainer(env, activeToken, job.ig_user_id, containerId);
+
+          await updateInstagramUploadJob(env.DB, job.id, {
+            status: 'published',
+            instagram_media_id: pub.mediaId,
+            instagram_post_url: pub.postUrl,
+            published_at: new Date().toISOString()
+          });
+
+          // Check B2 lifecycle
+          if (job.b2_file_name) {
+            const needed = await isB2FileNeededByOtherJobs(env.DB, job.b2_file_name, job.id);
+            if (!needed && job.b2_file_id) {
+              try {
+                await b2DeleteFile(env, job.b2_file_id, job.b2_file_name);
+                console.log(`[IG Scheduler] Cleaned up temporary B2 file: ${job.b2_file_name}`);
+              } catch (delErr) {
+                console.warn('[IG Scheduler] B2 cleanup warning:', delErr.message);
+              }
+            } else {
+              console.log(`[IG Scheduler] Retaining B2 file ${job.b2_file_name} for other dependent jobs.`);
+            }
+          }
+
+          processed++;
+          console.log(`[SCHEDULER] jobId=${job.id} platform=instagram publishEnd=${new Date().toISOString()} mediaId=${pub.mediaId}`);
+        } else {
+          console.log(`[SCHEDULER] jobId=${job.id} platform=instagram container queued for background encoding (containerId=${containerId}). Will check on next cron tick.`);
+        }
+      } catch (err) {
+        console.error(`[SCHEDULER] jobId=${job.id} platform=instagram error="${err.message}"`);
+        errors.push({ jobId: job.id, error: err.message });
+
+        await updateInstagramUploadJob(env.DB, job.id, {
+          status: 'failed',
+          error_message: err.message
+        });
+
+        if (job.b2_file_name) {
+          const needed = await isB2FileNeededByOtherJobs(env.DB, job.b2_file_name, job.id);
+          if (!needed && job.b2_file_id) {
+            try {
+              await b2DeleteFile(env, job.b2_file_id, job.b2_file_name);
+            } catch {}
+          }
+        }
+      }
+    }
+
+    return { processed, errors };
+  } catch (err) {
+    console.error('[IG Scheduler] Fatal error executing scheduled jobs query:', err);
+    return { processed: 0, errors: [err.message] };
+  }
 }

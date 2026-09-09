@@ -145,13 +145,7 @@ export default function StoragePanel({
               <h2 className="text-sm sm:text-base font-bold text-white tracking-tight">
                 Database &amp; Storage
               </h2>
-              <span className="text-[10px] font-mono px-2 py-0.5 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-full font-semibold shrink-0">
-                Live D1 &amp; B2
-              </span>
             </div>
-            <p className="text-xs text-slate-400 mt-0.5 leading-normal">
-              Monitor B2 temp storage, D1 records, and account data.
-            </p>
           </div>
         </div>
 
@@ -415,9 +409,6 @@ export default function StoragePanel({
             <h3 className="text-sm font-bold text-white tracking-tight">
               Danger Zone: Wipe All Data
             </h3>
-            <p className="text-xs text-slate-300 mt-1 leading-normal">
-              Permanently delete all database records, tokens, history, and B2 temp files.
-            </p>
           </div>
         </div>
 

@@ -197,6 +197,74 @@ export async function getUploadHistory() {
 }
 
 /**
+ * Get unified upload history across YouTube, Facebook, and Instagram from D1.
+ */
+export async function getAllUploadHistory() {
+  return apiFetch('/api/history/all');
+}
+
+/**
+ * Clear upload history for a specific platform or all platforms without revoking account credentials.
+ * @param {'youtube' | 'facebook' | 'instagram' | 'all'} platform
+ */
+export async function clearPlatformHistory(platform = 'all') {
+  return apiFetch('/api/history/clear', {
+    method: 'POST',
+    body: JSON.stringify({ platform })
+  });
+}
+
+/**
+ * SECTION 1: Get active scheduled publishing jobs for Facebook & Instagram.
+ */
+export async function getSocialScheduledJobs() {
+  return apiFetch('/api/social/scheduled');
+}
+
+/**
+ * SECTION 2: Get completed publishing history (published, failed, cancelled) with filters.
+ */
+export async function getSocialUploadHistory({ platform = 'all', status = 'all', limit = 100 } = {}) {
+  const query = new URLSearchParams();
+  if (platform && platform !== 'all') query.set('platform', platform);
+  if (status && status !== 'all') query.set('status', status);
+  if (limit) query.set('limit', String(limit));
+  const qs = query.toString() ? `?${query.toString()}` : '';
+  return apiFetch(`/api/social/history${qs}`);
+}
+
+/**
+ * SECTION 1: Generate safe temporary signed B2 preview URL for a scheduled video.
+ */
+export async function getSocialPreviewUrl({ platform, jobId, fileName }) {
+  const query = new URLSearchParams();
+  if (platform) query.set('platform', platform);
+  if (jobId) query.set('jobId', jobId);
+  if (fileName) query.set('fileName', fileName);
+  return apiFetch(`/api/social/preview-url?${query.toString()}`);
+}
+
+/**
+ * SECTION 1: Cancel an active scheduled publishing job.
+ */
+export async function cancelSocialScheduledJob(platform, jobId) {
+  return apiFetch('/api/social/cancel', {
+    method: 'POST',
+    body: JSON.stringify({ platform, jobId })
+  });
+}
+
+/**
+ * SECTION 3: Safely clear completed/failed/cancelled upload history.
+ */
+export async function clearSocialUploadHistory(platform = 'all') {
+  return apiFetch('/api/social/history/clear', {
+    method: 'POST',
+    body: JSON.stringify({ platform })
+  });
+}
+
+/**
  * Create an upload job in D1 and get a YouTube resumable upload URL.
  * The browser then uploads the video blob directly to the returned uploadUrl.
  *
@@ -347,16 +415,26 @@ export async function triggerAdminCleanup() {
  * Fetch all saved templates for the current user.
  */
 export async function getTemplates() {
-  const res = await apiFetch('/api/templates');
-  return res?.templates || [];
+  try {
+    const res = await apiFetch('/api/templates');
+    return res?.templates || [];
+  } catch (err) {
+    console.warn('getTemplates failed (using local fallback):', err?.message || err);
+    return [];
+  }
 }
 
 /**
  * Fetch a single saved template by ID.
  */
 export async function getTemplate(id) {
-  const res = await apiFetch(`/api/templates/${id}`);
-  return res?.template || null;
+  try {
+    const res = await apiFetch(`/api/templates/${id}`);
+    return res?.template || null;
+  } catch (err) {
+    console.warn(`getTemplate(${id}) failed:`, err?.message || err);
+    return null;
+  }
 }
 
 /**

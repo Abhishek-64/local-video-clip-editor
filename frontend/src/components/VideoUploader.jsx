@@ -134,8 +134,9 @@ export default function VideoUploader({ onVideoSelect, currentVideo }) {
           <div className="flex items-center justify-center">
             <button
               type="button"
+              id="select-local-video-btn"
               onClick={() => fileInputRef.current?.click()}
-              className="inline-flex items-center space-x-2 px-5 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-medium rounded-xl text-xs sm:text-sm shadow-lg shadow-orange-500/20 transition-all touch-manipulation cursor-pointer active:scale-95"
+              className="inline-flex items-center space-x-2 px-6 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-medium rounded-xl text-xs sm:text-sm shadow-lg shadow-orange-500/20 transition-all touch-manipulation cursor-pointer active:scale-95"
             >
               <FileVideo className="w-4 h-4" />
               <span>{isAnalyzing ? 'Analyzing Video...' : 'Select Local Video'}</span>

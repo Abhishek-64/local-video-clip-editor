@@ -518,184 +518,186 @@ export default function Timeline({
         </div>
       </div>
 
-      {/* ── 2. Visual Scrubber Timeline Track with Direct Drag Handles ── */}
-      <div className="relative pt-3 sm:pt-4 pb-1">
-        {/* Main Track Background with Audio/Waveform Style Lines */}
-        <div
-          ref={trackRef}
-          className="relative h-14 sm:h-16 bg-slate-950 rounded-xl overflow-hidden border border-slate-800 cursor-pointer select-none shadow-inner"
-          onClick={(e) => {
-            if (!duration || !onCurrentTimeChange || dragState?.isDragging) return;
-            const rect = e.currentTarget.getBoundingClientRect();
-            const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-            const rawTime = pos * duration;
-            onCurrentTimeChange(applyMagneticSnap(rawTime));
-          }}
-        >
-          {/* Active Global Range Highlight */}
+      {/* ── 2. The Main Interactive Multi-Segment Range Scrubber Track ── */}
+      <div className="relative bg-slate-950 rounded-xl p-2.5 sm:p-3 border border-slate-800 space-y-2">
+        {/* Horizontally Scrollable Track Wrapper on Mobile Screens (< sm) */}
+        <div className="overflow-x-auto no-scrollbar touch-pan-x pb-1 -mx-0.5 px-0.5">
           <div
-            className="absolute top-0 bottom-0 bg-slate-900/60 border-y border-amber-500/30 transition-all pointer-events-none"
-            style={{
-              left: `${startPercent}%`,
-              width: `${Math.max(0, endPercent - startPercent)}%`
+            ref={trackRef}
+            className="relative h-14 sm:h-16 min-w-[540px] sm:min-w-0 w-full bg-slate-950 rounded-xl overflow-hidden border border-slate-800 cursor-pointer select-none shadow-inner"
+            onClick={(e) => {
+              if (!duration || !onCurrentTimeChange || dragState?.isDragging) return;
+              const rect = e.currentTarget.getBoundingClientRect();
+              const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+              const rawTime = pos * duration;
+              onCurrentTimeChange(applyMagneticSnap(rawTime));
             }}
-          />
+          >
+            {/* Active Global Range Highlight */}
+            <div
+              className="absolute top-0 bottom-0 bg-slate-900/60 border-y border-amber-500/30 transition-all pointer-events-none"
+              style={{
+                left: `${startPercent}%`,
+                width: `${Math.max(0, endPercent - startPercent)}%`
+              }}
+            />
 
-          {/* Individual Part Markers & Visual Segments */}
-          {duration > 0 && displayPartsList.length > 0 && (
-            <div className="absolute inset-0 pointer-events-none">
-              {displayPartsList.map((part, idx) => {
-                const segLeftPct = (part.startTime / duration) * 100;
-                const segWidthPct = ((part.endTime - part.startTime) / duration) * 100;
-                const isSelected = activePreviewPartId === part.id;
-                const isCut = Boolean(part.isDeleted);
+            {/* Individual Part Markers & Visual Segments */}
+            {duration > 0 && displayPartsList.length > 0 && (
+              <div className="absolute inset-0 pointer-events-none">
+                {displayPartsList.map((part, idx) => {
+                  const segLeftPct = (part.startTime / duration) * 100;
+                  const segWidthPct = ((part.endTime - part.startTime) / duration) * 100;
+                  const isSelected = activePreviewPartId === part.id;
+                  const isCut = Boolean(part.isDeleted);
+
+                  return (
+                    <div
+                      key={part.id || idx}
+                      className={`absolute top-0 bottom-0 border-r flex flex-col justify-between p-1 transition-all ${
+                        isCut
+                          ? 'bg-[repeating-linear-gradient(45deg,rgba(225,29,72,0.15),rgba(225,29,72,0.15)_8px,rgba(15,23,42,0.8)_8px,rgba(15,23,42,0.8)_16px)] border-r-2 border-r-rose-500/70 border-dashed border-rose-500/50'
+                          : isSelected
+                          ? 'bg-amber-500/25 border-r-2 border-r-amber-400 border-dashed shadow-[inset_0_0_12px_rgba(245,158,11,0.2)]'
+                          : idx % 2 === 0
+                          ? 'bg-orange-500/15 border-r border-dashed border-amber-400/50'
+                          : 'bg-indigo-500/15 border-r border-dashed border-amber-400/50'
+                      }`}
+                      style={{ left: `${segLeftPct}%`, width: `${Math.max(1, segWidthPct)}%` }}
+                    >
+                      <div className="flex items-center justify-between gap-1">
+                        <span
+                          className={`text-[8px] sm:text-[9px] font-mono font-bold px-1 rounded truncate border ${
+                            isCut
+                              ? 'bg-rose-950/90 text-rose-300 border-rose-500/50 line-through'
+                              : 'bg-black/80 text-amber-200 border-amber-500/30'
+                          }`}
+                        >
+                          {isCut ? '✂️ CUT' : `Part ${part.partNumber || idx + 1}`}
+                        </span>
+                      </div>
+
+                      <span
+                        className={`text-[8px] font-mono px-1 rounded truncate self-start border ${
+                          isCut
+                            ? 'text-rose-400/80 bg-rose-950/90 border-rose-900/60 line-through'
+                            : 'text-slate-300 bg-slate-950/80 border-slate-800'
+                        }`}
+                      >
+                        {formatTime(part.duration || (part.endTime - part.startTime) || 0)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Interactive Split Boundary Handles (Drag & Drop boundary between parts) */}
+            {duration > 0 &&
+              displayPartsList.slice(0, -1).map((part, idx) => {
+                const boundaryPct = (part.endTime / duration) * 100;
+                const isDraggingThis = dragState?.type === 'split-boundary' && dragState?.index === idx;
 
                 return (
                   <div
-                    key={part.id || idx}
-                    className={`absolute top-0 bottom-0 border-r flex flex-col justify-between p-1 transition-all ${
-                      isCut
-                        ? 'bg-[repeating-linear-gradient(45deg,rgba(225,29,72,0.15),rgba(225,29,72,0.15)_8px,rgba(15,23,42,0.8)_8px,rgba(15,23,42,0.8)_16px)] border-r-2 border-r-rose-500/70 border-dashed border-rose-500/50'
-                        : isSelected
-                        ? 'bg-amber-500/25 border-r-2 border-r-amber-400 border-dashed shadow-[inset_0_0_12px_rgba(245,158,11,0.2)]'
-                        : idx % 2 === 0
-                        ? 'bg-orange-500/15 border-r border-dashed border-amber-400/50'
-                        : 'bg-indigo-500/15 border-r border-dashed border-amber-400/50'
+                    key={`split-handle-${idx}`}
+                    onMouseDown={(e) => handlePointerDown(e, 'split-boundary', idx)}
+                    onTouchStart={(e) => handlePointerDown(e, 'split-boundary', idx)}
+                    style={{ left: `${boundaryPct}%` }}
+                    className={`absolute top-0 bottom-0 w-6 -ml-3 z-30 flex items-center justify-center cursor-ew-resize group touch-manipulation ${
+                      isDraggingThis ? 'scale-110' : ''
                     }`}
-                    style={{ left: `${segLeftPct}%`, width: `${Math.max(1, segWidthPct)}%` }}
+                    title={`Drag to adjust split point (${formatTime(part.endTime)})`}
                   >
-                    <div className="flex items-center justify-between gap-1">
-                      <span
-                        className={`text-[8px] sm:text-[9px] font-mono font-bold px-1 rounded truncate border ${
-                          isCut
-                            ? 'bg-rose-950/90 text-rose-300 border-rose-500/50 line-through'
-                            : 'bg-black/80 text-amber-200 border-amber-500/30'
-                        }`}
-                      >
-                        {isCut ? '✂️ CUT' : `Part ${part.partNumber || idx + 1}`}
-                      </span>
-                    </div>
-
-                    <span
-                      className={`text-[8px] font-mono px-1 rounded truncate self-start border ${
-                        isCut
-                          ? 'text-rose-400/80 bg-rose-950/90 border-rose-900/60 line-through'
-                          : 'text-slate-300 bg-slate-950/80 border-slate-800'
+                    <div
+                      className={`w-1.5 h-full rounded-full transition-all flex flex-col items-center justify-center ${
+                        isDraggingThis
+                          ? 'bg-amber-400 shadow-[0_0_10px_#f59e0b]'
+                          : 'bg-amber-400/60 group-hover:bg-amber-400 group-hover:shadow-[0_0_8px_#f59e0b]'
                       }`}
                     >
-                      {formatTime(part.duration || (part.endTime - part.startTime) || 0)}
-                    </span>
+                      <div className="w-2.5 h-4 bg-amber-500 text-[8px] text-slate-950 font-black rounded-sm flex items-center justify-center shadow">
+                        &bull;
+                      </div>
+                    </div>
+
+                    {/* Tooltip on drag/hover */}
+                    <div
+                      className={`absolute -top-7 px-1.5 py-0.5 bg-slate-900 border border-amber-500/60 text-amber-300 font-mono text-[9px] font-bold rounded shadow-lg pointer-events-none transition-opacity whitespace-nowrap ${
+                        isDraggingThis ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                      }`}
+                    >
+                      ✂️ P{idx + 1}|P{idx + 2}: {formatTime(part.endTime)}
+                    </div>
                   </div>
                 );
               })}
-            </div>
-          )}
 
-          {/* Interactive Split Boundary Handles (Drag & Drop boundary between parts) */}
-          {duration > 0 &&
-            displayPartsList.slice(0, -1).map((part, idx) => {
-              const boundaryPct = (part.endTime / duration) * 100;
-              const isDraggingThis = dragState?.type === 'split-boundary' && dragState?.index === idx;
-
-              return (
-                <div
-                  key={`split-handle-${idx}`}
-                  onMouseDown={(e) => handlePointerDown(e, 'split-boundary', idx)}
-                  onTouchStart={(e) => handlePointerDown(e, 'split-boundary', idx)}
-                  style={{ left: `${boundaryPct}%` }}
-                  className={`absolute top-0 bottom-0 w-5 -ml-2.5 z-30 flex items-center justify-center cursor-ew-resize group touch-manipulation ${
-                    isDraggingThis ? 'scale-110' : ''
-                  }`}
-                  title={`Drag to adjust split point (${formatTime(part.endTime)})`}
-                >
-                  <div
-                    className={`w-1.5 h-full rounded-full transition-all flex flex-col items-center justify-center ${
-                      isDraggingThis
-                        ? 'bg-amber-400 shadow-[0_0_10px_#f59e0b]'
-                        : 'bg-amber-400/60 group-hover:bg-amber-400 group-hover:shadow-[0_0_8px_#f59e0b]'
-                    }`}
-                  >
-                    <div className="w-2.5 h-4 bg-amber-500 text-[8px] text-slate-950 font-black rounded-sm flex items-center justify-center shadow">
-                      &bull;
-                    </div>
-                  </div>
-
-                  {/* Tooltip on drag/hover */}
-                  <div
-                    className={`absolute -top-7 px-1.5 py-0.5 bg-slate-900 border border-amber-500/60 text-amber-300 font-mono text-[9px] font-bold rounded shadow-lg pointer-events-none transition-opacity whitespace-nowrap ${
-                      isDraggingThis ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-                    }`}
-                  >
-                    ✂️ P{idx + 1}|P{idx + 2}: {formatTime(part.endTime)}
-                  </div>
-                </div>
-              );
-            })}
-
-          {/* Left Start Range Drag Handle (◄) */}
-          <div
-            onMouseDown={(e) => handlePointerDown(e, 'start')}
-            onTouchStart={(e) => handlePointerDown(e, 'start')}
-            style={{ left: `${startPercent}%` }}
-            className={`absolute top-0 bottom-0 w-6 -ml-3 z-40 flex items-center justify-center cursor-ew-resize group touch-manipulation ${
-              dragState?.type === 'start' ? 'scale-110' : ''
-            }`}
-            title={`Drag to adjust Video Start Point (${formatTime(startTime)})`}
-          >
+            {/* Left Start Range Drag Handle (◄) */}
             <div
-              className={`w-2 h-full rounded-l-md transition-all flex items-center justify-center ${
-                dragState?.type === 'start'
-                  ? 'bg-amber-400 shadow-[0_0_12px_#f59e0b]'
-                  : 'bg-amber-500/90 hover:bg-amber-400 hover:shadow-[0_0_8px_#f59e0b]'
+              onMouseDown={(e) => handlePointerDown(e, 'start')}
+              onTouchStart={(e) => handlePointerDown(e, 'start')}
+              style={{ left: `${startPercent}%` }}
+              className={`absolute top-0 bottom-0 w-8 -ml-4 sm:w-6 sm:-ml-3 z-40 flex items-center justify-center cursor-ew-resize group touch-manipulation ${
+                dragState?.type === 'start' ? 'scale-110' : ''
               }`}
+              title={`Drag to adjust Video Start Point (${formatTime(startTime)})`}
             >
-              <span className="text-[9px] font-black text-slate-950">&lsaquo;</span>
+              <div
+                className={`w-2.5 sm:w-2 h-full rounded-l-md transition-all flex items-center justify-center ${
+                  dragState?.type === 'start'
+                    ? 'bg-amber-400 shadow-[0_0_12px_#f59e0b]'
+                    : 'bg-amber-500/90 hover:bg-amber-400 hover:shadow-[0_0_8px_#f59e0b]'
+                }`}
+              >
+                <span className="text-[9px] font-black text-slate-950">&lsaquo;</span>
+              </div>
+              {/* Tooltip */}
+              <div
+                className={`absolute -top-7 left-0 px-1.5 py-0.5 bg-slate-900 border border-amber-500 text-amber-300 font-mono text-[9px] font-bold rounded shadow-lg pointer-events-none transition-opacity whitespace-nowrap ${
+                  dragState?.type === 'start' ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                }`}
+              >
+                Start: {formatTime(startTime)}
+              </div>
             </div>
-            {/* Tooltip */}
-            <div
-              className={`absolute -top-7 left-0 px-1.5 py-0.5 bg-slate-900 border border-amber-500 text-amber-300 font-mono text-[9px] font-bold rounded shadow-lg pointer-events-none transition-opacity whitespace-nowrap ${
-                dragState?.type === 'start' ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-              }`}
-            >
-              Start: {formatTime(startTime)}
-            </div>
-          </div>
 
-          {/* Right End Range Drag Handle (►) */}
-          <div
-            onMouseDown={(e) => handlePointerDown(e, 'end')}
-            onTouchStart={(e) => handlePointerDown(e, 'end')}
-            style={{ left: `${endPercent}%` }}
-            className={`absolute top-0 bottom-0 w-6 -ml-3 z-40 flex items-center justify-center cursor-ew-resize group touch-manipulation ${
-              dragState?.type === 'end' ? 'scale-110' : ''
-            }`}
-            title={`Drag to adjust Video End Point (${formatTime(endTime)})`}
-          >
+            {/* Right End Range Drag Handle (►) */}
             <div
-              className={`w-2 h-full rounded-r-md transition-all flex items-center justify-center ${
-                dragState?.type === 'end'
-                  ? 'bg-amber-400 shadow-[0_0_12px_#f59e0b]'
-                  : 'bg-amber-500/90 hover:bg-amber-400 hover:shadow-[0_0_8px_#f59e0b]'
+              onMouseDown={(e) => handlePointerDown(e, 'end')}
+              onTouchStart={(e) => handlePointerDown(e, 'end')}
+              style={{ left: `${endPercent}%` }}
+              className={`absolute top-0 bottom-0 w-8 -ml-4 sm:w-6 sm:-ml-3 z-40 flex items-center justify-center cursor-ew-resize group touch-manipulation ${
+                dragState?.type === 'end' ? 'scale-110' : ''
               }`}
+              title={`Drag to adjust Video End Point (${formatTime(endTime)})`}
             >
-              <span className="text-[9px] font-black text-slate-950">&rsaquo;</span>
+              <div
+                className={`w-2.5 sm:w-2 h-full rounded-r-md transition-all flex items-center justify-center ${
+                  dragState?.type === 'end'
+                    ? 'bg-amber-400 shadow-[0_0_12px_#f59e0b]'
+                    : 'bg-amber-500/90 hover:bg-amber-400 hover:shadow-[0_0_8px_#f59e0b]'
+                }`}
+              >
+                <span className="text-[9px] font-black text-slate-950">&rsaquo;</span>
+              </div>
+              {/* Tooltip */}
+              <div
+                className={`absolute -top-7 right-0 px-1.5 py-0.5 bg-slate-900 border border-amber-500 text-amber-300 font-mono text-[9px] font-bold rounded shadow-lg pointer-events-none transition-opacity whitespace-nowrap ${
+                  dragState?.type === 'end' ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                }`}
+              >
+                End: {formatTime(endTime)}
+              </div>
             </div>
-            {/* Tooltip */}
-            <div
-              className={`absolute -top-7 right-0 px-1.5 py-0.5 bg-slate-900 border border-amber-500 text-amber-300 font-mono text-[9px] font-bold rounded shadow-lg pointer-events-none transition-opacity whitespace-nowrap ${
-                dragState?.type === 'end' ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-              }`}
-            >
-              End: {formatTime(endTime)}
-            </div>
-          </div>
 
-          {/* Current Playhead Indicator */}
-          <div
-            className="absolute top-0 bottom-0 w-0.5 bg-white shadow-[0_0_8px_white] z-20 pointer-events-none transition-all"
-            style={{ left: `${currentPercent}%` }}
-          >
-            <div className="w-3 h-3 bg-white -ml-1.5 -mt-0.5 rounded-full shadow border-2 border-orange-500" />
+            {/* Current Playhead Indicator */}
+            <div
+              className="absolute top-0 bottom-0 w-0.5 bg-white shadow-[0_0_8px_white] z-20 pointer-events-none transition-all"
+              style={{ left: `${currentPercent}%` }}
+            >
+              <div className="w-3 h-3 bg-white -ml-1.5 -mt-0.5 rounded-full shadow border-2 border-orange-500" />
+            </div>
           </div>
         </div>
 

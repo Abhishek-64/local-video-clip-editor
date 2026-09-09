@@ -32,7 +32,8 @@ export default function VideoPreview({
   customParts = [],
   skipDeletedCuts = true,
   onSplitAtPlayhead,
-  onToggleCutAtPlayhead
+  onToggleCutAtPlayhead,
+  isSuspended = false
 }) {
   const videoRef = useRef(null);
   const bgCanvasRef = useRef(null);
@@ -78,8 +79,33 @@ export default function VideoPreview({
   const bgBlur = bgSettings?.blur ?? 20;
   const bgOpacity = (bgSettings?.opacity ?? 65) / 100;
 
+  // When external modal preview opens, suspend editor video playback and release decode loop
+  useEffect(() => {
+    if (isSuspended && videoRef.current) {
+      if (!videoRef.current.paused) {
+        try { videoRef.current.pause(); } catch (e) {}
+      }
+      setIsPlaying(false);
+    }
+  }, [isSuspended]);
+
+  // Clean unmount of video element to release hardware decoder
+  useEffect(() => {
+    return () => {
+      if (videoRef.current) {
+        try {
+          videoRef.current.pause();
+          videoRef.current.removeAttribute('src');
+          videoRef.current.load();
+        } catch (e) {}
+      }
+    };
+  }, []);
+
   // Frame-Driven Background Canvas Blit for 100% Zero-Lag Playback & Zero Idle CPU Usage
   useEffect(() => {
+    if (isSuspended) return;
+
     let animId = null;
     let rVfcId = null;
     let isCancelled = false;
@@ -100,7 +126,7 @@ export default function VideoPreview({
     };
 
     const scheduleNextFrame = () => {
-      if (isCancelled) return;
+      if (isCancelled || isSuspended) return;
       renderBgFrame();
 
       const video = videoRef.current;
@@ -116,7 +142,7 @@ export default function VideoPreview({
     };
 
     // Trigger frame update on play state change or seek
-    if (isPlaying) {
+    if (isPlaying && !isSuspended) {
       scheduleNextFrame();
     } else {
       renderBgFrame();
@@ -131,7 +157,18 @@ export default function VideoPreview({
         } catch (e) {}
       }
     };
-  }, [isPlaying, isFillMode, bgType, currentTime]);
+  // currentTime intentionally removed: the rVfc/rAF chain is self-sustaining
+  // while playing, and re-triggering the effect on every throttled tick would
+  // cause the blur canvas loop to teardown and restart unnecessarily.
+  }, [isPlaying, isFillMode, bgType, isSuspended]);
+
+  // Suspend playback when background video is suspended by modal preview
+  useEffect(() => {
+    if (isSuspended && videoRef.current && !videoRef.current.paused) {
+      videoRef.current.pause();
+      setIsPlaying(false);
+    }
+  }, [isSuspended]);
 
   // Sync video element time if updated externally
   useEffect(() => {
@@ -918,8 +955,8 @@ export default function VideoPreview({
               className="relative rounded-2xl overflow-hidden shadow-2xl border-2 border-slate-700 bg-black flex items-center justify-center select-none"
               style={{
                 aspectRatio: '9 / 16',
-                height: '380px',
-                maxHeight: '55vh'
+                height: '360px',
+                maxHeight: '44vh'
               }}
             >
               {/* ── BACKGROUND LAYER (Hardware Fast Canvas Blit) ── */}
@@ -1251,10 +1288,10 @@ export default function VideoPreview({
 
       {/* Control Bar */}
       {videoData && (
-        <div className="bg-slate-900/95 border-t border-slate-800 px-3 sm:px-4 py-2.5 sm:py-3 z-10 backdrop-blur">
+        <div className="bg-slate-900/95 border-t border-slate-800 px-2.5 sm:px-4 py-2.5 sm:py-3 z-10 backdrop-blur">
           {/* Timeline Scrubber */}
           <div className="flex items-center space-x-2 sm:space-x-3 mb-2">
-            <span className="text-[11px] sm:text-xs font-mono text-slate-300 min-w-[36px] sm:min-w-[44px]">
+            <span className="text-[11px] sm:text-xs font-mono text-slate-300 min-w-[34px] sm:min-w-[44px]">
               {formatTime(currentTime)}
             </span>
             <div className="relative flex-1 flex items-center">
@@ -1265,23 +1302,24 @@ export default function VideoPreview({
                 step="0.05"
                 value={currentTime}
                 onChange={handleSeek}
-                className="w-full h-2 sm:h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-orange-500 focus:outline-none touch-manipulation"
+                className="w-full h-3 sm:h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-orange-500 focus:outline-none touch-manipulation"
               />
             </div>
-            <span className="text-[11px] sm:text-xs font-mono text-slate-400 min-w-[36px] sm:min-w-[44px] text-right">
+            <span className="text-[11px] sm:text-xs font-mono text-slate-400 min-w-[34px] sm:min-w-[44px] text-right">
               {formatTime(videoData.duration)}
             </span>
           </div>
 
           {/* Buttons */}
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center space-x-2 sm:space-x-3">
+          <div className="flex items-center justify-between gap-1 sm:gap-2">
+            <div className="flex items-center space-x-1 sm:space-x-2">
               <button
                 onClick={togglePlay}
-                className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-orange-500 hover:bg-orange-600 active:scale-95 text-white flex items-center justify-center transition-all shadow-md shadow-orange-500/20 cursor-pointer shrink-0 touch-manipulation"
+                aria-label={isPlaying ? 'Pause' : 'Play'}
+                className="w-11 h-11 sm:w-9 sm:h-9 rounded-xl bg-orange-500 hover:bg-orange-600 active:scale-95 text-white flex items-center justify-center transition-all shadow-md shadow-orange-500/20 cursor-pointer shrink-0 touch-manipulation"
                 title={isPlaying ? 'Pause' : 'Play'}
               >
-                {isPlaying ? <Pause className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4 fill-white translate-x-0.5" />}
+                {isPlaying ? <Pause className="w-4 h-4 sm:w-4 sm:h-4" /> : <Play className="w-4 h-4 sm:w-4 sm:h-4 fill-white translate-x-0.5" />}
               </button>
 
               <button
@@ -1291,16 +1329,18 @@ export default function VideoPreview({
                     onTimeUpdate(0);
                   }
                 }}
-                className="p-1.5 sm:p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer touch-manipulation"
+                aria-label="Restart video"
+                className="w-11 h-11 sm:w-auto sm:p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl flex items-center justify-center transition-colors cursor-pointer touch-manipulation shrink-0"
                 title="Restart"
               >
-                <RotateCcw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                <RotateCcw className="w-4 h-4" />
               </button>
 
-              <div className="flex items-center space-x-1.5 sm:space-x-2 pl-1.5 sm:pl-2 border-l border-slate-800">
+              <div className="flex items-center space-x-1 sm:space-x-2 pl-1 sm:pl-2 border-l border-slate-800">
                 <button
                   onClick={toggleMute}
-                  className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer touch-manipulation"
+                  aria-label={isMuted ? 'Unmute' : 'Mute'}
+                  className="w-11 h-11 sm:w-auto sm:p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl flex items-center justify-center transition-colors cursor-pointer touch-manipulation shrink-0"
                   title={isMuted ? 'Unmute' : 'Mute'}
                 >
                   {isMuted || volume === 0 ? (
@@ -1326,10 +1366,10 @@ export default function VideoPreview({
               {onSplitAtPlayhead && (
                 <button
                   onClick={onSplitAtPlayhead}
-                  className="px-2 sm:px-2.5 py-1 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 rounded-lg text-[11px] sm:text-xs font-semibold flex items-center space-x-1 transition-all cursor-pointer touch-manipulation active:scale-95"
+                  className="min-h-[44px] px-3 sm:min-h-[32px] sm:px-2.5 sm:py-1 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 rounded-xl sm:rounded-lg text-xs font-semibold flex items-center space-x-1 transition-all cursor-pointer touch-manipulation active:scale-95"
                   title="Split video at current time"
                 >
-                  <Scissors className="w-3 h-3 text-amber-400" />
+                  <Scissors className="w-3.5 h-3.5 text-amber-400" />
                   <span className="hidden xs:inline">Split</span>
                 </button>
               )}
@@ -1338,7 +1378,7 @@ export default function VideoPreview({
               {onToggleCutAtPlayhead && (
                 <button
                   onClick={onToggleCutAtPlayhead}
-                  className="px-2 sm:px-2.5 py-1 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 rounded-lg text-[11px] sm:text-xs font-semibold flex items-center space-x-1 transition-all cursor-pointer touch-manipulation active:scale-95"
+                  className="min-h-[44px] px-3 sm:min-h-[32px] sm:px-2.5 sm:py-1 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 rounded-xl sm:rounded-lg text-xs font-semibold flex items-center space-x-1 transition-all cursor-pointer touch-manipulation active:scale-95"
                   title="Toggle Cut/Keep under playhead"
                 >
                   <span className="hidden xs:inline">Cut/Keep</span>
@@ -1348,7 +1388,8 @@ export default function VideoPreview({
 
               <button
                 onClick={toggleFullscreen}
-                className="p-1.5 sm:p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer touch-manipulation"
+                aria-label="Toggle fullscreen"
+                className="w-11 h-11 sm:w-auto sm:p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl flex items-center justify-center transition-colors cursor-pointer touch-manipulation shrink-0"
                 title="Fullscreen"
               >
                 {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}

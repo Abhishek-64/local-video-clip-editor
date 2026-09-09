@@ -4,33 +4,77 @@
  * Prevents re-uploading the exact same video file to Backblaze B2 when publishing
  * across multiple platforms (e.g. Facebook Reels AND Instagram Reels).
  *
- * Holds temporary presigned public B2 media URLs with a TTL of 2 hours.
+ * Stores B2 upload identifiers { b2FileId, b2FileName } in memory and sessionStorage with a TTL of 2 hours.
+ * Includes in-flight Promise deduplication so simultaneous dual-publish requests await the exact same upload.
  */
 
 const CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+const SESSION_STORAGE_KEY = 'video_clip_editor_b2_shared_uploads';
 
 class SharedUploadCache {
   constructor() {
     this.cache = new Map();
+    this.inFlightUploads = new Map(); // key -> Promise<{ b2FileId, b2FileName }>
+    this.hydrateFromSession();
+  }
+
+  hydrateFromSession() {
+    if (typeof window === 'undefined' || !window.sessionStorage) return;
+    try {
+      const raw = window.sessionStorage.getItem(SESSION_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      const now = Date.now();
+      for (const [key, entry] of Object.entries(parsed)) {
+        if (entry && entry.expiresAt > now) {
+          this.cache.set(key, entry);
+        }
+      }
+    } catch (e) {
+      console.warn('[SharedUploadCache] Failed to hydrate from sessionStorage:', e);
+    }
+  }
+
+  saveToSession() {
+    if (typeof window === 'undefined' || !window.sessionStorage) return;
+    try {
+      const obj = {};
+      const now = Date.now();
+      for (const [key, entry] of this.cache.entries()) {
+        if (entry && entry.expiresAt > now) {
+          obj[key] = entry;
+        }
+      }
+      window.sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(obj));
+    } catch (e) {
+      console.warn('[SharedUploadCache] Failed to save to sessionStorage:', e);
+    }
   }
 
   /**
    * Generate unique cache key for a clip or video file
    */
-  getCacheKey(clipOrBlob) {
+  getCacheKey(clipOrBlob, extraKey = null) {
+    if (extraKey) return String(extraKey);
     if (!clipOrBlob) return null;
     if (typeof clipOrBlob === 'string') return clipOrBlob;
     if (clipOrBlob.id) return String(clipOrBlob.id);
-    if (clipOrBlob.name && clipOrBlob.size) return `${clipOrBlob.name}_${clipOrBlob.size}_${clipOrBlob.lastModified || ''}`;
-    if (clipOrBlob.blob && clipOrBlob.blob.name) return `${clipOrBlob.blob.name}_${clipOrBlob.blob.size}`;
+    if (clipOrBlob.clipId) return String(clipOrBlob.clipId);
+    if (clipOrBlob.name && clipOrBlob.size) return `${clipOrBlob.name}_${clipOrBlob.size}`;
+    if (clipOrBlob.blob && clipOrBlob.blob.size) {
+      return `${clipOrBlob.blob.name || 'blob'}_${clipOrBlob.blob.size}_${clipOrBlob.blob.type || ''}`;
+    }
+    if (typeof Blob !== 'undefined' && clipOrBlob instanceof Blob) {
+      return `blob_${clipOrBlob.size}_${clipOrBlob.type || 'video_mp4'}`;
+    }
     return null;
   }
 
   /**
    * Get cached active B2 upload data
    */
-  getCachedUpload(clipOrBlob) {
-    const key = this.getCacheKey(clipOrBlob);
+  getCachedUpload(clipOrBlob, extraKey = null) {
+    const key = this.getCacheKey(clipOrBlob, extraKey);
     if (!key) return null;
 
     const entry = this.cache.get(key);
@@ -39,6 +83,7 @@ class SharedUploadCache {
     // Check expiration
     if (Date.now() > entry.expiresAt) {
       this.cache.delete(key);
+      this.saveToSession();
       return null;
     }
 
@@ -48,25 +93,67 @@ class SharedUploadCache {
   /**
    * Set cached B2 upload data
    */
-  setCachedUpload(clipOrBlob, { b2Url, b2FileId, b2FileName }) {
-    const key = this.getCacheKey(clipOrBlob);
-    if (!key || !b2Url) return;
+  setCachedUpload(clipOrBlob, { b2FileId, b2FileName, b2Url = null }, extraKey = null) {
+    const key = this.getCacheKey(clipOrBlob, extraKey);
+    if (!key || !b2FileName) return null;
 
-    this.cache.set(key, {
-      b2Url,
-      b2FileId,
+    const entry = {
+      b2FileId: b2FileId || b2FileName,
       b2FileName,
+      b2Url,
       timestamp: Date.now(),
       expiresAt: Date.now() + CACHE_TTL_MS
-    });
+    };
+
+    this.cache.set(key, entry);
+    this.saveToSession();
+    return entry;
+  }
+
+  /**
+   * Check if an upload is currently in-flight for this key
+   */
+  getInFlightUpload(clipOrBlob, extraKey = null) {
+    const key = this.getCacheKey(clipOrBlob, extraKey);
+    if (!key) return null;
+    return this.inFlightUploads.get(key) || null;
+  }
+
+  /**
+   * Track an active upload promise to deduplicate simultaneous requests
+   */
+  trackUpload(clipOrBlob, uploadPromise, extraKey = null) {
+    const key = this.getCacheKey(clipOrBlob, extraKey);
+    if (!key) return uploadPromise;
+
+    this.inFlightUploads.set(key, uploadPromise);
+
+    uploadPromise
+      .then((result) => {
+        if (result && result.b2FileName) {
+          this.setCachedUpload(key, result);
+        }
+      })
+      .catch(() => {
+        // Clear in-flight on failure
+      })
+      .finally(() => {
+        this.inFlightUploads.delete(key);
+      });
+
+    return uploadPromise;
   }
 
   /**
    * Invalidate or remove a specific clip from cache
    */
-  removeCachedUpload(clipOrBlob) {
-    const key = this.getCacheKey(clipOrBlob);
-    if (key) this.cache.delete(key);
+  removeCachedUpload(clipOrBlob, extraKey = null) {
+    const key = this.getCacheKey(clipOrBlob, extraKey);
+    if (key) {
+      this.cache.delete(key);
+      this.inFlightUploads.delete(key);
+      this.saveToSession();
+    }
   }
 
   /**
@@ -74,6 +161,10 @@ class SharedUploadCache {
    */
   clear() {
     this.cache.clear();
+    this.inFlightUploads.clear();
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      window.sessionStorage.removeItem(SESSION_STORAGE_KEY);
+    }
   }
 }
 

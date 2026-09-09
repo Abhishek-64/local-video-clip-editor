@@ -4,13 +4,13 @@
  * Rendered below GeneratedClips.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Youtube, ExternalLink, RefreshCw, AlertCircle, CheckCircle2,
   Clock, Calendar, Upload, ChevronDown, ChevronUp, RotateCcw
 } from 'lucide-react';
 
-function StatusBadge({ status }) {
+function StatusBadge({ status, progress = null }) {
   switch (status) {
     case 'pending':
       return (
@@ -20,8 +20,8 @@ function StatusBadge({ status }) {
       );
     case 'uploading':
       return (
-        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-500/15 text-blue-400 border border-blue-500/25 animate-pulse shrink-0">
-          <Upload className="w-2.5 h-2.5 mr-1" /> Uploading
+        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-red-500/20 text-red-300 border border-red-500/30 animate-pulse shrink-0">
+          <Upload className="w-2.5 h-2.5 mr-1 animate-bounce" /> Uploading {progress != null ? `${progress}%` : ''}
         </span>
       );
     case 'uploaded':
@@ -71,39 +71,63 @@ function formatDateTime(iso) {
 }
 
 export default function YouTubeUploadHistory({
-  uploadHistory,
-  uploadJobs,        // live upload states from useUploadQueue (overrides D1 status for active jobs)
-  isLoadingHistory,
+  uploadHistory = [],
+  uploadJobs = {},        // live upload states from useUploadQueue (overrides D1 status for active jobs)
+  isLoadingHistory = false,
   onRetry,           // (clip) => void — called when user clicks retry
   onRefresh,
-  completedClips     // used to check if blob is still available for retry
+  completedClips = [], // used to check if blob is still available for retry
+  initialExpanded = true,
+  statusFilter = 'all'
 }) {
-  const [isExpanded, setIsExpanded] = useState(false);
-
-  if (!uploadHistory || uploadHistory.length === 0) {
-    return null;
-  }
+  const [isExpanded, setIsExpanded] = useState(initialExpanded);
 
   // Merge live upload states on top of D1 history
-  const mergedHistory = uploadHistory.map(record => {
-    const liveState = uploadJobs?.[record.id];
-    if (liveState) {
-      return {
-        ...record,
-        status: liveState.status === 'upload_failed' ? 'failed'
-               : liveState.status === 'upload_cancelled' ? 'cancelled'
-               : liveState.status === 'uploaded' ? 'uploaded'
-               : liveState.status === 'scheduled' ? 'scheduled'
-               : liveState.status === 'uploading' ? 'uploading'
-               : liveState.status === 'queued' ? 'uploading'
-               : record.status,
-        youtube_video_id: liveState.videoId || record.youtube_video_id,
-        error_message: liveState.error || record.error_message,
-        _liveProgress: liveState.progress
-      };
+  const mergedHistory = useMemo(() => {
+    if (!uploadHistory || uploadHistory.length === 0) return [];
+    return uploadHistory.map(record => {
+      const liveState = uploadJobs?.[record.id];
+      if (liveState) {
+        return {
+          ...record,
+          status: liveState.status === 'upload_failed' ? 'failed'
+                 : liveState.status === 'upload_cancelled' ? 'cancelled'
+                 : liveState.status === 'uploaded' ? 'uploaded'
+                 : liveState.status === 'scheduled' ? 'scheduled'
+                 : liveState.status === 'uploading' ? 'uploading'
+                 : liveState.status === 'queued' ? 'uploading'
+                 : record.status,
+          youtube_video_id: liveState.videoId || record.youtube_video_id,
+          error_message: liveState.error || record.error_message,
+          _liveProgress: liveState.progress
+        };
+      }
+      return record;
+    });
+  }, [uploadHistory, uploadJobs]);
+
+  const filteredHistory = useMemo(() => {
+    if (!statusFilter || statusFilter === 'all') return mergedHistory;
+    if (statusFilter === 'published') {
+      return mergedHistory.filter(r => r.status === 'uploaded' || r.status === 'published');
     }
-    return record;
-  });
+    if (statusFilter === 'failed') {
+      return mergedHistory.filter(r => r.status === 'failed' || r.status === 'upload_failed');
+    }
+    return mergedHistory;
+  }, [mergedHistory, statusFilter]);
+
+  if (!uploadHistory || uploadHistory.length === 0) {
+    return (
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center space-y-2 shadow-lg">
+        <Youtube className="w-8 h-8 text-red-500/60 mx-auto" />
+        <p className="text-xs font-semibold text-slate-400">No YouTube upload history found</p>
+        <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
+          Completed, scheduled, or queued YouTube uploads will appear here once publishing has started.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-lg overflow-hidden">
@@ -145,7 +169,12 @@ export default function YouTubeUploadHistory({
       {/* Content */}
       {isExpanded && (
         <div className="border-t border-slate-800 divide-y divide-slate-800/70 max-h-[500px] overflow-y-auto">
-          {mergedHistory.map(record => {
+          {filteredHistory.length === 0 ? (
+            <div className="p-6 text-center text-xs text-slate-500">
+              No YouTube uploads match the selected status filter.
+            </div>
+          ) : (
+            filteredHistory.map(record => {
             const hasVideo = Boolean(record.youtube_video_id);
             const ytUrl = hasVideo ? `https://www.youtube.com/watch?v=${record.youtube_video_id}` : null;
             const isUploading = record.status === 'uploading';
@@ -161,7 +190,7 @@ export default function YouTubeUploadHistory({
                       <span className="text-xs font-semibold text-white truncate max-w-[200px] sm:max-w-sm">
                         {record.title || `Part ${String(record.part_number || '?').padStart(2, '0')}`}
                       </span>
-                      <StatusBadge status={record.status} />
+                      <StatusBadge status={record.status} progress={record._liveProgress} />
                     </div>
 
                     {/* Meta */}
@@ -180,13 +209,13 @@ export default function YouTubeUploadHistory({
                       )}
                     </div>
 
-                    {/* Upload progress bar */}
+                    {/* Upload progress percentage (shows percentage instead of the line) */}
                     {isUploading && record._liveProgress != null && (
-                      <div className="w-full max-w-xs bg-slate-800 h-1 rounded-full overflow-hidden mt-1">
-                        <div
-                          className="bg-gradient-to-r from-red-500 to-orange-400 h-full rounded-full transition-all duration-300"
-                          style={{ width: `${record._liveProgress || 0}%` }}
-                        />
+                      <div className="flex items-center space-x-1.5 text-[11px] font-mono mt-1">
+                        <span className="text-slate-400">Upload progress:</span>
+                        <span className="text-red-400 font-bold px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500/20 shadow-inner">
+                          {record._liveProgress}%
+                        </span>
                       </div>
                     )}
 
@@ -217,7 +246,10 @@ export default function YouTubeUploadHistory({
 
                     {isFailed && (
                       <button
-                        onClick={() => onRetry?.({ id: record.id, partNumber: record.part_number })}
+                        onClick={() => {
+                          const matchingClip = completedClips?.find(c => c.id === record.id);
+                          onRetry?.(matchingClip || { id: record.id, partNumber: record.part_number, blob: matchingClip?.blob });
+                        }}
                         className="px-2.5 py-1.5 text-[11px] font-semibold text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-lg flex items-center space-x-1 transition-colors cursor-pointer touch-manipulation"
                         title={blobAvailable ? 'Retry upload' : 'Re-export required — blob no longer in memory'}
                       >
@@ -229,7 +261,7 @@ export default function YouTubeUploadHistory({
                 </div>
               </div>
             );
-          })}
+          }))}
         </div>
       )}
     </div>

@@ -1,17 +1,19 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import Header from './components/Header';
 import VideoUploader from './components/VideoUploader';
 import VideoPreview from './components/VideoPreview';
 import Timeline from './components/Timeline';
 import EditorTabs from './components/EditorTabs';
 import ProcessingQueue from './components/ProcessingQueue';
-import GeneratedClips from './components/GeneratedClips';
-import YouTubeUploadHistory from './components/YouTubeUploadHistory';
 import AuthModal from './components/AuthModal';
 import StorageSettingsModal from './components/StorageSettingsModal';
 import TemplateManagerModal from './components/TemplateManagerModal';
+import MobileBottomNav from './components/MobileBottomNav';
+import MobileEditSheet from './components/MobileEditSheet';
+import UnifiedPublishModal from './components/UnifiedPublishModal';
+import GeneratedVideoPlayer from './components/GeneratedVideoPlayer';
 import { generateClipFilename } from './utils/filename';
-import { calculateSingleScheduleTime, formatScheduledDateTime, getDefaultScheduleStartTime, toDateTimeLocalString } from './utils/scheduler';
+import { calculateSingleScheduleTime, formatScheduledDateTime, getDefaultScheduleStartTime, toDateTimeLocalString, getIntervalSeconds } from './utils/scheduler';
 import { cleanVideoFilename } from './utils/titleCleaner';
 import { useProcessingQueue } from './hooks/useProcessingQueue';
 import { useYouTube } from './hooks/useYouTube';
@@ -20,22 +22,91 @@ import { useFacebook } from './hooks/useFacebook';
 import { useInstagram } from './hooks/useInstagram';
 import { useAuth } from './hooks/useAuth';
 import { useTemplates } from './hooks/useTemplates';
-import { Check, Info, X, Film, Palette, Layers, Sparkles } from 'lucide-react';
+import sharedUploadCache from './services/sharedUploadCache';
+import {
+  Check, Info, X, Film, Palette, Layers, Sparkles,
+  Scissors, Crop, Image as ImageIcon, Type, Volume2, SlidersHorizontal,
+  Youtube, Share2, Instagram, Database, Sliders, ChevronRight
+} from 'lucide-react';
 
 export default function App() {
   // Video Source State
   const [videoData, setVideoData] = useState(null);
   const [currentTime, setCurrentTime] = useState(0);
+  // Ref always holds the live playhead position without triggering re-renders.
+  // State is throttled to ≤4fps so the Timeline playhead is visually smooth
+  // but the entire App tree is NOT re-rendered 25× per second during playback.
+  const currentTimeRef = useRef(0);
+  const lastTimeUpdateRef = useRef(0);
 
-  // Mobile Active View: 'preview' (Preview + Timeline), 'style' (EditorTabs), 'queue' (Queue + Output)
-  const [mobileView, setMobileView] = useState('preview');
+  /**
+   * HOT PATH: called on every `timeupdate` event (4–25×/sec).
+   * - Always updates the ref (zero re-render cost, always current for split/cut).
+   * - Throttles React state update to ≤4fps so the Timeline playhead animates
+   *   smoothly but never forces a full 2000-line App re-render at video frame rate.
+   */
+  const handleTimeUpdate = useCallback((time) => {
+    currentTimeRef.current = time;
+    const now = performance.now();
+    if (now - lastTimeUpdateRef.current >= 250) { // 4fps cap
+      lastTimeUpdateRef.current = now;
+      setCurrentTime(time);
+    }
+  }, []);
+
+  /**
+   * COLD PATH: explicit user seek (Timeline click, drag). Always flushes
+   * immediately so the playhead snaps to the correct position without delay.
+   */
+  const handleExplicitSeek = useCallback((time) => {
+    currentTimeRef.current = time;
+    lastTimeUpdateRef.current = performance.now();
+    setCurrentTime(time);
+  }, []);
+
+  // Central Unified Publish / Schedule Modal State (Accessible across Queue and Clips)
+  const [publishModalClips, setPublishModalClips] = useState(null);
+  const [preRenderContext, setPreRenderContext] = useState(null);
+  const handleClipCompletedRef = useRef(null);
+
+  // Background Video Preview Suspension State (for performance when previewing generated clips)
+  const [isEditorPreviewSuspended, setIsEditorPreviewSuspended] = useState(false);
+  const handlePauseBackgroundVideo = useCallback(() => setIsEditorPreviewSuspended(true), []);
+  const handleResumeBackgroundVideo = useCallback(() => setIsEditorPreviewSuspended(false), []);
+
+  // Mobile Slide-Up Edit Sheet & Bottom Nav State (< lg)
+  const [isMobileEditOpen, setIsMobileEditOpen] = useState(false);
+  const [isMobileSheetFullScreen, setIsMobileSheetFullScreen] = useState(true);
+  const [activeMobileNavTab, setActiveMobileNavTab] = useState('edit');
 
   // Active Tab in EditorTabs
   const [activeEditorTab, setActiveEditorTab] = useState('split-cut');
 
   const handleNavigateTab = (tabId) => {
     setActiveEditorTab(tabId);
-    setMobileView('style');
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      setIsMobileEditOpen(true);
+    }
+  };
+
+  const handleMobileNavSelect = (tabId) => {
+    setActiveMobileNavTab(tabId);
+    if (tabId === 'edit') {
+      setIsMobileEditOpen(true);
+    } else if (tabId === 'clips') {
+      setIsMobileEditOpen(false);
+      setTimeout(() => {
+        document.getElementById('generated-clips-container')?.scrollIntoView({ behavior: 'smooth' });
+      }, 50);
+    } else if (tabId === 'export') {
+      setActiveEditorTab('export');
+      setIsMobileEditOpen(true);
+    } else if (tabId === 'queue') {
+      setIsMobileEditOpen(false);
+      setTimeout(() => {
+        document.getElementById('processing-queue-container')?.scrollIntoView({ behavior: 'smooth' });
+      }, 50);
+    }
   };
 
   // Timeline / Range / Parts State
@@ -50,7 +121,7 @@ export default function App() {
     toDateTimeLocalString(getDefaultScheduleStartTime())
   );
 
-  // Preview Modal for Completed Clip
+  // Preview Modal for Completed Clip & Decoder Bandwidth Management
   const [previewClipModal, setPreviewClipModal] = useState(null);
 
   // Storage & Database Data Management Modal State
@@ -59,12 +130,12 @@ export default function App() {
   // Toast Notification State
   const [toastMessage, setToastMessage] = useState(null);
 
-  const showToast = (message, type = 'info') => {
+  const showToast = useCallback((message, type = 'info') => {
     setToastMessage({ message, type });
     setTimeout(() => {
       setToastMessage(null);
     }, 4000);
-  };
+  }, []);
 
   // Editing Settings State
   const [cropSettings, setCropSettings] = useState({
@@ -150,6 +221,7 @@ export default function App() {
   });
 
   const [exportSettings, setExportSettings] = useState({
+    movieName: 'My Movie',
     format: 'mp4',
     resolution: '1080p',
     bitrate: 'high',
@@ -159,8 +231,28 @@ export default function App() {
     fileTemplate: '{movie} - Part {part}'
   });
 
+  const handleTextChange = useCallback((newTextSettings) => {
+    setTextSettings(newTextSettings);
+    if (newTextSettings?.movieName !== undefined) {
+      setExportSettings((prev) => (prev.movieName === newTextSettings.movieName ? prev : {
+        ...prev,
+        movieName: newTextSettings.movieName
+      }));
+    }
+  }, []);
 
-  // ── Processing Queue Hook (existing — unchanged) ──────────────────────────────
+  const handleExportChange = useCallback((newExportSettings) => {
+    setExportSettings(newExportSettings);
+    if (newExportSettings?.movieName !== undefined) {
+      setTextSettings((prev) => (prev.movieName === newExportSettings.movieName ? prev : {
+        ...prev,
+        movieName: newExportSettings.movieName
+      }));
+    }
+  }, []);
+
+
+  // ── Processing Queue Hook (with automatic clip completion hook) ──────────────
   const {
     queue,
     completedClips,
@@ -173,7 +265,11 @@ export default function App() {
     clearQueue,
     downloadClip,
     downloadAllZip
-  } = useProcessingQueue();
+  } = useProcessingQueue({
+    onClipCompleted: (job) => {
+      handleClipCompletedRef.current?.(job);
+    }
+  });
 
   // ── Authentication Hook (User Signup, Login, Profile) ────────────────────────
   const {
@@ -340,7 +436,7 @@ export default function App() {
   const [fbPublishedMap, setFbPublishedMap] = useState({});
   const [fbPublishingClipId, setFbPublishingClipId] = useState(null);
 
-  const handlePublishFbClip = async (clip) => {
+  const handlePublishFbClip = useCallback(async (clip) => {
     if (!clip || !clip.blob) {
       showToast('Clip video data not ready for publishing.', 'error');
       return;
@@ -388,20 +484,20 @@ export default function App() {
     } finally {
       setFbPublishingClipId(null);
     }
-  };
+  }, [fbSettings, textSettings.movieName, renderFbTemplate, publishToFacebookPipeline, showToast]);
 
-  const handleBatchPublishFb = async (clipsToPublish) => {
+  const handleBatchPublishFb = useCallback(async (clipsToPublish) => {
     if (!clipsToPublish || clipsToPublish.length === 0) return;
     for (const clip of clipsToPublish) {
       await handlePublishFbClip(clip);
     }
-  };
+  }, [handlePublishFbClip]);
 
   // ── Instagram Direct & Batch Publishing Integration ──────────────────────────
   const [igPublishedMap, setIgPublishedMap] = useState({});
   const [igPublishingClipId, setIgPublishingClipId] = useState(null);
 
-  const handlePublishIgClip = async (clip) => {
+  const handlePublishIgClip = useCallback(async (clip) => {
     if (!clip || !clip.blob) {
       showToast('Clip video data not ready for publishing.', 'error');
       return;
@@ -443,40 +539,54 @@ export default function App() {
     } finally {
       setIgPublishingClipId(null);
     }
-  };
+  }, [igSettings, textSettings.movieName, renderIgTemplate, publishToInstagramPipeline, showToast]);
 
-  const handleBatchPublishIg = async (clipsToPublish) => {
+  const handleBatchPublishIg = useCallback(async (clipsToPublish) => {
     if (!clipsToPublish || clipsToPublish.length === 0) return;
     for (const clip of clipsToPublish) {
       await handlePublishIgClip(clip);
     }
-  };
+  }, [handlePublishIgClip]);
 
   // ── Dual FB + IG Direct & Batch Publishing Integration ────────────────────────
   const [isPublishingBoth, setIsPublishingBoth] = useState(false);
 
-  const handlePublishBothClip = async (clip) => {
+  const handlePublishBothClip = useCallback(async (clip) => {
     if (!clip || !clip.blob) {
       showToast('Clip video data not ready for publishing.', 'error');
       return;
     }
     setIsPublishingBoth(true);
+    const errors = [];
     try {
       showToast(`Publishing Part ${clip.partNumber || 1} to Facebook & Instagram Reels (Temporary upload cached)...`, 'info');
       // 1. Publish to Facebook first (uploads to Backblaze B2 and caches descriptor)
-      await handlePublishFbClip(clip);
+      try {
+        await handlePublishFbClip(clip);
+      } catch (fbErr) {
+        console.error('Dual publish FB error:', fbErr);
+        errors.push(`Facebook: ${fbErr.message}`);
+      }
       // 2. Publish to Instagram (reuses public B2 URL instantly from cache)
-      await handlePublishIgClip(clip);
-      showToast(`Part ${clip.partNumber || 1} published to both Facebook & Instagram!`, 'success');
-    } catch (err) {
-      console.error('Dual FB+IG publish error:', err);
-      showToast(`Dual publish error: ${err.message}`, 'error');
+      try {
+        await handlePublishIgClip(clip);
+      } catch (igErr) {
+        console.error('Dual publish IG error:', igErr);
+        errors.push(`Instagram: ${igErr.message}`);
+      }
+      if (errors.length === 0) {
+        showToast(`Part ${clip.partNumber || 1} published to both Facebook & Instagram!`, 'success');
+      } else if (errors.length === 1) {
+        showToast(`Part ${clip.partNumber || 1} publish completed with issue: ${errors[0]}`, 'warning');
+      } else {
+        showToast(`Dual publish failed: ${errors.join('; ')}`, 'error');
+      }
     } finally {
       setIsPublishingBoth(false);
     }
-  };
+  }, [handlePublishFbClip, handlePublishIgClip, showToast]);
 
-  const handleBatchPublishBoth = async (clipsToPublish) => {
+  const handleBatchPublishBoth = useCallback(async (clipsToPublish) => {
     if (!clipsToPublish || clipsToPublish.length === 0) return;
     setIsPublishingBoth(true);
     try {
@@ -486,18 +596,25 @@ export default function App() {
     } finally {
       setIsPublishingBoth(false);
     }
-  };
+  }, [handlePublishBothClip]);
+
+
 
   // ── Handle Video Loading and Auto-Detection ───────────────────────────────────
   const handleVideoSelect = (data) => {
     setVideoData(data);
     setStartTime(0);
     setEndTime(data.duration);
+    currentTimeRef.current = 0;
     setCurrentTime(0);
 
     // Auto-populate movie name from demo preset or filename (cleaned)
     const baseName = data.preset?.movieName || cleanVideoFilename(data.file.name);
     setTextSettings((prev) => ({
+      ...prev,
+      movieName: baseName
+    }));
+    setExportSettings((prev) => ({
       ...prev,
       movieName: baseName
     }));
@@ -540,7 +657,8 @@ export default function App() {
   // ── Split & Cut Actions for Player & Hotkeys ──────────────────────────────
   const handleSplitAtPlayhead = () => {
     if (!videoData) return;
-    const playhead = Math.round((currentTime || 0) * 10) / 10;
+    // Read from ref so we always have the live position, not the throttled state.
+    const playhead = Math.round((currentTimeRef.current || 0) * 10) / 10;
     const currentList = customParts && customParts.length > 0
       ? [...customParts]
       : [{ id: 'part-1', partNumber: 1, title: 'Full Video', startTime: 0, endTime: videoData.duration, duration: videoData.duration, isDeleted: false }];
@@ -576,7 +694,9 @@ export default function App() {
 
   const handleToggleCutAtPlayhead = () => {
     if (!customParts || customParts.length === 0) return;
-    const targetIdx = customParts.findIndex(p => currentTime >= p.startTime && currentTime <= p.endTime);
+    // Read from ref for the exact live position, not the 4fps-throttled state.
+    const liveTime = currentTimeRef.current;
+    const targetIdx = customParts.findIndex(p => liveTime >= p.startTime && liveTime <= p.endTime);
     if (targetIdx !== -1) {
       const updated = customParts.map((p, idx) => idx === targetIdx ? { ...p, isDeleted: !p.isDeleted } : p);
       let counter = 1;
@@ -608,7 +728,9 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [videoData, currentTime, customParts]);
+  // currentTime intentionally omitted: hotkey handler reads currentTimeRef.current
+  // directly so we don't re-register the listener on every timeupdate tick.
+  }, [videoData, customParts]);
 
   // Derive total calculated active kept parts
   const selectedDuration = Math.max(0, endTime - startTime);
@@ -627,6 +749,7 @@ export default function App() {
     autoSchedule = false,
     scheduleStartTime = null,
     scheduleInterval = '1hour',
+    publishConfig = null,
     customPartsList = null
   }) => {
     if (!videoData) return;
@@ -673,27 +796,69 @@ export default function App() {
     }
 
     const baseStartPart = Math.max(1, parseInt(textSettings.startPart) || 1);
+    const intervalMinutes = publishConfig?.batchIntervalMinutes || (getIntervalSeconds(scheduleInterval) / 60) || 30;
 
     const newJobs = partsToGenerate.map((part, idx) => {
       // Clean sequential part number starting from baseStartPart (e.g. 1 + 0 = Part 1)
       const partNum = baseStartPart + idx;
-      const customName = part.title ? `${textSettings.movieName || 'Clip'} - ${part.title} (Part ${partNum})` : null;
+      const effectiveMovie = exportSettings.movieName || textSettings.movieName || ytSettings?.yt_name || igSettings?.ig_name || fbSettings?.fb_name || 'Clip';
+      const isCustomTitle = part.title && part.title !== 'Full Video' && !part.title.match(/^Part\s+\d+$/i);
+      const customName = isCustomTitle ? `${effectiveMovie} - ${part.title} (Part ${partNum})` : null;
       const filename = customName
         ? `${customName.replace(/[\\/:*?"<>|]/g, '_')}.${exportSettings.format || 'mp4'}`
         : generateClipFilename({
-            movieName: textSettings.movieName || 'Clip',
+            movieName: effectiveMovie,
             partNumber: partNum,
+            totalParts: partsToGenerate.length,
             template: exportSettings.fileTemplate || textSettings.fileTemplate || textSettings.template || '{movie} - Part {part}',
             zeroPad: textSettings.zeroPad,
             extension: exportSettings.format || 'mp4'
           });
 
-      const scheduledAt = autoSchedule
-        ? calculateSingleScheduleTime(scheduleStartTime, scheduleInterval || '1hour', idx)
-        : null;
-
       const ytStartPart = Math.max(1, parseInt(ytSettings?.yt_start_part) || 1);
       const ytPartNum = ytStartPart + idx;
+
+      // Calculate staggered schedule offsets based on configured interval
+      const clipOffsetMs = idx * intervalMinutes * 60 * 1000;
+
+      let jobYtScheduledAt = null;
+      let jobFbScheduledAt = null;
+      let jobIgScheduledAt = null;
+
+      if (publishConfig?.mode === 'schedule') {
+        if (publishConfig.platforms?.youtube?.scheduleTime) {
+          jobYtScheduledAt = new Date(new Date(publishConfig.platforms.youtube.scheduleTime).getTime() + clipOffsetMs).toISOString();
+        }
+        if (publishConfig.platforms?.facebook?.scheduleTime) {
+          jobFbScheduledAt = new Date(new Date(publishConfig.platforms.facebook.scheduleTime).getTime() + clipOffsetMs).toISOString();
+        }
+        if (publishConfig.platforms?.instagram?.scheduleTime) {
+          jobIgScheduledAt = new Date(new Date(publishConfig.platforms.instagram.scheduleTime).getTime() + clipOffsetMs).toISOString();
+        }
+      } else if (autoSchedule && scheduleStartTime) {
+        jobYtScheduledAt = calculateSingleScheduleTime(scheduleStartTime, scheduleInterval || '1hour', idx);
+      }
+
+      const publishPlan = (publishConfig && publishConfig.mode !== 'local_only') ? {
+        mode: publishConfig.mode,
+        batchInterval: publishConfig.batchInterval,
+        batchIntervalMinutes: intervalMinutes,
+        clipIndex: idx,
+        youtube: publishConfig.platforms?.youtube?.enabled ? {
+          enabled: true,
+          scheduledAt: jobYtScheduledAt
+        } : null,
+        facebook: publishConfig.platforms?.facebook?.enabled ? {
+          enabled: true,
+          scheduledAt: jobFbScheduledAt
+        } : null,
+        instagram: publishConfig.platforms?.instagram?.enabled ? {
+          enabled: true,
+          scheduledAt: jobIgScheduledAt
+        } : null
+      } : null;
+
+      const scheduledAt = jobYtScheduledAt || jobFbScheduledAt || jobIgScheduledAt || null;
 
       return {
         id: `job-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 6)}`,
@@ -718,17 +883,13 @@ export default function App() {
         audioSettings,
         exportSettings,
         scheduledAt,
-        autoUpload: Boolean(autoSchedule)
+        autoUpload: Boolean(publishPlan?.youtube?.enabled),
+        publishPlan
       };
     });
 
     addJobs(newJobs);
-
-    if (autoSchedule) {
-      showToast(`Added ${newJobs.length} clips to queue! Auto-scheduled with ${scheduleInterval} interval.`, 'success');
-    } else {
-      showToast(`Added ${newJobs.length} clips to processing queue!`, 'success');
-    }
+    showToast(`Added ${newJobs.length} clips to processing queue!`, 'success');
   };
 
   // ── Action: Export Merged Cleaned Video (Without Deleted Sections) ───────────
@@ -745,7 +906,8 @@ export default function App() {
     }
 
     const totalKeptDur = keptList.reduce((acc, p) => acc + Math.max(0, (p.endTime || 0) - (p.startTime || 0)), 0);
-    const cleanedFilename = `${(textSettings.movieName || 'Cleaned_Video').replace(/[\\/:*?"<>|]/g, '_')}_Edited_Cleaned.${exportSettings.format || 'mp4'}`;
+    const effectiveCleanedMovie = exportSettings.movieName || textSettings.movieName || 'Cleaned_Video';
+    const cleanedFilename = `${effectiveCleanedMovie.replace(/[\\/:*?"<>|]/g, '_')}_Edited_Cleaned.${exportSettings.format || 'mp4'}`;
 
     const mergedJob = {
       id: `job-merged-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
@@ -792,7 +954,8 @@ export default function App() {
 
     const totalDur = partsToMerge.reduce((acc, p) => acc + Math.max(0, (p.endTime || 0) - (p.startTime || 0)), 0);
     const partNumbersLabel = partsToMerge.map(p => `P${p.partNumber || 1}`).join('_');
-    const cleanedFilename = `${(textSettings.movieName || 'Merged_Video').replace(/[\\/:*?"<>|]/g, '_')}_Merged_${partNumbersLabel}.${exportSettings.format || 'mp4'}`;
+    const effectiveMergedMovie = exportSettings.movieName || textSettings.movieName || 'Merged_Video';
+    const cleanedFilename = `${effectiveMergedMovie.replace(/[\\/:*?"<>|]/g, '_')}_Merged_${partNumbersLabel}.${exportSettings.format || 'mp4'}`;
 
     const mergedJob = {
       id: `job-merged-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
@@ -829,7 +992,30 @@ export default function App() {
       showToast('No active kept segments to generate clips for.', 'error');
       return;
     }
-    handleGenerateQueue({ mode: 'all', customPartsList: list });
+    const baseStartPart = Math.max(1, parseInt(textSettings.startPart) || 1);
+    const effectiveMovie = exportSettings.movieName || textSettings.movieName || ytSettings?.yt_name || igSettings?.ig_name || fbSettings?.fb_name || 'Clip';
+    const pendingClips = list.map((part, idx) => {
+      const partNum = baseStartPart + idx;
+      const isCustomTitle = part.title && part.title !== 'Full Video' && !part.title.match(/^Part\s+\d+$/i);
+      const name = isCustomTitle
+        ? `${effectiveMovie} - ${part.title} (Part ${partNum})`
+        : generateClipFilename({
+            movieName: effectiveMovie,
+            partNumber: partNum,
+            totalParts: list.length,
+            template: exportSettings.fileTemplate || textSettings.fileTemplate || textSettings.template || '{movie} - Part {part}',
+            zeroPad: textSettings.zeroPad,
+            extension: exportSettings.format || 'mp4'
+          });
+      return {
+        id: `pending-${idx + 1}`,
+        partNumber: partNum,
+        name,
+        duration: Math.max(0, (part.endTime || 0) - (part.startTime || 0))
+      };
+    });
+    setPreRenderContext({ mode: 'all', customPartsList: list });
+    setPublishModalClips(pendingClips);
   };
 
   // ── Action: Export Single Part Directly ──────────────────────────────────────
@@ -839,11 +1025,13 @@ export default function App() {
     const baseStartPart = Math.max(1, parseInt(textSettings.startPart) || 1);
     const partNum = keptIdx >= 0 ? baseStartPart + keptIdx : (part.partNumber || 1);
 
-    const customName = part.title ? `${textSettings.movieName || 'Clip'} - ${part.title} (Part ${partNum})` : null;
+    const effectiveMovie = exportSettings.movieName || textSettings.movieName || ytSettings?.yt_name || igSettings?.ig_name || fbSettings?.fb_name || 'Clip';
+    const isCustomTitle = part.title && part.title !== 'Full Video' && !part.title.match(/^Part\s+\d+$/i);
+    const customName = isCustomTitle ? `${effectiveMovie} - ${part.title} (Part ${partNum})` : null;
     const filename = customName
       ? `${customName.replace(/[\\/:*?"<>|]/g, '_')}.${exportSettings.format || 'mp4'}`
       : generateClipFilename({
-          movieName: textSettings.movieName || 'Clip',
+          movieName: effectiveMovie,
           partNumber: partNum,
           template: exportSettings.fileTemplate || textSettings.fileTemplate || textSettings.template || '{movie} - Part {part}',
           zeroPad: textSettings.zeroPad,
@@ -881,18 +1069,18 @@ export default function App() {
     showToast('Current styling & presets will be applied to all generated parts!', 'success');
   };
 
-  const handleDownloadAllZip = async () => {
+  const handleDownloadAllZip = useCallback(async () => {
     if (completedClips.length === 0) {
       showToast('No completed clips to download.', 'error');
       return;
     }
     try {
-      await downloadAllZip(textSettings.movieName || 'Video_Clips');
+      await downloadAllZip(exportSettings.movieName || textSettings.movieName || 'Video_Clips');
       showToast('Downloaded all clips in a single ZIP file!', 'success');
     } catch (err) {
       showToast('Failed to create ZIP file. Try downloading clips individually.', 'error');
     }
-  };
+  }, [completedClips.length, downloadAllZip, exportSettings.movieName, textSettings.movieName, showToast]);
 
   const handleCropReset = () => {
     setCropSettings({
@@ -927,7 +1115,7 @@ export default function App() {
   };
 
   // ── Handle YouTube upload callbacks ──────────────────────────────────────────
-  const handleUploadClip = (clip, overrides = {}) => {
+  const handleUploadClip = useCallback((clip, overrides = {}) => {
     if (!isConnected) {
       showToast('Connect YouTube first to upload clips.', 'error');
       return;
@@ -944,16 +1132,580 @@ export default function App() {
     } else {
       showToast(`Starting YouTube upload for Part ${clip.partNumber || ''}...`, 'info');
     }
-  };
+  }, [isConnected, uploadClip, showToast]);
 
-  const handleRetryUpload = (clip) => {
+  const handleRetryUpload = useCallback((clip) => {
     if (!clip.blob) {
       showToast('Clip blob is no longer available. Please re-export to retry.', 'error');
       return;
     }
     retryUpload(clip);
     showToast('Retrying YouTube upload...', 'info');
-  };
+  }, [retryUpload, showToast]);
+
+  // ── Automatic Background Publishing on Render Completion ─────────────────────
+  const handleClipCompleted = useCallback(async (completedJob) => {
+    if (!completedJob || !completedJob.blob) return;
+
+    const plan = completedJob.publishPlan;
+    if (!plan || plan.mode === 'local_only') {
+      // Local render only, no social publish requested
+      return;
+    }
+
+    const { youtube, facebook, instagram } = plan;
+
+    // 1. YouTube Auto Upload / Schedule
+    if (youtube?.enabled && isConnected) {
+      try {
+        const ytPartNum = completedJob.ytPartNumber || completedJob.partNumber || 1;
+        const ytMovie = ytSettings?.yt_name || textSettings?.movieName || 'My Movie';
+        const isYtZeroPad = ytSettings?.yt_zero_pad !== false;
+        const ytTags = (Array.isArray(ytSettings?.yt_tags) && ytSettings.yt_tags.length > 0)
+          ? ytSettings.yt_tags
+          : ['shorts', 'viral', 'clips'];
+
+        const ytTitle = renderTemplate
+          ? renderTemplate(ytSettings?.yt_title_template || '{movie} - Part {part} | #Shorts', {
+              movieName: ytMovie,
+              partNumber: ytPartNum,
+              zeroPad: isYtZeroPad,
+              tags: ytTags
+            })
+          : `${ytMovie} - Part ${ytPartNum} | #Shorts`;
+
+        const ytDesc = renderTemplate
+          ? renderTemplate(ytSettings?.yt_description_template || '{movie} - Part {part}\n\n#Shorts\n\n{hashtags}', {
+              movieName: ytMovie,
+              partNumber: ytPartNum,
+              zeroPad: isYtZeroPad,
+              tags: ytTags
+            })
+          : `${ytMovie} - Part ${ytPartNum}\n\n${ytTags.map(t => `#${t}`).join(' ')}`;
+
+        handleUploadClip(completedJob, {
+          title: ytTitle,
+          titleOverride: ytTitle,
+          description: ytDesc,
+          descriptionOverride: ytDesc,
+          tags: ytTags,
+          tagsOverride: ytTags,
+          visibility: ytSettings?.yt_visibility || 'private',
+          scheduledAt: youtube.scheduledAt || null
+        });
+      } catch (ytErr) {
+        console.error('[handleClipCompleted] YouTube auto-upload error:', ytErr);
+      }
+    }
+
+    // Single B2 upload deduplication across Facebook & Instagram for this clip
+    const cacheKey = completedJob.id || (completedJob.blob?.size ? `${completedJob.name}_${completedJob.blob.size}` : completedJob.blob);
+    let cachedUpload = completedJob.blob ? sharedUploadCache.getCachedUpload(completedJob.blob, cacheKey) : null;
+
+    // 2. Facebook Auto Publish / Schedule
+    if (facebook?.enabled && isFbConnected) {
+      setFbPublishingClipId(completedJob.id);
+      try {
+        const fbPartNum = completedJob.partNumber || 1;
+        const fbMovie = fbSettings?.fb_name || textSettings?.movieName || 'My Movie';
+        const isFbZeroPad = fbSettings?.fb_zero_pad !== false;
+        const fbTags = (Array.isArray(fbSettings?.fb_tags) && fbSettings.fb_tags.length > 0)
+          ? fbSettings.fb_tags
+          : ['reels', 'facebookreels', 'viral'];
+
+        const fbTitle = renderFbTemplate
+          ? renderFbTemplate(fbSettings?.fb_title_template || '{movie} - Part {part} | #Reels', {
+              movieName: fbMovie,
+              partNumber: fbPartNum,
+              zeroPad: isFbZeroPad,
+              tags: fbTags
+            })
+          : `${fbMovie} - Part ${fbPartNum} | #Reels`;
+
+        const fbCaption = renderFbTemplate
+          ? renderFbTemplate(fbSettings?.fb_caption_template || '{movie} - Part {part}\n\n#Reels #Shorts\n\n{hashtags}', {
+              movieName: fbMovie,
+              partNumber: fbPartNum,
+              zeroPad: isFbZeroPad,
+              tags: fbTags
+            })
+          : `${fbMovie} - Part ${fbPartNum}\n\n${fbTags.map(t => `#${t}`).join(' ')}`;
+
+        const fbRes = await publishToFacebookPipeline(completedJob.blob, {
+          clipId: completedJob.id,
+          b2FileId: cachedUpload?.b2FileId,
+          b2FileName: cachedUpload?.b2FileName,
+          fileName: `${fbMovie.replace(/[\\/:*?"<>|]/g, '_')}_Part_${fbPartNum}.mp4`,
+          title: fbTitle,
+          caption: fbCaption,
+          hashtags: fbTags,
+          contentType: fbSettings?.fb_content_type || 'reel',
+          pageId: fbAccount?.page_id,
+          scheduledAt: facebook.scheduledAt || null
+        });
+
+        if (!cachedUpload && completedJob.blob) {
+          cachedUpload = sharedUploadCache.getCachedUpload(completedJob.blob, cacheKey);
+        }
+
+        const fbUrl = fbRes?.postUrl || fbRes?.permalink_url || (fbRes?.videoId ? `https://www.facebook.com/reel/${fbRes.videoId}` : null);
+        if (fbUrl) {
+          setFbPublishedMap(prev => ({ ...prev, [completedJob.id]: fbUrl }));
+        }
+        if (facebook.scheduledAt) {
+          showToast(`Part ${fbPartNum} scheduled on Facebook for ${new Date(facebook.scheduledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, 'success');
+        } else {
+          showToast(`Part ${fbPartNum} published to Facebook!`, 'success');
+        }
+      } catch (fbErr) {
+        console.error(`[handleClipCompleted] Facebook error on Part ${completedJob.partNumber}:`, fbErr);
+        showToast(`Facebook error on Part ${completedJob.partNumber}: ${fbErr.message}`, 'error');
+      } finally {
+        setFbPublishingClipId(null);
+      }
+    }
+
+    // 3. Instagram Auto Publish / Schedule
+    if (instagram?.enabled && isIgConnected) {
+      setIgPublishingClipId(completedJob.id);
+      try {
+        const igPartNum = completedJob.partNumber || 1;
+        const igMovie = igSettings?.ig_name || textSettings?.movieName || 'My Movie';
+        const isIgZeroPad = igSettings?.ig_zero_pad !== false;
+        const igTags = (Array.isArray(igSettings?.ig_tags) && igSettings.ig_tags.length > 0)
+          ? igSettings.ig_tags
+          : ['reels', 'instagramreels', 'viral'];
+
+        const igCaption = renderIgTemplate
+          ? renderIgTemplate(igSettings?.ig_caption_template || '{movie} - Part {part}\n\n#Reels #InstagramReels #Viral\n\n{hashtags}', {
+              movieName: igMovie,
+              partNumber: igPartNum,
+              zeroPad: isIgZeroPad,
+              tags: igTags
+            })
+          : `${igMovie} - Part ${igPartNum}\n\n${igTags.map(t => `#${t}`).join(' ')}`;
+
+        const igRes = await publishToInstagramPipeline(completedJob.blob, {
+          clipId: completedJob.id,
+          b2FileId: cachedUpload?.b2FileId,
+          b2FileName: cachedUpload?.b2FileName,
+          fileName: `${igMovie.replace(/[\\/:*?"<>|]/g, '_')}_Part_${igPartNum}.mp4`,
+          title: `${igMovie} - Part ${igPartNum}`,
+          caption: igCaption,
+          hashtags: igTags,
+          shareToFeed: igSettings?.ig_share_to_feed !== false,
+          contentType: igSettings?.ig_content_type || 'reel',
+          igUserId: igAccount?.ig_user_id,
+          scheduledAt: instagram.scheduledAt || null
+        });
+
+        const igUrl = igRes?.postUrl || (igRes?.media_id ? `https://www.instagram.com/reel/${igRes.media_id}` : null);
+        if (igUrl) {
+          setIgPublishedMap(prev => ({ ...prev, [completedJob.id]: igUrl }));
+        }
+        if (instagram.scheduledAt) {
+          showToast(`Part ${igPartNum} scheduled on Instagram for ${new Date(instagram.scheduledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, 'success');
+        } else {
+          showToast(`Part ${igPartNum} published to Instagram!`, 'success');
+        }
+      } catch (igErr) {
+        console.error(`[handleClipCompleted] Instagram error on Part ${completedJob.partNumber}:`, igErr);
+        showToast(`Instagram error on Part ${completedJob.partNumber}: ${igErr.message}`, 'error');
+      } finally {
+        setIgPublishingClipId(null);
+      }
+    }
+  }, [
+    isConnected,
+    isFbConnected,
+    isIgConnected,
+    handleUploadClip,
+    renderTemplate,
+    renderFbTemplate,
+    renderIgTemplate,
+    textSettings.movieName,
+    ytSettings,
+    fbSettings,
+    fbAccount,
+    igSettings,
+    igAccount,
+    publishToFacebookPipeline,
+    publishToInstagramPipeline,
+    showToast
+  ]);
+
+  useEffect(() => {
+    handleClipCompletedRef.current = handleClipCompleted;
+  }, [handleClipCompleted]);
+
+  // ── Central Unified Publishing & Scheduling Orchestrator ─────────────────────
+  const handleUnifiedPublish = useCallback(async (config) => {
+    // If opened in pre-render mode, start rendering queue with publishConfig attached
+    if (preRenderContext) {
+      const savedContext = preRenderContext;
+      setPreRenderContext(null);
+      setPublishModalClips(null);
+
+      if (config.mode === 'local_only' || (!config.platforms?.youtube?.enabled && !config.platforms?.facebook?.enabled && !config.platforms?.instagram?.enabled)) {
+        handleGenerateQueue({ ...savedContext, publishConfig: null });
+        showToast('Rendering clips locally (no social upload)...', 'info');
+      } else {
+        handleGenerateQueue({ ...savedContext, publishConfig: config });
+        showToast(
+          config.mode === 'schedule'
+            ? `Starting rendering! Clips will be scheduled with ${config.batchIntervalMinutes || 30}-min intervals.`
+            : 'Starting rendering! Clips will be published as each completes.',
+          'success'
+        );
+      }
+      return;
+    }
+
+    // Post-render mode (completed clips published directly)
+    const { clips, mode, batchIntervalMinutes = 30, platforms } = config;
+    if (!clips || clips.length === 0) {
+      showToast('No clips selected for publishing.', 'error');
+      return;
+    }
+
+    const enabledPlatforms = [];
+    if (platforms.youtube?.enabled) enabledPlatforms.push('YouTube');
+    if (platforms.facebook?.enabled) enabledPlatforms.push('Facebook');
+    if (platforms.instagram?.enabled) enabledPlatforms.push('Instagram');
+
+    if (enabledPlatforms.length === 0) {
+      showToast('Please select at least one platform.', 'error');
+      return;
+    }
+
+    const isScheduling = mode === 'schedule';
+    showToast(
+      `${isScheduling ? 'Scheduling' : 'Publishing'} ${clips.length} clip(s) to ${enabledPlatforms.join(', ')}...`,
+      'info'
+    );
+
+    // Process each clip sequentially with single B2 upload deduplication
+    for (let i = 0; i < clips.length; i++) {
+      const clip = clips[i];
+      const partNum = clip.partNumber || i + 1;
+      const clipOffsetMs = i * batchIntervalMinutes * 60 * 1000;
+
+      // 1. YouTube Upload / Schedule
+      if (platforms.youtube?.enabled && isConnected) {
+        let ytScheduledAt = null;
+        const ytTargetTime = platforms.youtube.scheduleTime || platforms.youtube.scheduledAt;
+        if (isScheduling && ytTargetTime) {
+          ytScheduledAt = new Date(new Date(ytTargetTime).getTime() + clipOffsetMs).toISOString();
+        }
+
+        const ytPartNum = clip.ytPartNumber || partNum;
+        const ytMovie = ytSettings?.yt_name || textSettings?.movieName || 'My Movie';
+        const isYtZeroPad = ytSettings?.yt_zero_pad !== false;
+        const ytTags = (Array.isArray(ytSettings?.yt_tags) && ytSettings.yt_tags.length > 0)
+          ? ytSettings.yt_tags
+          : ['shorts', 'viral', 'clips'];
+
+        const ytTitle = renderTemplate
+          ? renderTemplate(ytSettings?.yt_title_template || '{movie} - Part {part} | #Shorts', {
+              movieName: ytMovie,
+              partNumber: ytPartNum,
+              zeroPad: isYtZeroPad,
+              tags: ytTags
+            })
+          : `${ytMovie} - Part ${ytPartNum} | #Shorts`;
+
+        const ytDesc = renderTemplate
+          ? renderTemplate(ytSettings?.yt_description_template || '{movie} - Part {part}\n\n#Shorts\n\n{hashtags}', {
+              movieName: ytMovie,
+              partNumber: ytPartNum,
+              zeroPad: isYtZeroPad,
+              tags: ytTags
+            })
+          : `${ytMovie} - Part ${ytPartNum}\n\n${ytTags.map(t => `#${t}`).join(' ')}`;
+
+        handleUploadClip(clip, {
+          title: ytTitle,
+          titleOverride: ytTitle,
+          description: ytDesc,
+          descriptionOverride: ytDesc,
+          tags: ytTags,
+          tagsOverride: ytTags,
+          visibility: ytSettings?.yt_visibility || 'private',
+          scheduledAt: ytScheduledAt
+        });
+      }
+
+      // Check if B2 upload is already cached for FB / IG (deduplicate B2 upload)
+      const cacheKey = clip.id || (clip.blob && clip.blob.size ? `${clip.name}_${clip.blob.size}` : clip.blob);
+      let cachedUpload = clip.blob ? sharedUploadCache.getCachedUpload(clip.blob, cacheKey) : null;
+
+      // 2. Facebook Publish / Schedule
+      if (platforms.facebook?.enabled && isFbConnected) {
+        setFbPublishingClipId(clip.id);
+        try {
+          let fbScheduledAt = null;
+          const fbTargetTime = platforms.facebook.scheduleTime || platforms.facebook.scheduledAt;
+          if (isScheduling && fbTargetTime) {
+            fbScheduledAt = new Date(new Date(fbTargetTime).getTime() + clipOffsetMs).toISOString();
+          }
+
+          const fbMovie = fbSettings?.fb_name || textSettings?.movieName || 'My Movie';
+          const isFbZeroPad = fbSettings?.fb_zero_pad !== false;
+          const fbTags = (Array.isArray(fbSettings?.fb_tags) && fbSettings.fb_tags.length > 0)
+            ? fbSettings.fb_tags
+            : ['reels', 'facebookreels', 'viral'];
+
+          const fbTitle = renderFbTemplate
+            ? renderFbTemplate(fbSettings?.fb_title_template || '{movie} - Part {part} | #Reels', {
+                movieName: fbMovie,
+                partNumber: partNum,
+                zeroPad: isFbZeroPad,
+                tags: fbTags
+              })
+            : `${fbMovie} - Part ${partNum} | #Reels`;
+
+          const fbCaption = renderFbTemplate
+            ? renderFbTemplate(fbSettings?.fb_caption_template || '{movie} - Part {part}\n\n#Reels #Shorts\n\n{hashtags}', {
+                movieName: fbMovie,
+                partNumber: partNum,
+                zeroPad: isFbZeroPad,
+                tags: fbTags
+              })
+            : `${fbMovie} - Part ${partNum}\n\n${fbTags.map(t => `#${t}`).join(' ')}`;
+
+          const fbRes = await publishToFacebookPipeline(clip.blob, {
+            clipId: clip.id,
+            b2FileId: cachedUpload?.b2FileId,
+            b2FileName: cachedUpload?.b2FileName,
+            fileName: `${fbMovie.replace(/[\\/:*?"<>|]/g, '_')}_Part_${partNum}.mp4`,
+            title: fbTitle,
+            caption: fbCaption,
+            hashtags: fbTags,
+            contentType: fbSettings?.fb_content_type || 'reel',
+            pageId: fbAccount?.page_id,
+            scheduledAt: fbScheduledAt
+          });
+
+          if (!cachedUpload && clip.blob) {
+            cachedUpload = sharedUploadCache.getCachedUpload(clip.blob, cacheKey);
+          }
+
+          const publishedUrl = fbRes?.postUrl || fbRes?.permalink_url || (fbRes?.videoId ? `https://www.facebook.com/reel/${fbRes.videoId}` : null);
+          if (publishedUrl) {
+            setFbPublishedMap(prev => ({ ...prev, [clip.id]: publishedUrl }));
+          }
+          if (fbScheduledAt) {
+            showToast(`Part ${partNum} scheduled on Facebook for ${new Date(fbScheduledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, 'success');
+          } else {
+            showToast(`Part ${partNum} published to Facebook!`, 'success');
+          }
+        } catch (fbErr) {
+          console.error(`FB publish error on part ${partNum}:`, fbErr);
+          showToast(`Facebook error on Part ${partNum}: ${fbErr.message}`, 'error');
+        } finally {
+          setFbPublishingClipId(null);
+        }
+      }
+
+      // 3. Instagram Publish / Schedule
+      if (platforms.instagram?.enabled && isIgConnected) {
+        setIgPublishingClipId(clip.id);
+        try {
+          let igScheduledAt = null;
+          const igTargetTime = platforms.instagram.scheduleTime || platforms.instagram.scheduledAt;
+          if (isScheduling && igTargetTime) {
+            igScheduledAt = new Date(new Date(igTargetTime).getTime() + clipOffsetMs).toISOString();
+          }
+
+          const igMovie = igSettings?.ig_name || textSettings?.movieName || 'My Movie';
+          const isIgZeroPad = igSettings?.ig_zero_pad !== false;
+          const igTags = (Array.isArray(igSettings?.ig_tags) && igSettings.ig_tags.length > 0)
+            ? igSettings.ig_tags
+            : ['reels', 'instagramreels', 'viral'];
+
+          const igCaption = renderIgTemplate
+            ? renderIgTemplate(igSettings?.ig_caption_template || '{movie} - Part {part}\n\n#Reels #InstagramReels #Viral\n\n{hashtags}', {
+                movieName: igMovie,
+                partNumber: partNum,
+                zeroPad: isIgZeroPad,
+                tags: igTags
+              })
+            : `${igMovie} - Part ${partNum}\n\n${igTags.map(t => `#${t}`).join(' ')}`;
+
+          const igRes = await publishToInstagramPipeline(clip.blob, {
+            clipId: clip.id,
+            b2FileId: cachedUpload?.b2FileId,
+            b2FileName: cachedUpload?.b2FileName,
+            fileName: `${igMovie.replace(/[\\/:*?"<>|]/g, '_')}_Part_${partNum}.mp4`,
+            title: `${igMovie} - Part ${partNum}`,
+            caption: igCaption,
+            hashtags: igTags,
+            shareToFeed: igSettings?.ig_share_to_feed !== false,
+            contentType: igSettings?.ig_content_type || 'reel',
+            igUserId: igAccount?.ig_user_id,
+            scheduledAt: igScheduledAt
+          });
+
+          const publishedUrl = igRes?.postUrl || (igRes?.media_id ? `https://www.instagram.com/reel/${igRes.media_id}` : null);
+          if (publishedUrl) {
+            setIgPublishedMap(prev => ({ ...prev, [clip.id]: publishedUrl }));
+          }
+          if (igScheduledAt) {
+            showToast(`Part ${partNum} scheduled on Instagram for ${new Date(igScheduledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, 'success');
+          } else {
+            showToast(`Part ${partNum} published to Instagram!`, 'success');
+          }
+        } catch (igErr) {
+          console.error(`Instagram publish error on part ${partNum}:`, igErr);
+          showToast(`Instagram error on Part ${partNum}: ${igErr.message}`, 'error');
+        } finally {
+          setIgPublishingClipId(null);
+        }
+      }
+    }
+  }, [
+    preRenderContext,
+    handleGenerateQueue,
+    isConnected,
+    isFbConnected,
+    isIgConnected,
+    handleUploadClip,
+    renderTemplate,
+    renderFbTemplate,
+    renderIgTemplate,
+    textSettings.movieName,
+    ytSettings,
+    fbSettings,
+    fbAccount,
+    igSettings,
+    igAccount,
+    publishToFacebookPipeline,
+    publishToInstagramPipeline,
+    showToast
+  ]);
+
+  // ── Render EditorTabs instance for either desktop sidebar or mobile slide-up sheet ────────
+  const renderEditorTabs = (isSheet = false) => {
+    if (!videoData) return null;
+    return (
+      <EditorTabs
+        isMobileSheet={isSheet}
+        isFullScreen={isMobileSheetFullScreen}
+        onToggleFullScreen={() => setIsMobileSheetFullScreen(prev => !prev)}
+        onCloseMobileSheet={() => setIsMobileEditOpen(false)}
+        onCloseSheet={() => setIsMobileEditOpen(false)}
+        videoData={videoData}
+        cropSettings={cropSettings}
+        onCropChange={setCropSettings}
+        onCropReset={handleCropReset}
+        bgSettings={bgSettings}
+        onBgChange={setBgSettings}
+        textSettings={textSettings}
+        onTextChange={handleTextChange}
+        logoSettings={logoSettings}
+        onLogoChange={setLogoSettings}
+        effectsSettings={effectsSettings}
+        onEffectsChange={setEffectsSettings}
+        onEffectsReset={handleEffectsReset}
+        audioSettings={audioSettings}
+        onAudioChange={setAudioSettings}
+        exportSettings={exportSettings}
+        onExportChange={handleExportChange}
+        sourceResolution={{ width: videoData?.width || 1080, height: videoData?.height || 1920 }}
+        detectedAudio={videoData?.detectedAudio}
+        detectedFps={videoData?.detectedFps}
+        detectedQuality={videoData?.detectedQuality}
+        onApplyToAll={handleApplyToAll}
+        // Split & Delete props
+        customParts={customParts}
+        onCustomPartsChange={setCustomParts}
+        currentTime={currentTime}
+        duration={videoData?.duration || 0}
+      onCurrentTimeChange={handleExplicitSeek}
+      skipDeletedCuts={skipDeletedCuts}
+      onToggleSkipDeletedCuts={() => setSkipDeletedCuts((prev) => !prev)}
+      onExportMergedCleaned={handleExportMergedCleaned}
+      onExportSelectedMerge={handleExportSelectedMerge}
+      onGenerateBatchKept={handleGenerateBatchKept}
+      onExportSinglePart={handleExportSinglePart}
+      movieName={exportSettings.movieName || textSettings.movieName}
+      // YouTube props
+      ytAccount={ytAccount}
+      isConnected={isConnected}
+      isLoadingAccount={isLoadingAccount}
+      accountError={accountError}
+      connectYouTube={connectYouTube}
+      disconnectYouTubeAccount={disconnectYouTubeAccount}
+      refreshAccount={refreshAccount}
+      ytSettings={ytSettings}
+      updateYtSettings={updateYtSettings}
+      apiAvailable={apiAvailable}
+      isAuthenticated={isUserLoggedIn}
+      onOpenAuth={openAuthModal}
+      pipelineStartTime={pipelineStartTime}
+      setPipelineStartTime={setPipelineStartTime}
+      completedClips={completedClips}
+      uploadHistory={uploadHistory}
+      uploadJobs={uploadJobs}
+      isLoadingHistory={isLoadingHistory}
+      onRetryUpload={handleRetryUpload}
+      refreshHistory={refreshHistory}
+      // Facebook props
+      fbAccount={fbAccount}
+      availablePages={fbAvailablePages}
+      isFbConnected={isFbConnected}
+      isFbUserConnected={isFbUserConnected}
+      isFbPageConnected={isFbPageConnected}
+      isLoadingFbAccount={isLoadingFbAccount}
+      fbAccountError={fbAccountError}
+      connectFacebook={connectFacebook}
+      connectFbPageById={connectFbPageById}
+      isConnectingFbPage={isConnectingFbPage}
+      fbPageConnectError={fbPageConnectError}
+      setFbPageConnectError={setFbPageConnectError}
+      switchPage={switchFbPage}
+      disconnectFacebook={disconnectFacebook}
+      refreshFbAccount={refreshFbAccount}
+      fbSettings={fbSettings}
+      updateFbSettings={updateFbSettings}
+      renderFbTemplate={renderFbTemplate}
+      publishToFacebookPipeline={publishToFacebookPipeline}
+      isPublishingFb={isPublishingFb}
+      publishFbProgress={publishFbProgress}
+      publishFbStage={publishFbStage}
+      publishFbError={publishFbError}
+      lastPublishedFbPost={lastPublishedFbPost}
+      // Instagram props
+      igAccount={igAccount}
+      availableIgAccounts={igAvailableAccounts}
+      isIgConnected={isIgConnected}
+      isIgUserConnected={isIgUserConnected}
+      isIgAccountConnected={isIgAccountConnected}
+      isLoadingIgAccount={isLoadingIgAccount}
+      igAccountError={igAccountError}
+      connectInstagram={connectInstagram}
+      connectIgAccountById={connectIgAccountById}
+      isConnectingIgAccount={isConnectingIgAccount}
+      igAccountConnectError={igAccountConnectError}
+      setIgAccountConnectError={setIgAccountConnectError}
+      switchIgAccount={switchIgAccount}
+      disconnectInstagram={disconnectInstagram}
+      refreshIgAccount={refreshIgAccount}
+      igSettings={igSettings}
+      updateIgSettings={updateIgSettings}
+      renderIgTemplate={renderIgTemplate}
+      publishToInstagramPipeline={publishToInstagramPipeline}
+      isPublishingIg={isPublishingIg}
+      publishIgProgress={publishIgProgress}
+      publishIgStage={publishIgStage}
+      publishIgError={publishIgError}
+      lastPublishedIgPost={lastPublishedIgPost}
+      activeTab={activeEditorTab}
+      onTabChange={setActiveEditorTab}
+      showToast={showToast}
+    />
+  );
+};
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-orange-500/30 selection:text-orange-200 pb-safe">
@@ -992,6 +1744,7 @@ export default function App() {
         hasVideo={Boolean(videoData)}
         onReset={() => {
           setVideoData(null);
+          currentTimeRef.current = 0;
           setCurrentTime(0);
         }}
         user={user}
@@ -1012,7 +1765,7 @@ export default function App() {
       />
 
       {/* Main Application Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 pb-24 lg:pb-8 space-y-4 sm:space-y-6">
         {/* Step 1: Video Uploader Area */}
         <section className="space-y-2">
           <VideoUploader onVideoSelect={handleVideoSelect} currentVideo={videoData} />
@@ -1021,55 +1774,14 @@ export default function App() {
         {/* Workspace Grid (When video is loaded) */}
         {videoData && (
           <>
-            {/* Mobile View Mode Navigation Switcher (visible on screens < lg) */}
-            <div className="lg:hidden bg-slate-900 border border-slate-800 rounded-2xl p-1.5 grid grid-cols-3 gap-1 shadow-lg touch-manipulation sticky top-16 z-30 backdrop-blur-md bg-slate-900/95">
-              <button
-                onClick={() => setMobileView('preview')}
-                className={`py-2 px-1 text-xs font-semibold rounded-xl flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
-                  mobileView === 'preview'
-                    ? 'bg-orange-500 text-white shadow-md'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Film className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">Preview &amp; Cut</span>
-              </button>
-
-              <button
-                onClick={() => setMobileView('style')}
-                className={`py-2 px-1 text-xs font-semibold rounded-xl flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
-                  mobileView === 'style'
-                    ? 'bg-orange-500 text-white shadow-md'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Palette className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">Style &amp; Text</span>
-              </button>
-
-              <button
-                onClick={() => setMobileView('queue')}
-                className={`py-2 px-1 text-xs font-semibold rounded-xl flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
-                  mobileView === 'queue'
-                    ? 'bg-orange-500 text-white shadow-md'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Layers className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">
-                  Queue {queue.length > 0 || completedClips.length > 0 ? `(${queue.length + completedClips.length})` : ''}
-                </span>
-              </button>
-            </div>
-
-            {/* Desktop 2-Column Workspace Layout (and Responsive Mobile Panels) */}
+            {/* Desktop 2-Column Workspace Layout & Single Column on Mobile */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
-              {/* Left Column: Player & Interactive Canvas */}
-              <div className={`lg:col-span-7 space-y-4 sm:space-y-6 ${mobileView === 'preview' ? 'block' : 'hidden lg:block'}`}>
+              {/* Left Column: Player, Timeline & Mobile Quick Tool Strip */}
+              <div className="lg:col-span-7 space-y-4 sm:space-y-6">
                 <VideoPreview
                   videoData={videoData}
                   currentTime={currentTime}
-                  onTimeUpdate={setCurrentTime}
+                  onTimeUpdate={handleTimeUpdate}
                   cropSettings={cropSettings}
                   onCropChange={setCropSettings}
                   bgSettings={bgSettings}
@@ -1083,6 +1795,7 @@ export default function App() {
                   skipDeletedCuts={skipDeletedCuts}
                   onSplitAtPlayhead={handleSplitAtPlayhead}
                   onToggleCutAtPlayhead={handleToggleCutAtPlayhead}
+                  isSuspended={isEditorPreviewSuspended || Boolean(previewClipModal)}
                 />
 
                 {/* Timeline Range Scrubber & Manual Parts Time Table */}
@@ -1093,127 +1806,80 @@ export default function App() {
                   currentTime={currentTime}
                   onStartChange={setStartTime}
                   onEndChange={setEndTime}
-                  onCurrentTimeChange={setCurrentTime}
+                  onCurrentTimeChange={handleExplicitSeek}
                   clipDuration={clipDuration}
                   onClipDurationChange={setClipDuration}
                   movieName={textSettings.movieName}
                   customParts={customParts}
                   onCustomPartsChange={setCustomParts}
                 />
+
+                {/* Mobile Quick Tool Launcher (visible on screens < lg) */}
+                <div className="lg:hidden bg-slate-900/90 border border-slate-800/80 rounded-2xl p-2.5 sm:p-3 backdrop-blur-md shadow-xl">
+                  <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800/60 px-1">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                      <Sliders className="w-3.5 h-3.5 text-orange-400" />
+                      Editing &amp; Social Tools
+                    </span>
+                    <button
+                      onClick={() => {
+                        setActiveMobileNavTab('edit');
+                        setIsMobileEditOpen(true);
+                      }}
+                      className="text-[11px] font-semibold text-orange-400 hover:text-orange-300 flex items-center gap-0.5 cursor-pointer touch-manipulation"
+                    >
+                      <span>Open All Tools</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-6">
+                    {[
+                      { id: 'split-cut', label: 'Split & Cut', icon: Scissors, color: 'text-amber-400' },
+                      { id: 'auto-split', label: 'Auto Split', icon: Sparkles, color: 'text-orange-400' },
+                      { id: 'crop', label: '9:16 Crop', icon: Crop, color: 'text-cyan-400' },
+                      { id: 'background', label: 'Backdrop', icon: ImageIcon, color: 'text-blue-400' },
+                      { id: 'text', label: 'Text/Titles', icon: Type, color: 'text-emerald-400' },
+                      { id: 'logo', label: 'Logo', icon: ImageIcon, color: 'text-violet-400' },
+                      { id: 'effects', label: 'Effects', icon: SlidersHorizontal, color: 'text-pink-400' },
+                      { id: 'audio', label: 'Audio', icon: Volume2, color: 'text-green-400' },
+                      { id: 'export', label: 'Export', icon: Film, color: 'text-orange-400' },
+                      { id: 'youtube', label: 'YouTube', icon: Youtube, color: 'text-red-400' },
+                      { id: 'facebook', label: 'Facebook', icon: Share2, color: 'text-blue-500' },
+                      { id: 'instagram', label: 'Instagram', icon: Instagram, color: 'text-purple-400' },
+                    ].map((item) => {
+                      const Icon = item.icon;
+                      const isActive = activeEditorTab === item.id;
+                      return (
+                        <button
+                          key={item.id}
+                          onClick={() => {
+                            setActiveEditorTab(item.id);
+                            setActiveMobileNavTab('edit');
+                            setIsMobileEditOpen(true);
+                          }}
+                          className={`flex flex-col items-center justify-center p-2 rounded-xl transition-all cursor-pointer touch-manipulation min-h-[58px] ${
+                            isActive
+                              ? 'bg-orange-500/20 border border-orange-500/40 text-orange-300 shadow-sm'
+                              : 'bg-slate-800/60 border border-slate-700/40 text-slate-300 hover:bg-slate-800 hover:text-white'
+                          }`}
+                        >
+                          <Icon className={`w-4 h-4 mb-1 ${item.color}`} />
+                          <span className="text-[10px] font-medium leading-tight text-center truncate w-full">{item.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
 
-              {/* Right Column: Multi-tab Editing Panel */}
-              <div className={`lg:col-span-5 space-y-4 sm:space-y-6 ${mobileView === 'style' ? 'block' : 'hidden lg:block'}`}>
-                <EditorTabs
-                  videoData={videoData}
-                  cropSettings={cropSettings}
-                  onCropChange={setCropSettings}
-                  onCropReset={handleCropReset}
-                  bgSettings={bgSettings}
-                  onBgChange={setBgSettings}
-                  textSettings={textSettings}
-                  onTextChange={setTextSettings}
-                  logoSettings={logoSettings}
-                  onLogoChange={setLogoSettings}
-                  effectsSettings={effectsSettings}
-                  onEffectsChange={setEffectsSettings}
-                  onEffectsReset={handleEffectsReset}
-                  audioSettings={audioSettings}
-                  onAudioChange={setAudioSettings}
-                  exportSettings={exportSettings}
-                  onExportChange={setExportSettings}
-                  sourceResolution={{ width: videoData.width, height: videoData.height }}
-                  detectedAudio={videoData.detectedAudio}
-                  detectedFps={videoData.detectedFps}
-                  detectedQuality={videoData.detectedQuality}
-                  onApplyToAll={handleApplyToAll}
-                  // Split & Delete props
-                  customParts={customParts}
-                  onCustomPartsChange={setCustomParts}
-                  currentTime={currentTime}
-                  duration={videoData.duration}
-                  onCurrentTimeChange={setCurrentTime}
-                  skipDeletedCuts={skipDeletedCuts}
-                  onToggleSkipDeletedCuts={() => setSkipDeletedCuts((prev) => !prev)}
-                  onExportMergedCleaned={handleExportMergedCleaned}
-                  onExportSelectedMerge={handleExportSelectedMerge}
-                  onGenerateBatchKept={handleGenerateBatchKept}
-                  onExportSinglePart={handleExportSinglePart}
-                  movieName={textSettings.movieName}
-                  // YouTube props
-                  ytAccount={ytAccount}
-                  isConnected={isConnected}
-                  isLoadingAccount={isLoadingAccount}
-                  accountError={accountError}
-                  connectYouTube={connectYouTube}
-                  disconnectYouTubeAccount={disconnectYouTubeAccount}
-                  refreshAccount={refreshAccount}
-                  ytSettings={ytSettings}
-                  updateYtSettings={updateYtSettings}
-                  apiAvailable={apiAvailable}
-                  isAuthenticated={isUserLoggedIn}
-                  onOpenAuth={openAuthModal}
-                  pipelineStartTime={pipelineStartTime}
-                  setPipelineStartTime={setPipelineStartTime}
-                  completedClips={completedClips}
-                  // Facebook props
-                  fbAccount={fbAccount}
-                  availablePages={fbAvailablePages}
-                  isFbConnected={isFbConnected}
-                  isFbUserConnected={isFbUserConnected}
-                  isFbPageConnected={isFbPageConnected}
-                  isLoadingFbAccount={isLoadingFbAccount}
-                  fbAccountError={fbAccountError}
-                  connectFacebook={connectFacebook}
-                  connectFbPageById={connectFbPageById}
-                  isConnectingFbPage={isConnectingFbPage}
-                  fbPageConnectError={fbPageConnectError}
-                  setFbPageConnectError={setFbPageConnectError}
-                  switchPage={switchFbPage}
-                  disconnectFacebook={disconnectFacebook}
-                  refreshFbAccount={refreshFbAccount}
-                  fbSettings={fbSettings}
-                  updateFbSettings={updateFbSettings}
-                  renderFbTemplate={renderFbTemplate}
-                  publishToFacebookPipeline={publishToFacebookPipeline}
-                  isPublishingFb={isPublishingFb}
-                  publishFbProgress={publishFbProgress}
-                  publishFbStage={publishFbStage}
-                  publishFbError={publishFbError}
-                  lastPublishedFbPost={lastPublishedFbPost}
-                  // Instagram props
-                  igAccount={igAccount}
-                  availableIgAccounts={igAvailableAccounts}
-                  isIgConnected={isIgConnected}
-                  isIgUserConnected={isIgUserConnected}
-                  isIgAccountConnected={isIgAccountConnected}
-                  isLoadingIgAccount={isLoadingIgAccount}
-                  igAccountError={igAccountError}
-                  connectInstagram={connectInstagram}
-                  connectIgAccountById={connectIgAccountById}
-                  isConnectingIgAccount={isConnectingIgAccount}
-                  igAccountConnectError={igAccountConnectError}
-                  setIgAccountConnectError={setIgAccountConnectError}
-                  switchIgAccount={switchIgAccount}
-                  disconnectInstagram={disconnectInstagram}
-                  refreshIgAccount={refreshIgAccount}
-                  igSettings={igSettings}
-                  updateIgSettings={updateIgSettings}
-                  renderIgTemplate={renderIgTemplate}
-                  publishToInstagramPipeline={publishToInstagramPipeline}
-                  isPublishingIg={isPublishingIg}
-                  publishIgProgress={publishIgProgress}
-                  publishIgStage={publishIgStage}
-                  publishIgError={publishIgError}
-                  lastPublishedIgPost={lastPublishedIgPost}
-                  activeTab={activeEditorTab}
-                  onTabChange={setActiveEditorTab}
-                />
+              {/* Right Column: Multi-tab Editing Panel (Visible on desktop >= lg) */}
+              <div className="hidden lg:block lg:col-span-5 space-y-4 lg:space-y-6">
+                {renderEditorTabs(false)}
               </div>
             </div>
 
-            {/* Bottom Row: Batch Processing Queue & Output */}
-            <div className={`space-y-4 sm:space-y-6 pt-1 sm:pt-2 ${mobileView === 'queue' ? 'block' : 'hidden lg:block'}`}>
+            {/* Batch Processing Queue & Output */}
+            <div id="processing-queue-container" className="space-y-4 sm:space-y-6 pt-1 sm:pt-2">
               <ProcessingQueue
                 queue={queue}
                 onGenerateQueue={handleGenerateQueue}
@@ -1245,95 +1911,66 @@ export default function App() {
                 fbPublishStage={publishFbStage}
                 fbPublishingClipId={fbPublishingClipId}
                 fbPublishedMap={fbPublishedMap}
-              />
-
-              <GeneratedClips
-                completedClips={completedClips}
-                onDownloadClip={downloadClip}
-                onDownloadAllZip={handleDownloadAllZip}
-                isZipping={isZipping}
-                zipProgress={zipProgress}
-                movieName={textSettings.movieName}
-                youtubeName={ytSettings?.yt_name || textSettings.movieName}
-                // YouTube upload integration
-                uploadJobs={uploadJobs}
-                onUploadClip={handleUploadClip}
-                onRetryUpload={handleRetryUpload}
-                isConnected={isConnected}
-                ytSettings={ytSettings}
-                // Facebook Reels upload integration
-                isFbConnected={isFbConnected}
-                fbAccount={fbAccount}
-                fbSettings={fbSettings}
-                onPublishFbClip={handlePublishFbClip}
-                onBatchPublishFb={handleBatchPublishFb}
-                isPublishingFb={isPublishingFb}
-                fbPublishProgress={publishFbProgress}
-                fbPublishStage={publishFbStage}
-                fbPublishingClipId={fbPublishingClipId}
-                fbPublishedMap={fbPublishedMap}
                 // Instagram Reels upload integration
                 isIgConnected={isIgConnected}
                 igAccount={igAccount}
                 igSettings={igSettings}
                 onPublishIgClip={handlePublishIgClip}
-                onBatchPublishIg={handleBatchPublishIg}
                 isPublishingIg={isPublishingIg}
                 igPublishProgress={publishIgProgress}
                 igPublishStage={publishIgStage}
                 igPublishingClipId={igPublishingClipId}
                 igPublishedMap={igPublishedMap}
-                // Dual FB + IG platform integration
-                onPublishBothClip={handlePublishBothClip}
-                onBatchPublishBoth={handleBatchPublishBoth}
-                isPublishingBoth={isPublishingBoth}
-              />
-
-              {/* YouTube Upload History (only shown when there are history records) */}
-              <YouTubeUploadHistory
-                uploadHistory={uploadHistory}
-                uploadJobs={uploadJobs}
-                isLoadingHistory={isLoadingHistory}
-                onRetry={handleRetryUpload}
-                onRefresh={refreshHistory}
-                completedClips={completedClips}
+                onOpenPublish={setPublishModalClips}
+                onOpenPreRenderModal={(pendingClips, options) => {
+                  setPreRenderContext(options);
+                  setPublishModalClips(pendingClips);
+                }}
+                onDownloadAllZip={handleDownloadAllZip}
+                isZipping={isZipping}
+                zipProgress={zipProgress}
               />
             </div>
           </>
         )}
       </main>
 
-      {/* Completed Clip Modal Preview */}
+      {/* Mobile Slide-Up Edit Sheet (< lg) */}
+      {videoData && (
+        <MobileEditSheet
+          isOpen={isMobileEditOpen}
+          onClose={() => setIsMobileEditOpen(false)}
+          isFullScreen={isMobileSheetFullScreen}
+          onToggleFullScreen={() => setIsMobileSheetFullScreen(prev => !prev)}
+        >
+          {renderEditorTabs(true)}
+        </MobileEditSheet>
+      )}
+
+      {/* Fixed Mobile Bottom Navigation (< lg) */}
+      {videoData && (
+        <MobileBottomNav
+          activeNavTab={activeMobileNavTab}
+          onSelectNavTab={handleMobileNavSelect}
+          queueCount={queue.length}
+          clipsCount={completedClips.length}
+        />
+      )}
+
+      {/* Dedicated High-Performance Modal Player for Completed Clips */}
       {previewClipModal && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-150 max-h-[92vh] flex flex-col">
-            <div className="p-3.5 sm:p-4 border-b border-slate-800 flex items-center justify-between">
-              <span className="font-semibold text-xs sm:text-sm text-white truncate max-w-[200px] sm:max-w-xs">{previewClipModal.name}</span>
-              <button
-                onClick={() => setPreviewClipModal(null)}
-                className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer touch-manipulation"
-              >
-                <X className="w-4 h-4 sm:w-5 sm:h-5" />
-              </button>
-            </div>
-            <div className="p-3 sm:p-4 bg-black flex justify-center flex-1 min-h-0">
-              <video
-                src={previewClipModal.outputUrl}
-                controls
-                autoPlay
-                className="max-h-[55vh] rounded-lg shadow-lg w-auto object-contain"
-              />
-            </div>
-            <div className="p-3.5 sm:p-4 border-t border-slate-800 flex justify-end">
-              <button
-                onClick={() => downloadClip(previewClipModal)}
-                className="w-full sm:w-auto px-4 py-2.5 sm:py-2 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 active:scale-98 text-white font-semibold text-xs rounded-xl shadow-lg shadow-orange-500/20 cursor-pointer touch-manipulation flex items-center justify-center space-x-1.5"
-              >
-                Download This Part
-              </button>
-            </div>
-          </div>
-        </div>
+        <GeneratedVideoPlayer
+          clip={previewClipModal}
+          allClips={queue.filter((j) => j.status === 'completed' && (j.outputUrl || j.blob))}
+          onSelectClip={(c) => setPreviewClipModal(c)}
+          onClose={() => {
+            setPreviewClipModal(null);
+            setIsEditorPreviewSuspended(false);
+          }}
+          onDownload={downloadClip}
+          onPauseBackgroundVideo={() => setIsEditorPreviewSuspended(true)}
+          onResumeBackgroundVideo={() => setIsEditorPreviewSuspended(false)}
+        />
       )}
 
       {/* User Login & Signup Modal */}
@@ -1381,6 +2018,34 @@ export default function App() {
         currentIgSettings={igSettings}
         currentLogoSettings={logoSettings}
       />
+
+      {/* Central Unified Publish & Schedule Modal */}
+      {publishModalClips && (
+        <UnifiedPublishModal
+          isOpen={Boolean(publishModalClips)}
+          onClose={() => {
+            setPublishModalClips(null);
+            setPreRenderContext(null);
+          }}
+          clips={publishModalClips}
+          movieName={exportSettings.movieName || textSettings.movieName}
+          youtubeName={exportSettings.movieName || ytSettings?.yt_name || textSettings.movieName}
+          textSettings={textSettings}
+          isYtConnected={isConnected}
+          ytAccount={ytAccount}
+          ytSettings={ytSettings}
+          isFbConnected={isFbConnected}
+          fbAccount={fbAccount}
+          fbSettings={fbSettings}
+          isIgConnected={isIgConnected}
+          igAccount={igAccount}
+          igSettings={igSettings}
+          isPublishing={isPublishingFb || isPublishingIg || isPublishingBoth}
+          publishProgress={publishFbProgress || publishIgProgress || 0}
+          onConfirmPublish={handleUnifiedPublish}
+          isPreRender={Boolean(preRenderContext)}
+        />
+      )}
     </div>
   );
 }

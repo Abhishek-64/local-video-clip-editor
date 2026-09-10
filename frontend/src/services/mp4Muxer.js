@@ -781,6 +781,10 @@ export class MP4Muxer {
       type: 'video/mp4'
     });
 
+    // Store counts for diagnostic telemetry before clearing buffers
+    const totalVideoFrames = this.videoChunks.length;
+    const totalAudioFrames = this.audioChunks.length;
+
     // Release internal chunk buffers immediately to free hundreds of MBs of memory
     this.videoChunks = [];
     this.audioChunks = [];
@@ -792,13 +796,13 @@ export class MP4Muxer {
       console.log('[MP4Muxer Container Diagnostic]', {
         duration: `${durationSec.toFixed(3)}s`,
         fps: this.fps,
-        frameCount: this.videoChunks.length,
+        frameCount: totalVideoFrames,
         bitrate: `${(actualBitrate / 1_000_000).toFixed(2)} Mbps`,
         width: this.width,
         height: this.height,
         fileSize: `${(finalBlob.size / (1024 * 1024)).toFixed(2)} MB`,
         videoCodec: this.sps ? `H.264 (SPS ${this.sps.length}B, PPS ${this.pps?.length || 0}B)` : 'H.264 Baseline',
-        audioCodec: this.hasAudio ? `AAC (${this.audioChunks.length} frames)` : 'none'
+        audioCodec: this.hasAudio ? `AAC (${totalAudioFrames} frames)` : 'none'
       });
     }
 

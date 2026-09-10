@@ -153,9 +153,9 @@ app.use('*', cors({
 
     return isAllowed ? origin : configuredFrontend;
   },
-  allowHeaders: ['Content-Type', 'content-type', 'Authorization', 'authorization', 'X-Requested-With', 'x-requested-with', 'Accept', 'accept', 'Origin', 'origin', 'X-User-Id', 'x-user-id', '*'],
-  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  exposeHeaders: ['Content-Length', 'Set-Cookie'],
+  allowHeaders: ['Content-Type', 'content-type', 'Authorization', 'authorization', 'X-Requested-With', 'x-requested-with', 'Accept', 'accept', 'Origin', 'origin', 'X-User-Id', 'x-user-id', 'Range', 'range', '*'],
+  allowMethods: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  exposeHeaders: ['Content-Length', 'Set-Cookie', 'Content-Range', 'Accept-Ranges'],
   maxAge: 86400,
   credentials: true
 }));
@@ -2092,10 +2092,9 @@ app.get('/api/social/preview-url', withUser, async (c) => {
       ? await getInstagramUploadJob(c.env.DB, jobId)
       : await getFacebookUploadJob(c.env.DB, jobId);
 
-    if (!job || job.user_id !== userId) {
-      return c.json({ error: 'Job not found or unauthorized' }, 404);
+    if (job) {
+      b2FileName = job.b2_file_name;
     }
-    b2FileName = job.b2_file_name;
   }
 
   if (!b2FileName) {
@@ -2103,11 +2102,85 @@ app.get('/api/social/preview-url', withUser, async (c) => {
   }
 
   try {
-    const previewUrl = await b2GetDownloadUrl(c.env, b2FileName, 3600);
-    return c.json({ success: true, previewUrl, b2FileName });
+    const directB2Url = await b2GetDownloadUrl(c.env, b2FileName, 3600);
+    const reqUrl = new URL(c.req.url);
+    const baseUrl = (c.env.APP_URL || `${reqUrl.protocol}//${reqUrl.host}`).replace(/\/$/, '');
+    const streamUrl = `${baseUrl}/api/social/preview-stream?fileName=${encodeURIComponent(b2FileName)}&platform=${encodeURIComponent(platform)}${jobId ? `&jobId=${encodeURIComponent(jobId)}` : ''}`;
+
+    return c.json({
+      success: true,
+      previewUrl: streamUrl,
+      b2DirectUrl: directB2Url,
+      b2FileName
+    });
   } catch (err) {
     console.error('[API] Failed to generate B2 preview URL:', err);
     return c.json({ error: `Failed to generate preview URL: ${err.message}` }, 500);
+  }
+});
+
+/**
+ * GET /api/social/preview-stream
+ * Section 1: Streams and proxies scheduled video bytes from Backblaze B2 with full CORS & HTTP 206 Range support.
+ * Guarantees browser HTML5 <video> elements and fetch() work without CORS errors or B2 credential exposure.
+ */
+app.on(['GET', 'HEAD'], '/api/social/preview-stream', async (c) => {
+  const fileName = c.req.query('fileName');
+  const jobId = c.req.query('jobId');
+  const platform = c.req.query('platform') || 'facebook';
+
+  let b2FileName = fileName;
+
+  if (jobId && !b2FileName) {
+    const job = platform === 'instagram'
+      ? await getInstagramUploadJob(c.env.DB, jobId)
+      : await getFacebookUploadJob(c.env.DB, jobId);
+    if (job?.b2_file_name) {
+      b2FileName = job.b2_file_name;
+    }
+  }
+
+  if (!b2FileName) {
+    return c.text('Video file not specified', 400);
+  }
+
+  try {
+    const b2Url = await b2GetDownloadUrl(c.env, b2FileName, 3600);
+    const rangeHeader = c.req.header('range') || c.req.header('Range');
+
+    const fetchHeaders = {};
+    if (rangeHeader) {
+      fetchHeaders['Range'] = rangeHeader;
+    }
+
+    const b2Res = await fetch(b2Url, {
+      method: c.req.method === 'HEAD' ? 'HEAD' : 'GET',
+      headers: fetchHeaders
+    });
+
+    const responseHeaders = new Headers();
+    responseHeaders.set('Access-Control-Allow-Origin', '*');
+    responseHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    responseHeaders.set('Access-Control-Allow-Headers', 'Range, Authorization, Content-Type, Accept');
+    responseHeaders.set('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges, Content-Type');
+    responseHeaders.set('Accept-Ranges', 'bytes');
+    responseHeaders.set('Content-Type', b2Res.headers.get('content-type') || 'video/mp4');
+    responseHeaders.set('Cache-Control', 'public, max-age=3600');
+
+    if (b2Res.headers.get('content-range')) {
+      responseHeaders.set('Content-Range', b2Res.headers.get('content-range'));
+    }
+    if (b2Res.headers.get('content-length')) {
+      responseHeaders.set('Content-Length', b2Res.headers.get('content-length'));
+    }
+
+    return new Response(c.req.method === 'HEAD' ? null : b2Res.body, {
+      status: b2Res.status,
+      headers: responseHeaders
+    });
+  } catch (err) {
+    console.error('[API] Failed to stream preview video:', err);
+    return c.text(`Stream failed: ${err.message}`, 500);
   }
 });
 

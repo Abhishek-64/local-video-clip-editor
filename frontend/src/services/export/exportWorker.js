@@ -181,7 +181,9 @@ async function runExportInWorker(payload) {
   });
 
   // 7. Video Encoding Loop with Backpressure & Guaranteed VideoFrame Cleanup
-  const keyframeInterval = Math.round(targetFps * 2);
+  // Keyframe every 1 second (was 2 s). Halves the max seek distance the browser
+  // must traverse during initial buffering and user scrubbing on long clips.
+  const keyframeInterval = Math.round(targetFps);
   let lastProgressReported = 10;
   let capturedThumbnailBlob = null;
 
@@ -400,6 +402,9 @@ async function runExportInWorker(payload) {
     videoDecoder.close();
     if (videoEncoder && videoEncoder.state !== 'closed') {
       try { videoEncoder.close(); } catch (e) {}
+    }
+    if (audioEncoder && audioEncoder.state !== 'closed') {
+      try { audioEncoder.close(); } catch (e) {}
     }
   }
 }

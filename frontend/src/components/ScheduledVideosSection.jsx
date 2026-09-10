@@ -54,7 +54,8 @@ function getRelativeTime(isoString) {
 export default function ScheduledVideosSection({
   refreshTrigger = 0,
   onOpenPreview = null,
-  showToast = (msg, type) => console.log(type, msg)
+  showToast = (msg, type) => console.log(type, msg),
+  completedClips = []
 }) {
   const [jobs, setJobs] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -64,9 +65,11 @@ export default function ScheduledVideosSection({
   const [cancelModalJob, setCancelModalJob] = useState(null);
   const [isCancelling, setIsCancelling] = useState(false);
 
-  // Video Preview Modal State (Streams temporary signed B2 URL)
-  const [previewModal, setPreviewModal] = useState(null); // { url, title, fileName }
+  // Video Preview Modal State (Streams temporary signed B2 URL or local asset)
+  const [previewModal, setPreviewModal] = useState(null); // { url, title, fileName, job }
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+  const [previewVideoError, setPreviewVideoError] = useState(null);
+  const [activePreviewJob, setActivePreviewJob] = useState(null);
 
   // Fetch active scheduled jobs
   const fetchScheduledJobs = useCallback(async () => {
@@ -114,8 +117,39 @@ export default function ScheduledVideosSection({
     return Array.from(groups.values());
   }, [jobs]);
 
-  // Handle Video Preview
+  // Handle Video Preview: Local In-Memory first, then Cloudflare Stream Proxy fallback
   const handlePreview = async (job) => {
+    setActivePreviewJob(job);
+    setPreviewVideoError(null);
+
+    // 1. Local Cache Check: If video was exported in current session, use local blob URL immediately
+    if (completedClips && completedClips.length > 0) {
+      const localMatch = completedClips.find(
+        (c) =>
+          c.id === job.id ||
+          (job.title && c.name && (c.name === job.title || c.name.includes(job.title) || job.title.includes(c.name))) ||
+          (job.b2_file_name && c.name && job.b2_file_name.includes(c.name.replace(/[^a-zA-Z0-9]/g, '')))
+      );
+
+      if (localMatch && (localMatch.outputUrl || localMatch.blob)) {
+        if (onOpenPreview) {
+          onOpenPreview(localMatch);
+          return;
+        }
+        const localUrl = localMatch.outputUrl || (localMatch.blob instanceof Blob ? URL.createObjectURL(localMatch.blob) : null);
+        if (localUrl) {
+          setPreviewModal({
+            url: localUrl,
+            title: job.title || localMatch.name || 'Scheduled Video Preview',
+            fileName: 'Local In-Memory Video Asset',
+            job
+          });
+          return;
+        }
+      }
+    }
+
+    // 2. Remote Fetch: Obtain streaming proxy URL from Cloudflare Worker
     setIsLoadingPreview(true);
     try {
       const res = await getSocialPreviewUrl({
@@ -124,11 +158,13 @@ export default function ScheduledVideosSection({
         fileName: job.b2_file_name
       });
 
-      if (res && res.previewUrl) {
+      if (res && (res.previewUrl || res.b2DirectUrl)) {
         setPreviewModal({
-          url: res.previewUrl,
+          url: res.previewUrl || res.b2DirectUrl,
+          b2DirectUrl: res.b2DirectUrl,
           title: job.title || 'Scheduled Video Preview',
-          fileName: res.b2_file_name || job.b2_file_name
+          fileName: res.b2_file_name || job.b2_file_name,
+          job
         });
       } else {
         showToast('Could not generate preview link. Video file may be expired or inaccessible.', 'error');
@@ -342,20 +378,52 @@ export default function ScheduledVideosSection({
                 </span>
               </div>
               <button
-                onClick={() => setPreviewModal(null)}
+                onClick={() => { setPreviewModal(null); setPreviewVideoError(null); }}
                 className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer touch-manipulation"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="p-3 sm:p-4 bg-black flex justify-center flex-1 min-h-0">
-              <video
-                src={previewModal.url}
-                controls
-                autoPlay
-                className="max-h-[55vh] rounded-lg shadow-lg w-auto object-contain"
-              />
+            <div className="p-3 sm:p-4 bg-black flex justify-center flex-1 min-h-0 relative">
+              {previewVideoError ? (
+                <div className="flex flex-col items-center justify-center gap-3 py-8 text-center">
+                  <AlertCircle className="w-10 h-10 text-rose-400 opacity-80" />
+                  <p className="text-xs text-rose-300 font-semibold max-w-xs">{previewVideoError}</p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => (activePreviewJob ? handlePreview(activePreviewJob) : setPreviewVideoError(null))}
+                      className="px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-white rounded-lg flex items-center space-x-1 cursor-pointer"
+                    >
+                      <RefreshCw className="w-3 h-3 mr-1" /> Retry Stream
+                    </button>
+                    {previewModal.b2DirectUrl && previewModal.b2DirectUrl !== previewModal.url && (
+                      <button
+                        onClick={() => {
+                          setPreviewVideoError(null);
+                          setPreviewModal(prev => ({ ...prev, url: prev.b2DirectUrl }));
+                        }}
+                        className="px-3 py-1.5 text-xs bg-orange-600 hover:bg-orange-500 text-white rounded-lg flex items-center space-x-1 cursor-pointer"
+                      >
+                        Try Direct Link
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <video
+                  key={previewModal.url}
+                  src={previewModal.url}
+                  controls
+                  playsInline
+                  preload="auto"
+                  className="max-h-[55vh] rounded-lg shadow-lg w-auto object-contain"
+                  onError={(e) => {
+                    console.error('Scheduled preview video error:', e);
+                    setPreviewVideoError('Could not load or stream video. Please retry or verify the file is available.');
+                  }}
+                />
+              )}
             </div>
 
             <div className="p-3.5 sm:p-4 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
@@ -364,7 +432,7 @@ export default function ScheduledVideosSection({
                 Authorized signed preview (1h expiry)
               </span>
               <button
-                onClick={() => setPreviewModal(null)}
+                onClick={() => { setPreviewModal(null); setPreviewVideoError(null); }}
                 className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs rounded-xl cursor-pointer"
               >
                 Close

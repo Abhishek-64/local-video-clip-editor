@@ -1,18 +1,19 @@
-import React, { useRef, useEffect, useState, useMemo } from 'react';
+import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { X, Download, AlertCircle, Play, Pause, Activity, RefreshCw, CheckCircle2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { formatTime } from '../utils/time';
 import { clipResourceManager } from '../services/export/exportResourceManager';
 
 /**
  * Dedicated, High-Performance Native Video Player for Generated Clips
- * 
- * Rules Adhered to:
- * - Single active player architecture with stable source switching
- * - preload="metadata" policy (zero unneeded buffer downloads)
- * - Zero React state updates on video timeupdate (native <video controls> handles scrubbing)
- * - Hardware decoder released on teardown and clip switch
- * - Background editor video suspension during preview session
- * - Next/Previous clip navigation in the same player instance
+ *
+ * Designed for immediate first-frame rendering and fluid HTML5 playback:
+ * 1. Native declarative <video key={activeUrl} src={activeUrl} controls playsInline preload="auto" />
+ *    - Eliminates all imperative src/load timing races.
+ *    - Allows browser C++ media engine to buffer and render seamlessly.
+ * 2. Zero artificial "stall recovery" loops that force video.load() on transient waiting events.
+ * 3. Zero full-screen artificial buffering overlays blocking user interaction.
+ * 4. Automatic fallback to fresh URL from in-memory blob if existing object URL is invalid.
+ * 5. Single-shot background editor video suspension on mount; restoration on unmount.
  */
 export default function GeneratedVideoPlayer({
   clip,
@@ -24,18 +25,124 @@ export default function GeneratedVideoPlayer({
   onResumeBackgroundVideo
 }) {
   const videoRef = useRef(null);
-  const [isPlaying, setIsPlaying] = useState(false);
   const [duration, setDuration] = useState(clip?.duration || 0);
   const [error, setError] = useState(null);
   const [showTelemetry, setShowTelemetry] = useState(false);
+  const fallbackBlobUrlRef = useRef(null);
 
-  // Development Diagnostics Telemetry State
+  // Determine initial video URL
+  const initialUrl = useMemo(() => {
+    if (!clip) return null;
+    if (clip.outputUrl) return clip.outputUrl;
+    if (clip.blob instanceof Blob) {
+      return clipResourceManager.getVideoUrl(clip.id || 'preview-temp', clip.blob);
+    }
+    return null;
+  }, [clip?.id, clip?.outputUrl, clip?.blob]);
+
+  const [activeUrl, setActiveUrl] = useState(initialUrl);
+
+  // Sync activeUrl when clip changes
+  useEffect(() => {
+    setActiveUrl(initialUrl);
+    setError(null);
+    setDuration(clip?.duration || 0);
+    // Cleanup any temporary fallback URL on clip change
+    if (fallbackBlobUrlRef.current && fallbackBlobUrlRef.current !== initialUrl) {
+      try { URL.revokeObjectURL(fallbackBlobUrlRef.current); } catch (e) {}
+      fallbackBlobUrlRef.current = null;
+    }
+  }, [initialUrl, clip?.duration]);
+
+  // Current index for sequential clip switching
+  const currentIndex = useMemo(() => {
+    if (!allClips || allClips.length === 0 || !clip) return -1;
+    return allClips.findIndex((c) => c.id === clip.id);
+  }, [allClips, clip?.id]);
+
+  const hasPrev = currentIndex > 0;
+  const hasNext = currentIndex >= 0 && currentIndex < allClips.length - 1;
+
+  // ── Single-shot mount effect: Pause background videos to free hardware decoders ──
+  const onPauseBgRef = useRef(onPauseBackgroundVideo);
+  onPauseBgRef.current = onPauseBackgroundVideo;
+
+  useEffect(() => {
+    if (onPauseBgRef.current) {
+      try { onPauseBgRef.current(); } catch (e) {}
+    }
+    const timer = setTimeout(() => {
+      try {
+        document.querySelectorAll('video:not(#generated-preview-video)').forEach((v) => {
+          if (!v.paused) {
+            try { v.pause(); } catch (e) {}
+          }
+        });
+      } catch (e) {}
+    }, 50);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Protect active URL from revocation while modal is open
+  useEffect(() => {
+    if (activeUrl) {
+      clipResourceManager.setActivePreviewUrl(activeUrl);
+    }
+    return () => {
+      clipResourceManager.setActivePreviewUrl(null);
+      if (fallbackBlobUrlRef.current) {
+        try { URL.revokeObjectURL(fallbackBlobUrlRef.current); } catch (e) {}
+      }
+    };
+  }, [activeUrl]);
+
+  // Handle Video Error & Automatic In-Memory Fallback
+  const handleVideoError = useCallback((e) => {
+    const video = videoRef.current;
+    console.warn('Generated clip playback error:', video?.error || e);
+    // If the URL failed (e.g. revoked URL) and clip.blob is available, create a fresh object URL
+    if (clip?.blob instanceof Blob && activeUrl !== fallbackBlobUrlRef.current) {
+      try {
+        const freshUrl = URL.createObjectURL(clip.blob);
+        fallbackBlobUrlRef.current = freshUrl;
+        setError(null);
+        setActiveUrl(freshUrl);
+        return;
+      } catch (err) {}
+    }
+    setError(video?.error?.message || 'Failed to decode video stream');
+  }, [clip?.blob, activeUrl]);
+
+  // Clean close handler that restores background video preview
+  const handleClose = useCallback(() => {
+    if (onResumeBackgroundVideo) {
+      try { onResumeBackgroundVideo(); } catch (e) {}
+    }
+    onClose?.();
+  }, [onResumeBackgroundVideo, onClose]);
+
+  // Manual reload (error state retry)
+  const handleReload = useCallback(() => {
+    setError(null);
+    if (clip?.blob instanceof Blob) {
+      try {
+        const freshUrl = URL.createObjectURL(clip.blob);
+        fallbackBlobUrlRef.current = freshUrl;
+        setActiveUrl(freshUrl);
+        return;
+      } catch (err) {}
+    }
+    if (videoRef.current) {
+      videoRef.current.load();
+    }
+  }, [clip?.blob]);
+
+  // ── Development Diagnostics Telemetry ──────────────────────────────
   const [telemetry, setTelemetry] = useState({
     droppedFrames: 0,
     totalFrames: 0,
     dropRate: '0.0%',
     fps: 0,
-    stalls: 0,
     readyState: 0,
     networkState: 0
   });
@@ -43,103 +150,7 @@ export default function GeneratedVideoPlayer({
   const rVfcIdRef = useRef(null);
   const lastVfcTimeRef = useRef(0);
   const vfcFrameCountRef = useRef(0);
-  const stallCountRef = useRef(0);
 
-  // Resolve stable Object URL from clipResourceManager (lazy loading)
-  const videoUrl = useMemo(() => {
-    if (!clip) return null;
-    return clip.outputUrl || clipResourceManager.getVideoUrl(clip.id, clip.blob);
-  }, [clip]);
-
-  // Current index for sequential clip switching
-  const currentIndex = useMemo(() => {
-    if (!allClips || allClips.length === 0 || !clip) return -1;
-    return allClips.findIndex((c) => c.id === clip.id);
-  }, [allClips, clip]);
-
-  const hasPrev = currentIndex > 0;
-  const hasNext = currentIndex >= 0 && currentIndex < allClips.length - 1;
-
-  // Comprehensive Video Element Lifecycle Management & Hardware Decoder Release
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !videoUrl) return;
-
-    // 1. Suspend background editor video to give 100% decoder bandwidth to preview
-    if (onPauseBackgroundVideo) {
-      try {
-        onPauseBackgroundVideo();
-      } catch (e) {}
-    }
-
-    // 2. Protect this active URL from being revoked during playback
-    clipResourceManager.setActivePreviewUrl(videoUrl);
-
-    setError(null);
-    stallCountRef.current = 0;
-    setDuration(clip?.duration || 0);
-
-    const onPlay = () => setIsPlaying(true);
-    const onPause = () => setIsPlaying(false);
-    const onLoadedMetadata = () => {
-      if (video.duration && !isNaN(video.duration) && isFinite(video.duration)) {
-        setDuration(video.duration);
-      }
-    };
-    const onWaiting = () => {
-      stallCountRef.current += 1;
-    };
-    const onError = (e) => {
-      console.warn('Generated video playback error:', video.error || e);
-      setError(video.error?.message || 'Failed to decode video stream');
-    };
-
-    video.addEventListener('play', onPlay);
-    video.addEventListener('pause', onPause);
-    video.addEventListener('loadedmetadata', onLoadedMetadata);
-    video.addEventListener('waiting', onWaiting);
-    video.addEventListener('error', onError);
-
-    // Apply preload="metadata" before playback (Rule 6)
-    video.preload = 'metadata';
-    video.src = videoUrl;
-    video.load();
-
-    return () => {
-      video.removeEventListener('play', onPlay);
-      video.removeEventListener('pause', onPause);
-      video.removeEventListener('loadedmetadata', onLoadedMetadata);
-      video.removeEventListener('waiting', onWaiting);
-      video.removeEventListener('error', onError);
-
-      if (rVfcIdRef.current && typeof video.cancelVideoFrameCallback === 'function') {
-        try {
-          video.cancelVideoFrameCallback(rVfcIdRef.current);
-        } catch (e) {}
-      }
-
-      // Teardown previous source cleanly to release hardware decoder slot
-      try {
-        video.pause();
-        video.removeAttribute('src');
-        video.load();
-      } catch (e) {}
-
-      clipResourceManager.setActivePreviewUrl(null);
-    };
-  }, [videoUrl, clip?.id, clip?.duration, onPauseBackgroundVideo]);
-
-  // Clean close handler that restores background video preview
-  const handleClose = () => {
-    if (onResumeBackgroundVideo) {
-      try {
-        onResumeBackgroundVideo();
-      } catch (e) {}
-    }
-    onClose?.();
-  };
-
-  // Development Diagnostics Telemetry Loop (solely active when diagnostic panel is opened)
   useEffect(() => {
     if (!showTelemetry) return;
 
@@ -164,7 +175,6 @@ export default function GeneratedVideoPlayer({
         droppedFrames: dropped,
         totalFrames: total,
         dropRate,
-        stalls: stallCountRef.current,
         readyState: video.readyState,
         networkState: video.networkState
       }));
@@ -198,14 +208,12 @@ export default function GeneratedVideoPlayer({
       isCancelled = true;
       clearInterval(interval);
       if (rVfcIdRef.current && videoRef.current && typeof videoRef.current.cancelVideoFrameCallback === 'function') {
-        try {
-          videoRef.current.cancelVideoFrameCallback(rVfcIdRef.current);
-        } catch (e) {}
+        try { videoRef.current.cancelVideoFrameCallback(rVfcIdRef.current); } catch (e) {}
       }
     };
   }, [showTelemetry]);
 
-  const isHealthyPlayback = telemetry.stalls === 0 && parseFloat(telemetry.dropRate) < 1.0;
+  const isHealthyPlayback = parseFloat(telemetry.dropRate) < 1.0;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
@@ -279,22 +287,28 @@ export default function GeneratedVideoPlayer({
               <AlertCircle className="w-10 h-10 text-rose-400 mx-auto opacity-90" />
               <p className="text-xs text-rose-300 font-semibold">{error}</p>
               <button
-                onClick={() => {
-                  setError(null);
-                  if (videoRef.current) videoRef.current.load();
-                }}
-                className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-xs text-white rounded-lg inline-flex items-center space-x-1"
+                onClick={handleReload}
+                className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-xs text-white rounded-lg inline-flex items-center space-x-1 cursor-pointer"
               >
-                <RefreshCw className="w-3 h-3 mr-1" /> Reload Stream
+                <RefreshCw className="w-3 h-3 mr-1" /> Reload Video
               </button>
             </div>
           ) : (
             <video
+              key={activeUrl}
+              id="generated-preview-video"
               ref={videoRef}
+              src={activeUrl || undefined}
               controls
               playsInline
-              preload="metadata"
-              className="max-h-[60vh] w-auto max-w-full object-contain rounded-lg"
+              preload="auto"
+              className="max-h-[60vh] w-auto max-w-full object-contain rounded-lg shadow-2xl"
+              onError={handleVideoError}
+              onLoadedMetadata={(e) => {
+                if (e.target.duration && !isNaN(e.target.duration) && isFinite(e.target.duration)) {
+                  setDuration(e.target.duration);
+                }
+              }}
             />
           )}
 
@@ -305,7 +319,7 @@ export default function GeneratedVideoPlayer({
                 <span>Playback Telemetry</span>
                 <span className={`inline-flex items-center text-[10px] ${isHealthyPlayback ? 'text-emerald-400' : 'text-amber-400'}`}>
                   {isHealthyPlayback ? <CheckCircle2 className="w-3 h-3 mr-1 inline" /> : null}
-                  {isHealthyPlayback ? 'Zero Lag' : 'Stalled'}
+                  {isHealthyPlayback ? 'Zero Lag' : 'Frames Dropped'}
                 </span>
               </div>
               <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 pt-0.5">
@@ -317,8 +331,6 @@ export default function GeneratedVideoPlayer({
                 </span>
                 <span>Total Decoded:</span>
                 <span className="text-slate-200">{telemetry.totalFrames}</span>
-                <span>Buffer Stalls:</span>
-                <span className={telemetry.stalls > 0 ? 'text-amber-400' : 'text-slate-400'}>{telemetry.stalls}</span>
                 <span>Decoder State:</span>
                 <span className="text-slate-200">Ready {telemetry.readyState}/4</span>
               </div>

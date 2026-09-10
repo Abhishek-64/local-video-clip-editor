@@ -128,6 +128,8 @@ export default function EditorTabs({
   isLoadingHistory = false,
   onRetryUpload,
   refreshHistory,
+  onOpenPreview,
+  onPreviewClip,
   // Mobile sheet props
   isMobileSheet = false,
   isFullScreen = true,
@@ -569,6 +571,8 @@ export default function EditorTabs({
               <ScheduledVideosSection
                 refreshTrigger={socialRefreshTrigger || onSocialRefresh}
                 showToast={showToast}
+                completedClips={completedClips}
+                onOpenPreview={onOpenPreview || onPreviewClip}
               />
             ) : (
               <SocialUploadHistorySection

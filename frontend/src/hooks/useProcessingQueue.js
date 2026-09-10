@@ -249,13 +249,11 @@ export function useProcessingQueue({ onClipCompleted } = {}) {
         duration: result.duration
       };
 
-      // Register with centralized resource manager
-      clipResourceManager.registerClip(completedJob.id, {
-        blob: result.blob,
-        url: result.url,
-        thumbnailBlob: result.thumbnailBlob,
-        thumbnailUrl: result.thumbnailUrl
-      });
+      // NOTE: clipResourceManager.registerClip() is intentionally NOT called here.
+      // The export pipeline (exportWorkerBridge.js / exportEngine.js) already registers
+      // the clip and creates its Object URL before returning result.url.
+      // A second registerClip() call would create a redundant Object URL for the same
+      // blob, wasting browser memory with a URL that never gets revoked.
 
       // Update in queue
       queueRef.current = queueRef.current.map((j) =>

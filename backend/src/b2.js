@@ -113,7 +113,7 @@ export async function b2GetDownloadUrl(env, fileName, validDurationInSeconds = 3
   const data = await res.json();
   const token = data.authorizationToken;
 
-  return `${auth.downloadUrl}/file/${bucketName}/${encodeURIComponent(fileName)}?Authorization=${encodeURIComponent(token)}`;
+  return `${auth.downloadUrl}/file/${bucketName}/${encodeURIComponent(fileName)}?Authorization=${token}`;
 }
 
 /**

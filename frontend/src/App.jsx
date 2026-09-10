@@ -1645,6 +1645,7 @@ export default function App() {
       pipelineStartTime={pipelineStartTime}
       setPipelineStartTime={setPipelineStartTime}
       completedClips={completedClips}
+      onOpenPreview={(clip) => setPreviewClipModal(clip)}
       uploadHistory={uploadHistory}
       uploadJobs={uploadJobs}
       isLoadingHistory={isLoadingHistory}
@@ -1967,11 +1968,11 @@ export default function App() {
           onSelectClip={(c) => setPreviewClipModal(c)}
           onClose={() => {
             setPreviewClipModal(null);
-            setIsEditorPreviewSuspended(false);
+            handleResumeBackgroundVideo();
           }}
           onDownload={downloadClip}
-          onPauseBackgroundVideo={() => setIsEditorPreviewSuspended(true)}
-          onResumeBackgroundVideo={() => setIsEditorPreviewSuspended(false)}
+          onPauseBackgroundVideo={handlePauseBackgroundVideo}
+          onResumeBackgroundVideo={handleResumeBackgroundVideo}
         />
       )}
 

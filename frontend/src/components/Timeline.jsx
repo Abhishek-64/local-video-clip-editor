@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   Scissors, Clock, Layers, Hash, Film, ListOrdered, Plus, Trash2,
   Play, RefreshCw, ChevronDown, ChevronUp, Copy, ArrowUp, ArrowDown,
@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { formatTime, parseTimeToSeconds, splitKeptParts } from '../utils/time';
 
-export default function Timeline({
+function TimelineInner({
   duration = 0,
   startTime = 0,
   endTime = 0,
@@ -35,6 +35,28 @@ export default function Timeline({
   const [dragState, setDragState] = useState(null);
   const trackRef = useRef(null);
 
+  // ── Stable refs for drag handler — avoids re-attaching listeners on every tick ──
+  const durationRef = useRef(duration);
+  const startTimeRef = useRef(startTime);
+  const endTimeRef = useRef(endTime);
+  const customPartsRef = useRef(customParts);
+  const splitModeRef = useRef('duration');
+  const numPartsRef = useRef(5);
+  const clipDurationRef = useRef(clipDuration);
+  const onStartChangeRef = useRef(onStartChange);
+  const onEndChangeRef = useRef(onEndChange);
+  const onCustomPartsChangeRef = useRef(onCustomPartsChange);
+
+  // Keep refs in sync with latest props/state (no re-render cost)
+  useEffect(() => { durationRef.current = duration; }, [duration]);
+  useEffect(() => { startTimeRef.current = startTime; }, [startTime]);
+  useEffect(() => { endTimeRef.current = endTime; }, [endTime]);
+  useEffect(() => { customPartsRef.current = customParts; }, [customParts]);
+  useEffect(() => { clipDurationRef.current = clipDuration; }, [clipDuration]);
+  useEffect(() => { onStartChangeRef.current = onStartChange; }, [onStartChange]);
+  useEffect(() => { onEndChangeRef.current = onEndChange; }, [onEndChange]);
+  useEffect(() => { onCustomPartsChangeRef.current = onCustomPartsChange; }, [onCustomPartsChange]);
+
   const selectedDuration = Math.max(0, endTime - startTime);
 
   // Derive active kept and cut counts
@@ -42,51 +64,57 @@ export default function Timeline({
   const deletedParts = useMemo(() => (customParts || []).filter(p => p.isDeleted), [customParts]);
 
   // Pointer Down handler for drag handles
-  const handlePointerDown = (e, type, index = 0) => {
+  const handlePointerDown = useCallback((e, type, index = 0) => {
     e.stopPropagation();
     e.preventDefault();
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     setDragState({ type, index, startX: clientX, isDragging: true });
-  };
+  }, []);
 
-  // Helper for magnetic snap (within 0.3s)
-  const applyMagneticSnap = (targetTime, excludeIndex = -1) => {
-    if (!customParts || customParts.length === 0) return targetTime;
+  // Helper for magnetic snap (within 0.35s) — uses ref to avoid stale closures
+  const applyMagneticSnapRef = useRef((targetTime, excludeIndex = -1) => {
+    const parts = customPartsRef.current;
+    if (!parts || parts.length === 0) return targetTime;
     const SNAP_THRESHOLD = 0.35;
-    for (let i = 0; i < customParts.length; i++) {
+    for (let i = 0; i < parts.length; i++) {
       if (i === excludeIndex) continue;
-      const p = customParts[i];
+      const p = parts[i];
       if (Math.abs(targetTime - p.startTime) <= SNAP_THRESHOLD) return p.startTime;
       if (Math.abs(targetTime - p.endTime) <= SNAP_THRESHOLD) return p.endTime;
     }
     return targetTime;
-  };
+  });
 
-  // Drag Event Listener for Mouse & Mobile Touch
+  // Drag Event Listener for Mouse & Mobile Touch.
+  // Dependency array is ONLY [dragState] — all other values are accessed via refs
+  // so the listeners are ONLY attached/detached when dragging actually starts or stops,
+  // NOT on every currentTime or customParts update during playback.
   useEffect(() => {
     if (!dragState?.isDragging) return;
 
     const handlePointerMove = (e) => {
-      if (!trackRef.current || !duration) return;
+      if (!trackRef.current) return;
+      const dur = durationRef.current;
+      if (!dur) return;
       const clientX = e.touches ? e.touches[0].clientX : e.clientX;
       const rect = trackRef.current.getBoundingClientRect();
       const pos = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-      let targetTime = Math.round(pos * duration * 10) / 10;
+      let targetTime = Math.round(pos * dur * 10) / 10;
 
       if (dragState.type === 'start') {
-        targetTime = applyMagneticSnap(targetTime);
-        if (targetTime < endTime - 0.5) {
-          onStartChange(targetTime);
+        targetTime = applyMagneticSnapRef.current(targetTime);
+        if (targetTime < endTimeRef.current - 0.5) {
+          onStartChangeRef.current?.(targetTime);
         }
       } else if (dragState.type === 'end') {
-        targetTime = applyMagneticSnap(targetTime);
-        if (targetTime > startTime + 0.5) {
-          onEndChange(targetTime);
+        targetTime = applyMagneticSnapRef.current(targetTime);
+        if (targetTime > startTimeRef.current + 0.5) {
+          onEndChangeRef.current?.(targetTime);
         }
       } else if (dragState.type === 'split-boundary') {
-        const currentList = customParts && customParts.length > 0
-          ? [...customParts]
-          : generateSmartPartsList(splitMode, numParts, clipDuration, false);
+        const currentList = customPartsRef.current && customPartsRef.current.length > 0
+          ? [...customPartsRef.current]
+          : [];
 
         const idx = dragState.index;
         if (idx >= 0 && idx < currentList.length - 1) {
@@ -107,7 +135,7 @@ export default function Timeline({
             startTime: clamped,
             duration: Math.max(0, Math.round((rightPart.endTime - clamped) * 10) / 10)
           };
-          if (onCustomPartsChange) onCustomPartsChange(updated);
+          onCustomPartsChangeRef.current?.(updated);
         }
       }
     };
@@ -127,7 +155,11 @@ export default function Timeline({
       window.removeEventListener('touchmove', handlePointerMove);
       window.removeEventListener('touchend', handlePointerUp);
     };
-  }, [dragState, duration, startTime, endTime, customParts, splitMode, numParts, clipDuration]);
+  // IMPORTANT: dep array is intentionally [dragState] only.
+  // All other values (duration, startTime, endTime, customParts) are accessed via
+  // stable refs to prevent 60fps listener reattachment during video playback.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dragState]);
 
   // ── Smart Auto-Split Algorithm (Preserves Deleted/Cut Content) ──────────────
   const generateSmartPartsList = (mode, partsCount, segSec, shouldPreserve = preserveCuts) => {
@@ -1106,3 +1138,5 @@ export default function Timeline({
     </div>
   );
 }
+
+export default React.memo(TimelineInner);

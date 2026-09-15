@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import {
   Play,
   Pause,
@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { formatTime } from '../utils/time';
 
-export default function VideoPreview({
+function VideoPreviewInner({
   videoData,
   currentTime,
   onTimeUpdate,
@@ -120,15 +120,19 @@ export default function VideoPreview({
     }
   }, [onCaptureFrame]);
 
-  // Frame-Driven Background Canvas Blit for 100% Zero-Lag Playback & Zero Idle CPU Usage
+  // Frame-Driven Background Canvas Blit — throttled to ≤15fps for blur backdrop.
+  // At 15fps the human eye cannot perceive blur-background changes; this halves
+  // GPU canvas-blit work vs. running at full video frame rate.
   useEffect(() => {
     if (isSuspended) return;
 
     let animId = null;
     let rVfcId = null;
     let isCancelled = false;
+    let lastBlitMs = 0;
+    const BLIT_INTERVAL_MS = 67; // ~15fps cap for blur canvas
 
-    const renderBgFrame = () => {
+    const renderBgFrame = (nowMs = 0) => {
       if (
         bgCanvasRef.current &&
         videoRef.current &&
@@ -136,22 +140,26 @@ export default function VideoPreview({
         !isFillMode &&
         bgType === 'blur-video'
       ) {
-        const bgCtx = bgCanvasRef.current.getContext('2d', { alpha: false });
-        if (bgCtx) {
-          bgCtx.drawImage(videoRef.current, 0, 0, bgCanvasRef.current.width, bgCanvasRef.current.height);
+        // Throttle: only blit if ≥67ms have elapsed since last blit (~15fps)
+        if (nowMs - lastBlitMs >= BLIT_INTERVAL_MS || nowMs === 0) {
+          lastBlitMs = nowMs;
+          const bgCtx = bgCanvasRef.current.getContext('2d', { alpha: false, willReadFrequently: false });
+          if (bgCtx) {
+            bgCtx.drawImage(videoRef.current, 0, 0, bgCanvasRef.current.width, bgCanvasRef.current.height);
+          }
         }
       }
     };
 
-    const scheduleNextFrame = () => {
+    const scheduleNextFrame = (nowMs) => {
       if (isCancelled || isSuspended) return;
-      renderBgFrame();
+      renderBgFrame(nowMs);
 
       const video = videoRef.current;
       if (video && isPlaying && !video.paused && !video.ended) {
         if ('requestVideoFrameCallback' in video) {
-          rVfcId = video.requestVideoFrameCallback(() => {
-            scheduleNextFrame();
+          rVfcId = video.requestVideoFrameCallback((now) => {
+            scheduleNextFrame(now);
           });
         } else {
           animId = requestAnimationFrame(scheduleNextFrame);
@@ -161,9 +169,9 @@ export default function VideoPreview({
 
     // Trigger frame update on play state change or seek
     if (isPlaying && !isSuspended) {
-      scheduleNextFrame();
+      scheduleNextFrame(0);
     } else {
-      renderBgFrame();
+      renderBgFrame(0);
     }
 
     return () => {
@@ -670,8 +678,8 @@ export default function VideoPreview({
     };
   }, [onCropChange, cropSettings, onTextChange, textSettings, onLogoChange, logoSettings]);
 
-  // Compute text string from template with dynamic playhead part detection
-  const getRenderedText = () => {
+  // Memoized: only recomputes when currentTime crosses a part boundary or text settings change
+  const renderedText = useMemo(() => {
     if (!textSettings) return '';
     const baseStartPart = Math.max(1, parseInt(textSettings.startPart) || 1);
 
@@ -694,7 +702,9 @@ export default function VideoPreview({
       .replace(/\{title\}/gi, displayText)
       .replace(/\{text\}/gi, displayText)
       .replace(/\{part\}/gi, formattedPart);
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentTime, customParts, textSettings?.template, textSettings?.text, textSettings?.movieName, textSettings?.startPart, textSettings?.zeroPad]);
+  const getRenderedText = () => renderedText;
 
   // Helper to convert hex or rgb string to rgba with opacity
   const hexOrColorToRgba = (colorStr, alphaPercent = 75) => {
@@ -713,8 +723,8 @@ export default function VideoPreview({
     return colorStr;
   };
 
-  // Compute Primary Text overlay position style
-  const getTextOverlayStyle = () => {
+  // Memoized primary text overlay style — only recomputes when text settings or preview mode change
+  const textOverlayStyle = useMemo(() => {
     if (!textSettings) return {};
 
     const pos = textSettings.position || 'top-center';
@@ -741,7 +751,8 @@ export default function VideoPreview({
       maxWidth: '86%',
       cursor: 'move',
       userSelect: 'none',
-      touchAction: 'none'
+      touchAction: 'none',
+      willChange: 'transform'
     };
 
     if (typeof textSettings.customX === 'number') {
@@ -795,7 +806,9 @@ export default function VideoPreview({
     }
 
     return style;
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [textSettings, previewMode]);
+  const getTextOverlayStyle = () => textOverlayStyle;
 
   // Compute Extra Text overlay position style
   const getExtraTextStyle = (extra) => {
@@ -851,8 +864,8 @@ export default function VideoPreview({
     return style;
   };
 
-  // Compute Logo overlay position style
-  const getLogoOverlayStyle = () => {
+  // Memoized logo overlay style
+  const logoOverlayStyle = useMemo(() => {
     const logoSrc = logoSettings?.dataUrl || logoSettings?.url;
     if (!logoSettings || !logoSrc) return {};
 
@@ -867,7 +880,8 @@ export default function VideoPreview({
       zIndex: 45,
       cursor: 'move',
       userSelect: 'none',
-      touchAction: 'none'
+      touchAction: 'none',
+      willChange: 'transform'
     };
 
     if (typeof logoSettings.customX === 'number' && typeof logoSettings.customY === 'number') {
@@ -888,7 +902,9 @@ export default function VideoPreview({
     }
 
     return style;
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [logoSettings, previewMode]);
+  const getLogoOverlayStyle = () => logoOverlayStyle;
 
 
   const getCropBoxDimensions = () => {
@@ -1046,6 +1062,7 @@ export default function VideoPreview({
                     ref={videoRef}
                     src={videoData.url}
                     className="absolute pointer-events-none"
+                    preload="metadata"
                     style={{
                       ...getFilterStyle(),
                       width: 'auto',
@@ -1054,7 +1071,8 @@ export default function VideoPreview({
                       minHeight: '100%',
                       objectFit: 'cover',
                       transform: `translate(${(cropSettings?.x || 0) * 0.5}px, ${(cropSettings?.y || 0) * 0.5}px) scale(${cropSettings?.zoom || 1})`,
-                      transformOrigin: 'center center'
+                      transformOrigin: 'center center',
+                      willChange: 'transform'
                     }}
                     onTimeUpdate={handleTimeUpdateInternal}
                     onEnded={() => setIsPlaying(false)}
@@ -1068,7 +1086,8 @@ export default function VideoPreview({
                       ref={videoRef}
                       src={videoData.url}
                       className="w-full h-auto max-h-full object-contain pointer-events-none shadow-2xl"
-                      style={getFilterStyle()}
+                      preload="metadata"
+                      style={{ ...getFilterStyle(), willChange: 'transform' }}
                       onTimeUpdate={handleTimeUpdateInternal}
                       onEnded={() => setIsPlaying(false)}
                       onPlay={() => setIsPlaying(true)}
@@ -1179,7 +1198,8 @@ export default function VideoPreview({
                 ref={videoRef}
                 src={videoData.url}
                 className="max-h-[300px] sm:max-h-[420px] w-auto max-w-full object-contain mx-auto transition-all"
-                style={getFilterStyle()}
+                preload="metadata"
+                style={{ ...getFilterStyle(), willChange: 'transform' }}
                 onTimeUpdate={handleTimeUpdateInternal}
                 onEnded={() => setIsPlaying(false)}
                 onPlay={() => setIsPlaying(true)}
@@ -1458,6 +1478,28 @@ export default function VideoPreview({
     </div>
   );
 }
+
+// React.memo: prevents re-render when parent App state (crop drag, text drag, time ticks)
+// changes something unrelated to VideoPreview's own visual output.
+export default React.memo(VideoPreviewInner, (prev, next) => {
+  // Re-render only if these props actually change
+  return (
+    prev.videoData === next.videoData &&
+    prev.currentTime === next.currentTime &&
+    prev.cropSettings === next.cropSettings &&
+    prev.bgSettings === next.bgSettings &&
+    prev.textSettings === next.textSettings &&
+    prev.logoSettings === next.logoSettings &&
+    prev.effectsSettings === next.effectsSettings &&
+    prev.audioSettings === next.audioSettings &&
+    prev.customParts === next.customParts &&
+    prev.skipDeletedCuts === next.skipDeletedCuts &&
+    prev.isSuspended === next.isSuspended &&
+    prev.onSplitAtPlayhead === next.onSplitAtPlayhead &&
+    prev.onToggleCutAtPlayhead === next.onToggleCutAtPlayhead &&
+    prev.onCaptureFrame === next.onCaptureFrame
+  );
+});
 
 function FilmIcon({ className }) {
   return (

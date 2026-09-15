@@ -672,7 +672,7 @@ export default function App() {
   };
 
   // ── Split & Cut Actions for Player & Hotkeys ──────────────────────────────
-  const handleSplitAtPlayhead = () => {
+  const handleSplitAtPlayhead = useCallback(() => {
     if (!videoData) return;
     // Read from ref so we always have the live position, not the throttled state.
     const playhead = Math.round((currentTimeRef.current || 0) * 10) / 10;
@@ -707,9 +707,10 @@ export default function App() {
       setCustomParts(renumbered);
       showToast(`Split video at ${playhead.toFixed(1)}s`, 'info');
     }
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videoData, customParts, showToast]);
 
-  const handleToggleCutAtPlayhead = () => {
+  const handleToggleCutAtPlayhead = useCallback(() => {
     if (!customParts || customParts.length === 0) return;
     // Read from ref for the exact live position, not the 4fps-throttled state.
     const liveTime = currentTimeRef.current;
@@ -727,7 +728,8 @@ export default function App() {
       const isNowCut = updated[targetIdx].isDeleted;
       showToast(`${isNowCut ? 'Cut (Excluded)' : 'Restored'} Part ${targetIdx + 1}`, 'info');
     }
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customParts, showToast]);
 
   // ── Global Keyboard Shortcut for Split (Key S) ───────────────────────────────
   React.useEffect(() => {
@@ -1915,7 +1917,7 @@ export default function App() {
                       onCropChange={setCropSettings}
                       bgSettings={bgSettings}
                       textSettings={textSettings}
-                      onTextChange={setTextSettings}
+                      onTextChange={handleTextChange}
                       logoSettings={logoSettings}
                       onLogoChange={setLogoSettings}
                       effectsSettings={effectsSettings}

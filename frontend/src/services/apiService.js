@@ -255,6 +255,26 @@ export async function cancelSocialScheduledJob(platform, jobId) {
 }
 
 /**
+ * SECTION 1: Reschedule an active scheduled publishing job to a new date/time.
+ */
+export async function rescheduleSocialScheduledJob(platform, jobId, scheduledAt) {
+  return apiFetch('/api/social/reschedule', {
+    method: 'POST',
+    body: JSON.stringify({ platform, jobId, scheduledAt })
+  });
+}
+
+/**
+ * SECTION 1: Publish an active scheduled publishing job immediately on-demand.
+ */
+export async function publishSocialJobNow(platform, jobId) {
+  return apiFetch('/api/social/publish-now', {
+    method: 'POST',
+    body: JSON.stringify({ platform, jobId })
+  });
+}
+
+/**
  * SECTION 3: Safely clear completed/failed/cancelled upload history.
  */
 export async function clearSocialUploadHistory(platform = 'all') {
@@ -492,6 +512,13 @@ export async function selectFacebookPage(pageId) {
  */
 export async function debugFacebookPage() {
   return apiFetch('/api/facebook/debug-page');
+}
+
+/**
+ * Safe Facebook Account Diagnostics Check
+ */
+export async function debugFacebookAccount() {
+  return apiFetch('/api/facebook/debug-account');
 }
 
 /**

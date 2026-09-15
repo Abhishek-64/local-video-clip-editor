@@ -296,9 +296,18 @@ export async function verifyInstagramPublishCapability(env, accessToken, igUserI
     if (!res.ok) {
       const errText = await res.text();
       let errorMsg = `Meta API error (${res.status})`;
+      let isTokenExpired = false;
       try {
         const errJson = JSON.parse(errText);
-        errorMsg = errJson?.error?.message || errorMsg;
+        const code = errJson?.error?.code;
+        const subcode = errJson?.error?.error_subcode;
+        const msg = errJson?.error?.message;
+        if (code === 190 || subcode === 460 || (msg && msg.toLowerCase().includes('session has been invalidated'))) {
+          isTokenExpired = true;
+          errorMsg = 'Meta session expired or invalidated (e.g. password changed). Please re-authenticate Instagram.';
+        } else {
+          errorMsg = msg || errorMsg;
+        }
       } catch {}
 
       return {
@@ -307,6 +316,7 @@ export async function verifyInstagramPublishCapability(env, accessToken, igUserI
         ig_username: null,
         has_access_token: true,
         can_publish: false,
+        token_expired: isTokenExpired,
         error: errorMsg
       };
     }
@@ -318,6 +328,7 @@ export async function verifyInstagramPublishCapability(env, accessToken, igUserI
     let quotaUsage = null;
     let quotaTotal = null;
     let publishError = null;
+    let isTokenExpired = false;
 
     try {
       const quotaUrl = `${GRAPH_BASE}/${version}/${cleanId}/content_publishing_limit?fields=quota_usage,config&access_token=${accessToken}`;
@@ -337,10 +348,16 @@ export async function verifyInstagramPublishCapability(env, accessToken, igUserI
         const quotaErrText = await quotaRes.text();
         try {
           const parsedErr = JSON.parse(quotaErrText);
-          if (parsedErr?.error?.code === 200 || parsedErr?.error?.code === 10) {
+          const code = parsedErr?.error?.code;
+          const subcode = parsedErr?.error?.error_subcode;
+          const msg = parsedErr?.error?.message;
+          if (code === 190 || subcode === 460 || (msg && msg.toLowerCase().includes('session has been invalidated'))) {
+            isTokenExpired = true;
+            publishError = 'Meta session expired or invalidated. Please re-authenticate.';
+          } else if (code === 200 || code === 10) {
             publishError = "Permission 'instagram_content_publish' is not active or account is not eligible for Reels publishing.";
           } else {
-            publishError = parsedErr?.error?.message || 'Publishing capability probe returned an error.';
+            publishError = msg || 'Publishing capability probe returned an error.';
           }
         } catch {
           publishError = quotaErrText;
@@ -351,13 +368,14 @@ export async function verifyInstagramPublishCapability(env, accessToken, igUserI
     }
 
     return {
-      connected: true,
+      connected: !isTokenExpired,
       ig_user_id: cleanId,
       ig_username: data.username || 'instagram_creator',
       ig_name: data.name || '',
       ig_profile_picture_url: data.profile_picture_url || null,
       has_access_token: true,
-      can_publish: canPublish,
+      can_publish: canPublish && !isTokenExpired,
+      token_expired: isTokenExpired,
       quotaUsage,
       quotaTotal,
       error: publishError

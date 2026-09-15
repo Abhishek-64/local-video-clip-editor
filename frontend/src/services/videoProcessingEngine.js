@@ -772,11 +772,43 @@ export async function processVideoClipLegacy({
   });
 }
 
+export function hexOrColorToRgba(colorStr, alphaPercent = 75) {
+  const alpha = Math.max(0, Math.min(1, (alphaPercent ?? 75) / 100));
+  if (!colorStr) return `rgba(0, 0, 0, ${alpha})`;
+  if (colorStr.startsWith('rgba(')) {
+    return colorStr.replace(/[\d\.]+\)$/g, `${alpha})`);
+  }
+  if (colorStr.startsWith('rgb(')) {
+    return colorStr.replace('rgb(', 'rgba(').replace(')', `, ${alpha})`);
+  }
+  if (colorStr.startsWith('#')) {
+    let hex = colorStr.slice(1);
+    if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+    const r = parseInt(hex.slice(0, 2), 16) || 0;
+    const g = parseInt(hex.slice(2, 4), 16) || 0;
+    const b = parseInt(hex.slice(4, 6), 16) || 0;
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+  return colorStr;
+}
+
+function applyTextTransform(str, transform) {
+  if (!str) return '';
+  if (transform === 'uppercase') return str.toUpperCase();
+  if (transform === 'lowercase') return str.toLowerCase();
+  if (transform === 'capitalize') {
+    return str.replace(/\b\w/g, c => c.toUpperCase());
+  }
+  return str;
+}
+
 /**
  * Render dynamic text template, part numbers, and all extra custom text overlays onto canvas
- * with intelligent word wrapping and auto-fitting to prevent text overflow.
+ * with intelligent word wrapping, opacity controls, 2px minimum sizing, and auto-fitting.
  */
 export function renderTextOverlay(ctx, canvasWidth, canvasHeight, textSettings, partNumber = 1) {
+  if (!textSettings) return;
+
   const minDim = Math.min(canvasWidth, canvasHeight);
   const scale = minDim / 540;
   const maxAllowedTextWidth = canvasWidth * 0.86;
@@ -790,112 +822,139 @@ export function renderTextOverlay(ctx, canvasWidth, canvasHeight, textSettings, 
       font = 'Inter, sans-serif',
       fontSize = 28,
       color = '#ffffff',
+      opacity = 100,
       outline = true,
       outlineColor = '#000000',
       outlineThickness = 3,
       bgEnabled = false,
       bgColor = 'rgba(0, 0, 0, 0.75)',
+      bgOpacity = 75,
+      bgPadding = 8,
+      bgRadius = 8,
       position = 'top-center',
       customY = null,
-      customX = null
+      customX = null,
+      textTransform = 'none',
+      fontStyle = 'normal',
+      letterSpacing = 0,
+      displayMode = 'all'
     } = textSettings;
 
-    const formattedPart = zeroPad ? String(partNumber).padStart(2, '0') : String(partNumber);
-    const displayText = textSettings.text || movieName || 'My Movie';
-    const fullText = (template || '{movie} - Part {part}')
-      .replace(/\{movie\}/gi, displayText)
-      .replace(/\{title\}/gi, displayText)
-      .replace(/\{text\}/gi, displayText)
-      .replace(/\{part\}/gi, formattedPart);
+    // Check display / staying mode
+    const shouldDisplay = displayMode === 'all'
+      || (displayMode === 'first' && partNumber === 1)
+      || (displayMode === 'last' && textSettings.isLastPart);
 
-    ctx.save();
+    if (shouldDisplay) {
+      const formattedPart = zeroPad ? String(partNumber).padStart(2, '0') : String(partNumber);
+      const displayText = textSettings.text || movieName || 'My Movie';
+      let fullText = (template || '{movie} - Part {part}')
+        .replace(/\{movie\}/gi, displayText)
+        .replace(/\{title\}/gi, displayText)
+        .replace(/\{text\}/gi, displayText)
+        .replace(/\{part\}/gi, formattedPart);
 
-    const initialScaledFontSize = Math.max(18, Math.round(fontSize * scale));
-    const layout = wrapAndFitText(ctx, fullText, maxAllowedTextWidth, initialScaledFontSize, font, 16);
+      fullText = applyTextTransform(fullText, textTransform);
 
-    ctx.font = `bold ${layout.fontSize}px ${font}`;
-    ctx.textBaseline = 'middle';
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, Math.min(1, (opacity ?? 100) / 100));
 
-    const isTop = position.startsWith('top');
-    const isBottom = position.startsWith('bottom');
-    const isLeft = position.endsWith('left');
-    const isRight = position.endsWith('right');
+      const initialScaledFontSize = Math.max(2, Math.round(fontSize * scale));
+      const layout = wrapAndFitText(ctx, fullText, maxAllowedTextWidth, initialScaledFontSize, font, 2);
 
-    // X Position
-    let x = canvasWidth / 2;
-    let textAlign = 'center';
+      const stylePrefix = fontStyle === 'italic' ? 'italic ' : '';
+      ctx.font = `${stylePrefix}bold ${layout.fontSize}px ${font}`;
+      ctx.textBaseline = 'middle';
 
-    if (typeof customX === 'number') {
-      x = (customX / 100) * canvasWidth;
-      textAlign = 'center';
-    } else if (isLeft) {
-      x = canvasWidth * 0.07;
-      textAlign = 'left';
-    } else if (isRight) {
-      x = canvasWidth * 0.93;
-      textAlign = 'right';
-    } else {
-      x = canvasWidth / 2;
-      textAlign = 'center';
-    }
-
-    // Y Position
-    let y = canvasHeight * 0.10;
-    if (typeof customY === 'number') {
-      y = (customY / 100) * canvasHeight;
-    } else if (isTop) {
-      y = canvasHeight * 0.10;
-    } else if (isBottom) {
-      y = canvasHeight * 0.90;
-    } else {
-      y = canvasHeight * 0.50;
-    }
-
-    ctx.textAlign = textAlign;
-
-    const totalTextHeight = layout.lines.length * layout.lineHeight;
-
-    // Background Pill Box
-    if (bgEnabled) {
-      const padX = 14 * scale;
-      const padY = 6 * scale;
-      const radius = 8 * scale;
-
-      let boxX = x - layout.maxLineWidth / 2 - padX;
-      if (textAlign === 'left') {
-        boxX = x - padX;
-      } else if (textAlign === 'right') {
-        boxX = x - layout.maxLineWidth - padX;
+      if (letterSpacing && 'letterSpacing' in ctx) {
+        try { ctx.letterSpacing = `${letterSpacing * scale}px`; } catch (e) {}
       }
 
-      const boxY = y - totalTextHeight / 2 - padY;
-      const boxW = layout.maxLineWidth + padX * 2;
-      const boxH = totalTextHeight + padY * 2;
+      const isTop = position.startsWith('top');
+      const isBottom = position.startsWith('bottom');
+      const isLeft = position.endsWith('left');
+      const isRight = position.endsWith('right');
 
-      ctx.fillStyle = bgColor || 'rgba(0, 0, 0, 0.75)';
-      ctx.beginPath();
-      ctx.roundRect(boxX, boxY, boxW, boxH, radius);
-      ctx.fill();
-    }
+      // X Position
+      let x = canvasWidth / 2;
+      let textAlign = 'center';
 
-    // Draw each wrapped line
-    const startY = y - ((layout.lines.length - 1) * layout.lineHeight) / 2;
-
-    layout.lines.forEach((line, idx) => {
-      const lineY = startY + idx * layout.lineHeight;
-
-      if (outline) {
-        ctx.strokeStyle = outlineColor || '#000000';
-        ctx.lineWidth = Math.max(2.5, outlineThickness * scale);
-        ctx.lineJoin = 'round';
-        ctx.strokeText(line, x, lineY);
+      if (typeof customX === 'number') {
+        x = (customX / 100) * canvasWidth;
+        textAlign = 'center';
+      } else if (isLeft) {
+        x = canvasWidth * 0.07;
+        textAlign = 'left';
+      } else if (isRight) {
+        x = canvasWidth * 0.93;
+        textAlign = 'right';
+      } else {
+        x = canvasWidth / 2;
+        textAlign = 'center';
       }
 
-      ctx.fillStyle = color || '#ffffff';
-      ctx.fillText(line, x, lineY);
-    });
+      // Y Position
+      let y = canvasHeight * 0.10;
+      if (typeof customY === 'number') {
+        y = (customY / 100) * canvasHeight;
+      } else if (isTop) {
+        y = canvasHeight * 0.10;
+      } else if (isBottom) {
+        y = canvasHeight * 0.90;
+      } else {
+        y = canvasHeight * 0.50;
+      }
 
-    ctx.restore();
+      ctx.textAlign = textAlign;
+      const totalTextHeight = layout.lines.length * layout.lineHeight;
+
+      // Background Pill Box
+      if (bgEnabled) {
+        const pad = Math.max(2, bgPadding ?? 8);
+        const padX = (pad + 4) * scale;
+        const padY = pad * scale;
+        const radius = (bgRadius ?? 8) * scale;
+
+        let boxX = x - layout.maxLineWidth / 2 - padX;
+        if (textAlign === 'left') {
+          boxX = x - padX;
+        } else if (textAlign === 'right') {
+          boxX = x - layout.maxLineWidth - padX;
+        }
+
+        const boxY = y - totalTextHeight / 2 - padY;
+        const boxW = layout.maxLineWidth + padX * 2;
+        const boxH = totalTextHeight + padY * 2;
+
+        ctx.fillStyle = hexOrColorToRgba(bgColor, bgOpacity);
+        ctx.beginPath();
+        if (typeof ctx.roundRect === 'function') {
+          ctx.roundRect(boxX, boxY, boxW, boxH, radius);
+        } else {
+          ctx.rect(boxX, boxY, boxW, boxH);
+        }
+        ctx.fill();
+      }
+
+      // Draw each wrapped line
+      const startY = y - ((layout.lines.length - 1) * layout.lineHeight) / 2;
+
+      layout.lines.forEach((line, idx) => {
+        const lineY = startY + idx * layout.lineHeight;
+
+        if (outline) {
+          ctx.strokeStyle = outlineColor || '#000000';
+          ctx.lineWidth = Math.max(2, (outlineThickness || 3) * scale);
+          ctx.lineJoin = 'round';
+          ctx.strokeText(line, x, lineY);
+        }
+
+        ctx.fillStyle = color || '#ffffff';
+        ctx.fillText(line, x, lineY);
+      });
+
+      ctx.restore();
+    }
   }
 
   // 2. Extra Custom Text Overlays
@@ -903,14 +962,28 @@ export function renderTextOverlay(ctx, canvasWidth, canvasHeight, textSettings, 
     textSettings.extraTexts.forEach((extra) => {
       if (!extra.enabled || !extra.text) return;
 
-      ctx.save();
-      const extraFont = extra.font || 'Inter, sans-serif';
-      const initialExtraFontSize = Math.max(16, Math.round((extra.fontSize || 22) * scale));
-      const layout = wrapAndFitText(ctx, extra.text, maxAllowedTextWidth, initialExtraFontSize, extraFont, 14);
+      const shouldDisplayExtra = (extra.displayMode || 'all') === 'all'
+        || (extra.displayMode === 'first' && partNumber === 1)
+        || (extra.displayMode === 'last' && textSettings.isLastPart);
 
-      ctx.font = `bold ${layout.fontSize}px ${extraFont}`;
+      if (!shouldDisplayExtra) return;
+
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, Math.min(1, (extra.opacity ?? 100) / 100));
+
+      const extraFont = extra.font || 'Inter, sans-serif';
+      const initialExtraFontSize = Math.max(2, Math.round((extra.fontSize || 22) * scale));
+      const extraTransformedText = applyTextTransform(extra.text, extra.textTransform || 'none');
+      const layout = wrapAndFitText(ctx, extraTransformedText, maxAllowedTextWidth, initialExtraFontSize, extraFont, 2);
+
+      const stylePrefix = extra.fontStyle === 'italic' ? 'italic ' : '';
+      ctx.font = `${stylePrefix}bold ${layout.fontSize}px ${extraFont}`;
       ctx.textBaseline = 'middle';
       ctx.textAlign = 'center';
+
+      if (extra.letterSpacing && 'letterSpacing' in ctx) {
+        try { ctx.letterSpacing = `${extra.letterSpacing * scale}px`; } catch (e) {}
+      }
 
       const extraX = ((extra.customX ?? 50) / 100) * canvasWidth;
       const extraY = ((extra.customY ?? 88) / 100) * canvasHeight;
@@ -918,18 +991,23 @@ export function renderTextOverlay(ctx, canvasWidth, canvasHeight, textSettings, 
 
       // Background pill box
       if (extra.bgEnabled) {
-        const padX = 12 * scale;
-        const padY = 5 * scale;
-        const radius = 8 * scale;
+        const pad = Math.max(2, extra.bgPadding ?? 6);
+        const padX = (pad + 4) * scale;
+        const padY = pad * scale;
+        const radius = (extra.bgRadius ?? 8) * scale;
 
         const boxX = extraX - layout.maxLineWidth / 2 - padX;
         const boxY = extraY - totalTextHeight / 2 - padY;
         const boxW = layout.maxLineWidth + padX * 2;
         const boxH = totalTextHeight + padY * 2;
 
-        ctx.fillStyle = extra.bgColor || 'rgba(0, 0, 0, 0.75)';
+        ctx.fillStyle = hexOrColorToRgba(extra.bgColor || '#000000', extra.bgOpacity ?? 75);
         ctx.beginPath();
-        ctx.roundRect(boxX, boxY, boxW, boxH, radius);
+        if (typeof ctx.roundRect === 'function') {
+          ctx.roundRect(boxX, boxY, boxW, boxH, radius);
+        } else {
+          ctx.rect(boxX, boxY, boxW, boxH);
+        }
         ctx.fill();
       }
 

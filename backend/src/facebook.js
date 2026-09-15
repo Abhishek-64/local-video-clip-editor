@@ -230,9 +230,18 @@ export async function verifyPagePublishCapability(env, pageAccessToken, pageId) 
     if (!res.ok) {
       const errText = await res.text();
       let errorMsg = `Meta API error (${res.status})`;
+      let isTokenExpired = false;
       try {
         const errJson = JSON.parse(errText);
-        errorMsg = errJson?.error?.message || errorMsg;
+        const code = errJson?.error?.code;
+        const subcode = errJson?.error?.error_subcode;
+        const msg = errJson?.error?.message;
+        if (code === 190 || subcode === 460 || (msg && msg.toLowerCase().includes('session has been invalidated'))) {
+          isTokenExpired = true;
+          errorMsg = 'Meta session expired or invalidated (e.g. password changed). Please re-authenticate Facebook.';
+        } else {
+          errorMsg = msg || errorMsg;
+        }
       } catch {}
 
       return {
@@ -241,6 +250,7 @@ export async function verifyPagePublishCapability(env, pageAccessToken, pageId) 
         page_name: null,
         has_page_access_token: true,
         can_publish: false,
+        token_expired: isTokenExpired,
         error: errorMsg
       };
     }
@@ -292,10 +302,15 @@ export async function publishFacebookReel(env, pageAccessToken, pageId, {
     let friendlyMessage = `Failed to start Facebook Reel session: ${errText}`;
     try {
       const errObj = JSON.parse(errText);
-      if (errObj?.error?.code === 200) {
+      const code = errObj?.error?.code;
+      const subcode = errObj?.error?.error_subcode;
+      const message = errObj?.error?.message;
+      if (code === 190 || subcode === 460 || (message && message.toLowerCase().includes('session has been invalidated'))) {
+        friendlyMessage = `Facebook Session Expired (#190): The Meta session has been invalidated (e.g. password changed). Please re-authenticate your Facebook account.`;
+      } else if (code === 200) {
         friendlyMessage = `Facebook Permission Error (#200): Subject does not have permission to post videos on this Page. Please ensure your Page has 'pages_manage_posts' & 'pages_read_engagement' permissions by re-authenticating with Facebook.`;
-      } else if (errObj?.error?.message) {
-        friendlyMessage = `Facebook API Error: ${errObj.error.message}`;
+      } else if (message) {
+        friendlyMessage = `Facebook API Error: ${message}`;
       }
     } catch {}
     throw new Error(friendlyMessage);

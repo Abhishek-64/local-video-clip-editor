@@ -2,9 +2,30 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Calendar, Clock, Video, Eye, XCircle, RefreshCw, AlertCircle,
   Instagram, Share2, CheckCircle2, Play, ExternalLink, ShieldCheck,
-  Film, X
+  Film, X, CalendarClock, ArrowRight, Sparkles, Zap
 } from 'lucide-react';
-import { getSocialScheduledJobs, getSocialPreviewUrl, cancelSocialScheduledJob } from '../services/apiService';
+import {
+  getSocialScheduledJobs,
+  getSocialPreviewUrl,
+  cancelSocialScheduledJob,
+  rescheduleSocialScheduledJob,
+  publishSocialJobNow
+} from '../services/apiService';
+
+/**
+ * Helper to format a Date into an HTML5 datetime-local string (YYYY-MM-DDTHH:mm)
+ */
+function toDateTimeLocalString(date) {
+  const d = date instanceof Date ? date : new Date(date);
+  if (isNaN(d.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  const year = d.getFullYear();
+  const month = pad(d.getMonth() + 1);
+  const day = pad(d.getDate());
+  const hours = pad(d.getHours());
+  const minutes = pad(d.getMinutes());
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
 
 /**
  * Format ISO datetime string to user-friendly local date & time
@@ -27,6 +48,28 @@ function formatScheduledTime(isoString) {
 }
 
 /**
+ * Format ISO datetime string with weekday for modal preview
+ */
+function formatFullScheduledTime(isoString) {
+  if (!isoString) return '';
+  try {
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return isoString;
+    return d.toLocaleString([], {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
+  } catch {
+    return isoString;
+  }
+}
+
+/**
  * Get human-readable relative time (e.g. "in 15m", "Due now")
  */
 function getRelativeTime(isoString) {
@@ -38,7 +81,12 @@ function getRelativeTime(isoString) {
     if (diffMins < 60) return `in ${diffMins} min`;
     const diffHours = Math.floor(diffMins / 60);
     const remMins = diffMins % 60;
-    return `in ${diffHours}h ${remMins}m`;
+    if (diffHours < 24) {
+      return remMins > 0 ? `in ${diffHours}h ${remMins}m` : `in ${diffHours}h`;
+    }
+    const diffDays = Math.floor(diffHours / 24);
+    const remHours = diffHours % 24;
+    return remHours > 0 ? `in ${diffDays}d ${remHours}h` : `in ${diffDays}d`;
   } catch {
     return '';
   }
@@ -64,6 +112,15 @@ export default function ScheduledVideosSection({
   // Cancellation Modal State
   const [cancelModalJob, setCancelModalJob] = useState(null);
   const [isCancelling, setIsCancelling] = useState(false);
+
+  // Reschedule Modal State
+  const [rescheduleModalJob, setRescheduleModalJob] = useState(null);
+  const [rescheduleDateTime, setRescheduleDateTime] = useState('');
+  const [isRescheduling, setIsRescheduling] = useState(false);
+  const [rescheduleError, setRescheduleError] = useState(null);
+
+  // Publish Now Execution State
+  const [publishingNowJobIds, setPublishingNowJobIds] = useState({});
 
   // Video Preview Modal State (Streams temporary signed B2 URL or local asset)
   const [previewModal, setPreviewModal] = useState(null); // { url, title, fileName, job }
@@ -116,6 +173,86 @@ export default function ScheduledVideosSection({
 
     return Array.from(groups.values());
   }, [jobs]);
+
+  // Open Reschedule Modal with default/current datetime
+  const handleOpenReschedule = (job) => {
+    setRescheduleModalJob(job);
+    setRescheduleError(null);
+    const existing = job?.scheduled_at ? new Date(job.scheduled_at) : new Date(Date.now() + 3600000);
+    const initialTime = existing.getTime() > Date.now() ? existing : new Date(Date.now() + 3600000);
+    setRescheduleDateTime(toDateTimeLocalString(initialTime));
+  };
+
+  // Apply Quick Preset
+  const applyPreset = (presetType) => {
+    const now = new Date();
+    const currentSelected = rescheduleDateTime ? new Date(rescheduleDateTime) : new Date();
+    const base = isNaN(currentSelected.getTime()) || currentSelected.getTime() < now.getTime() ? now : currentSelected;
+    
+    let nextDate = new Date(base);
+    if (presetType === 'plus1h') {
+      nextDate = new Date(Date.now() + 60 * 60 * 1000);
+    } else if (presetType === 'plus3h') {
+      nextDate = new Date(Date.now() + 3 * 60 * 60 * 1000);
+    } else if (presetType === 'plus6h') {
+      nextDate = new Date(Date.now() + 6 * 60 * 60 * 1000);
+    } else if (presetType === 'tomorrow') {
+      const d = new Date(now);
+      d.setDate(d.getDate() + 1);
+      if (rescheduleModalJob?.scheduled_at) {
+        const orig = new Date(rescheduleModalJob.scheduled_at);
+        if (!isNaN(orig.getTime())) {
+          d.setHours(orig.getHours(), orig.getMinutes(), 0, 0);
+        }
+      }
+      nextDate = d.getTime() > Date.now() ? d : new Date(Date.now() + 24 * 60 * 60 * 1000);
+    } else if (presetType === 'plus2d') {
+      nextDate = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
+    } else if (presetType === 'plus1w') {
+      nextDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    }
+    setRescheduleDateTime(toDateTimeLocalString(nextDate));
+    setRescheduleError(null);
+  };
+
+  // Handle Confirm Reschedule
+  const handleConfirmReschedule = async () => {
+    if (!rescheduleModalJob || !rescheduleDateTime) return;
+    const selected = new Date(rescheduleDateTime);
+    if (isNaN(selected.getTime())) {
+      setRescheduleError('Please enter a valid date and time.');
+      return;
+    }
+    if (selected.getTime() <= Date.now()) {
+      setRescheduleError('Please choose a future date and time for scheduled publishing.');
+      return;
+    }
+
+    setIsRescheduling(true);
+    setRescheduleError(null);
+    try {
+      const res = await rescheduleSocialScheduledJob(
+        rescheduleModalJob.platform,
+        rescheduleModalJob.id,
+        selected.toISOString()
+      );
+      if (res && res.success) {
+        const platformName = rescheduleModalJob.platform === 'instagram' ? 'Instagram' : 'Facebook';
+        const formattedTime = formatScheduledTime(selected.toISOString());
+        showToast(`Rescheduled ${platformName} post to ${formattedTime}!`, 'success');
+        setRescheduleModalJob(null);
+        await fetchScheduledJobs();
+      } else {
+        throw new Error(res?.error || 'Failed to reschedule');
+      }
+    } catch (err) {
+      console.error('Reschedule error:', err);
+      setRescheduleError(err.message || 'Failed to reschedule publishing time');
+      showToast(`Error: ${err.message}`, 'error');
+    } finally {
+      setIsRescheduling(false);
+    }
+  };
 
   // Handle Video Preview: Local In-Memory first, then Cloudflare Stream Proxy fallback
   const handlePreview = async (job) => {
@@ -198,6 +335,33 @@ export default function ScheduledVideosSection({
     }
   };
 
+  // Handle Publish Now (Immediately execute a scheduled job on-demand)
+  const handlePublishNow = async (job) => {
+    if (!job || publishingNowJobIds[job.id]) return;
+    const platformName = job.platform === 'instagram' ? 'Instagram' : 'Facebook';
+    setPublishingNowJobIds(prev => ({ ...prev, [job.id]: true }));
+
+    try {
+      showToast(`Publishing ${platformName} Reel immediately...`, 'info');
+      const res = await publishSocialJobNow(job.platform, job.id);
+      if (res && res.success) {
+        showToast(`✓ Published to ${platformName} successfully!`, 'success');
+        await fetchScheduledJobs();
+      } else {
+        throw new Error(res?.error || `Failed to publish to ${platformName}`);
+      }
+    } catch (err) {
+      console.error(`Publish now error for ${platformName}:`, err);
+      showToast(`Publish error: ${err.message}`, 'error');
+    } finally {
+      setPublishingNowJobIds(prev => {
+        const next = { ...prev };
+        delete next[job.id];
+        return next;
+      });
+    }
+  };
+
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl mt-2">
       {/* Header */}
@@ -276,13 +440,14 @@ export default function ScheduledVideosSection({
                     {group.platforms.map((job) => {
                       const isIg = job.platform === 'instagram';
                       const relative = getRelativeTime(job.scheduled_at);
+                      const isPublishingThis = Boolean(publishingNowJobIds[job.id]);
 
                       return (
                         <div
                           key={job.id}
                           className="bg-slate-900/80 border border-slate-800/90 rounded-xl p-3 space-y-2.5 hover:border-slate-700/80 transition-all"
                         >
-                          {/* Top: Platform Icon + Name + Content Type + Status Badge + Cancel */}
+                          {/* Top: Platform Icon + Name + Content Type + Status Badge + Publish Now + Reschedule + Cancel */}
                           <div className="flex items-center justify-between gap-2">
                             <div className="flex items-center space-x-2.5 min-w-0">
                               <div
@@ -305,18 +470,42 @@ export default function ScheduledVideosSection({
                               </div>
                             </div>
 
-                            <div className="flex items-center space-x-2 shrink-0">
+                            <div className="flex items-center space-x-1.5 sm:space-x-2 shrink-0">
                               <span className={`px-2.5 py-0.5 text-[10px] font-bold rounded-full border shadow-sm ${
-                                job.status === 'uploading' || job.status === 'processing'
+                                isPublishingThis || job.status === 'uploading' || job.status === 'processing'
                                 ? 'bg-blue-500/20 text-blue-300 border-blue-500/40 animate-pulse'
                                 : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
                               }`}>
-                                {job.status === 'uploading' ? (job.progress != null ? `Uploading ${job.progress}%` : 'Uploading...') : (job.status === 'processing' ? 'Processing...' : 'Scheduled')}
+                                {isPublishingThis ? 'Publishing...' : (job.status === 'uploading' ? (job.progress != null ? `Uploading ${job.progress}%` : 'Uploading...') : (job.status === 'processing' ? 'Processing...' : 'Scheduled'))}
                               </span>
+
+                              {/* Publish Now Button */}
+                              <button
+                                type="button"
+                                onClick={() => handlePublishNow(job)}
+                                disabled={isPublishingThis || job.status === 'uploading' || job.status === 'processing'}
+                                className="px-2.5 py-1 text-[11px] font-semibold text-emerald-300 hover:text-white bg-emerald-500/15 hover:bg-emerald-500/30 border border-emerald-500/40 rounded-lg transition-all flex items-center space-x-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-sm active:scale-95"
+                                title={`Publish ${isIg ? 'Instagram' : 'Facebook'} post immediately`}
+                              >
+                                <Zap className={`w-3.5 h-3.5 text-emerald-400 ${isPublishingThis ? 'animate-spin' : ''}`} />
+                                <span className="hidden sm:inline">Publish Now</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleOpenReschedule(job)}
+                                disabled={isPublishingThis || job.status === 'uploading' || job.status === 'processing'}
+                                className="px-2 py-1 text-[11px] font-semibold text-slate-300 hover:text-white bg-slate-800/90 hover:bg-orange-500/20 hover:border-orange-500/40 border border-slate-700/70 rounded-lg transition-all flex items-center space-x-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-sm active:scale-95"
+                                title={`Reschedule ${isIg ? 'Instagram' : 'Facebook'} post date and time`}
+                              >
+                                <CalendarClock className="w-3.5 h-3.5 text-orange-400" />
+                                <span className="hidden sm:inline">Reschedule</span>
+                              </button>
 
                               <button
                                 type="button"
                                 onClick={() => setCancelModalJob(job)}
+                                disabled={isPublishingThis}
                                 className="p-1 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
                                 title={`Cancel ${isIg ? 'Instagram' : 'Facebook'} Schedule`}
                               >
@@ -325,12 +514,19 @@ export default function ScheduledVideosSection({
                             </div>
                           </div>
 
-                          {/* Bottom: Dedicated Time & Countdown Strip (Never Collides) */}
-                          <div className="bg-slate-950/80 border border-slate-800/80 rounded-lg px-2.5 py-1.5 flex items-center justify-between gap-2">
+                          {/* Bottom: Dedicated Time & Countdown Strip (Click to Reschedule) */}
+                          <div
+                            onClick={() => (job.status !== 'uploading' && job.status !== 'processing' && !isPublishingThis) && handleOpenReschedule(job)}
+                            className="bg-slate-950/80 border border-slate-800/80 hover:border-orange-500/40 rounded-lg px-2.5 py-1.5 flex items-center justify-between gap-2 transition-all cursor-pointer group/time"
+                            title="Click to reschedule publishing time"
+                          >
                             <div className="flex items-center space-x-1.5 text-slate-300 min-w-0">
-                              <Clock className="w-3.5 h-3.5 text-orange-400 shrink-0" />
-                              <span className="font-semibold text-[11px] truncate">
+                              <Clock className="w-3.5 h-3.5 text-orange-400 shrink-0 group-hover/time:text-orange-300 transition-colors" />
+                              <span className="font-semibold text-[11px] truncate group-hover/time:text-white transition-colors">
                                 {formatScheduledTime(job.scheduled_at)}
+                              </span>
+                              <span className="text-[9px] text-slate-500 group-hover/time:text-orange-400/80 hidden sm:inline ml-1 font-sans">
+                                (click to reschedule)
                               </span>
                             </div>
 
@@ -345,8 +541,30 @@ export default function ScheduledVideosSection({
                     })}
                   </div>
 
-                  {/* Card Actions: Preview */}
+                  {/* Card Actions: Publish Now + Reschedule + Preview */}
                   <div className="pt-2 flex items-center justify-end space-x-2 border-t border-slate-800/60">
+                    {group.platforms.length === 1 && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handlePublishNow(group.platforms[0])}
+                          disabled={Boolean(publishingNowJobIds[group.platforms[0].id]) || group.platforms[0].status === 'uploading' || group.platforms[0].status === 'processing'}
+                          className="px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 active:scale-98 text-emerald-300 hover:text-white font-medium text-xs rounded-xl shadow-sm border border-emerald-500/40 flex items-center space-x-1.5 transition-all cursor-pointer disabled:opacity-40"
+                        >
+                          <Zap className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>{publishingNowJobIds[group.platforms[0].id] ? 'Publishing...' : 'Publish Now'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenReschedule(group.platforms[0])}
+                          disabled={group.platforms[0].status === 'uploading' || group.platforms[0].status === 'processing'}
+                          className="px-3 py-1.5 bg-slate-800/90 hover:bg-slate-700 active:scale-98 text-slate-200 hover:text-white font-medium text-xs rounded-xl shadow-sm border border-slate-700 flex items-center space-x-1.5 transition-all cursor-pointer disabled:opacity-40"
+                        >
+                          <CalendarClock className="w-3.5 h-3.5 text-orange-400" />
+                          <span>Reschedule</span>
+                        </button>
+                      </>
+                    )}
                     <button
                       type="button"
                       onClick={() => handlePreview(group.platforms[0])}
@@ -363,6 +581,207 @@ export default function ScheduledVideosSection({
           </div>
         )}
       </div>
+
+      {/* Reschedule Modal */}
+      {rescheduleModalJob && (() => {
+        const isIg = rescheduleModalJob.platform === 'instagram';
+        const selectedDate = rescheduleDateTime ? new Date(rescheduleDateTime) : null;
+        const isValidDate = selectedDate && !isNaN(selectedDate.getTime());
+        const isFuture = isValidDate && selectedDate.getTime() > Date.now();
+        const newRelative = isFuture ? getRelativeTime(selectedDate.toISOString()) : null;
+        const minDateTime = toDateTimeLocalString(new Date());
+
+        return (
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-4 sm:p-5 space-y-4 shadow-2xl animate-in fade-in zoom-in duration-150">
+              {/* Header */}
+              <div className="flex items-start justify-between gap-3 border-b border-slate-800 pb-3.5">
+                <div className="flex items-center space-x-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-orange-500/15 border border-orange-500/30 text-orange-400 flex items-center justify-center shrink-0 shadow-inner">
+                    <CalendarClock className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center space-x-2">
+                      <h4 className="text-sm font-bold text-white truncate">
+                        Reschedule {isIg ? 'Instagram' : 'Facebook'} Post
+                      </h4>
+                      <span className={`px-2 py-0.5 text-[9px] font-bold rounded-md ${
+                        isIg ? 'bg-pink-500/20 text-pink-300 border border-pink-500/30' : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                      }`}>
+                        {rescheduleModalJob.content_type === 'video' ? 'Video Post' : 'Reel'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 truncate mt-0.5">
+                      {rescheduleModalJob.title || 'Scheduled Video'}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => { setRescheduleModalJob(null); setRescheduleError(null); }}
+                  className="p-1 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Current Schedule Banner */}
+              <div className="bg-slate-950/90 border border-slate-800/80 rounded-xl p-3 flex items-center justify-between gap-2">
+                <div className="space-y-0.5 min-w-0">
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">
+                    Current Scheduled Time
+                  </span>
+                  <div className="flex items-center space-x-1.5 text-slate-200">
+                    <Clock className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+                    <span className="text-xs font-semibold truncate">
+                      {formatFullScheduledTime(rescheduleModalJob.scheduled_at)}
+                    </span>
+                  </div>
+                </div>
+                {getRelativeTime(rescheduleModalJob.scheduled_at) && (
+                  <span className="text-[10px] font-mono font-bold text-amber-300 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded-md shrink-0">
+                    {getRelativeTime(rescheduleModalJob.scheduled_at)}
+                  </span>
+                )}
+              </div>
+
+              {/* Quick Presets */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-semibold text-slate-300 flex items-center space-x-1">
+                  <Sparkles className="w-3.5 h-3.5 text-orange-400" />
+                  <span>Quick Presets</span>
+                </label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => applyPreset('plus1h')}
+                    className="px-2.5 py-1.5 text-[11px] font-medium text-slate-300 hover:text-white bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 rounded-lg transition-all text-center cursor-pointer active:scale-95"
+                  >
+                    +1 Hour
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyPreset('plus3h')}
+                    className="px-2.5 py-1.5 text-[11px] font-medium text-slate-300 hover:text-white bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 rounded-lg transition-all text-center cursor-pointer active:scale-95"
+                  >
+                    +3 Hours
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyPreset('plus6h')}
+                    className="px-2.5 py-1.5 text-[11px] font-medium text-slate-300 hover:text-white bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 rounded-lg transition-all text-center cursor-pointer active:scale-95"
+                  >
+                    +6 Hours
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyPreset('tomorrow')}
+                    className="px-2.5 py-1.5 text-[11px] font-medium text-slate-300 hover:text-white bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 rounded-lg transition-all text-center cursor-pointer active:scale-95"
+                  >
+                    Tomorrow
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyPreset('plus2d')}
+                    className="px-2.5 py-1.5 text-[11px] font-medium text-slate-300 hover:text-white bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 rounded-lg transition-all text-center cursor-pointer active:scale-95"
+                  >
+                    +2 Days
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyPreset('plus1w')}
+                    className="px-2.5 py-1.5 text-[11px] font-medium text-slate-300 hover:text-white bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 rounded-lg transition-all text-center cursor-pointer active:scale-95"
+                  >
+                    +1 Week
+                  </button>
+                </div>
+              </div>
+
+              {/* Date & Time Picker */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-semibold text-slate-300 flex items-center justify-between">
+                  <span>Select New Publication Time</span>
+                  <span className="text-[10px] text-slate-400 font-normal">Local Time</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="datetime-local"
+                    value={rescheduleDateTime}
+                    min={minDateTime}
+                    onChange={(e) => {
+                      setRescheduleDateTime(e.target.value);
+                      setRescheduleError(null);
+                    }}
+                    className="w-full bg-slate-950 border border-slate-800 focus:border-orange-500 focus:ring-1 focus:ring-orange-500 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 outline-none transition-all font-mono [color-scheme:dark]"
+                  />
+                </div>
+              </div>
+
+              {/* Live Preview / Validation Box */}
+              {isValidDate ? (
+                isFuture ? (
+                  <div className="p-3 bg-emerald-500/10 border border-emerald-500/25 rounded-xl space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 flex items-center space-x-1">
+                        <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
+                        New Schedule
+                      </span>
+                      {newRelative && (
+                        <span className="text-[10px] font-mono font-bold text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded-md">
+                          {newRelative}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs font-semibold text-emerald-200">
+                      {formatFullScheduledTime(selectedDate.toISOString())}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-rose-500/10 border border-rose-500/25 rounded-xl flex items-center space-x-2 text-xs text-rose-300">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+                    <span>Selected time is in the past. Please choose a future date & time.</span>
+                  </div>
+                )
+              ) : null}
+
+              {rescheduleError && (
+                <div className="p-3 bg-rose-500/10 border border-rose-500/25 rounded-xl flex items-center space-x-2 text-xs text-rose-300">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+                  <span>{rescheduleError}</span>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex items-center space-x-2 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => { setRescheduleModalJob(null); setRescheduleError(null); }}
+                  disabled={isRescheduling}
+                  className="flex-1 py-2 text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-xl transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmReschedule}
+                  disabled={isRescheduling || !isFuture}
+                  className="flex-1 py-2 text-xs font-bold text-white bg-orange-600 hover:bg-orange-500 active:scale-98 rounded-xl shadow-lg shadow-orange-600/20 transition-all cursor-pointer flex items-center justify-center space-x-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isRescheduling ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <>
+                      <CalendarClock className="w-3.5 h-3.5" />
+                      <span>Save New Schedule</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Secure Video Preview Modal */}
       {previewModal && (

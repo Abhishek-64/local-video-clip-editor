@@ -645,6 +645,29 @@ export default function FacebookPanel({
             </div>
           </div>
 
+          {/* Session Expiry / Error Alert */}
+          {(accountError || (publishError && (publishError.includes('190') || publishError.toLowerCase().includes('session') || publishError.toLowerCase().includes('re-authenticate')))) && (
+            <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-start justify-between gap-3 text-xs text-amber-300 animate-fadeIn">
+              <div className="flex items-start space-x-2 min-w-0">
+                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <div className="space-y-1 min-w-0">
+                  <p className="font-bold text-white">Facebook Session Needs Re-authentication</p>
+                  <p className="text-[11px] text-amber-200/90 leading-relaxed">
+                    {accountError || publishError}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={connectFacebook}
+                className="px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs rounded-lg shadow-sm shrink-0 flex items-center space-x-1 cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Re-authenticate</span>
+              </button>
+            </div>
+          )}
+
           {showAddAnotherPage && (
             <div className="pt-3 border-t border-slate-800/80 space-y-3 animate-fadeIn">
               <div className="flex items-center justify-between">

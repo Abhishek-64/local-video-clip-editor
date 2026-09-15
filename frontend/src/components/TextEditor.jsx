@@ -18,7 +18,11 @@ import {
   Paintbrush,
   Youtube,
   Share2,
-  Instagram
+  Instagram,
+  Clock,
+  Italic,
+  SlidersHorizontal,
+  Wand2
 } from 'lucide-react';
 
 export default function TextEditor({
@@ -32,6 +36,13 @@ export default function TextEditor({
     onChange({
       ...textSettings,
       [key]: value
+    });
+  };
+
+  const updateMultipleSettings = (newSettings) => {
+    onChange({
+      ...textSettings,
+      ...newSettings
     });
   };
 
@@ -50,6 +61,19 @@ export default function TextEditor({
     });
   };
 
+  const updateMultipleExtraText = (id, newProps) => {
+    const updated = extraTexts.map((item) => {
+      if (item.id === id) {
+        return { ...item, ...newProps };
+      }
+      return item;
+    });
+    onChange({
+      ...textSettings,
+      extraTexts: updated
+    });
+  };
+
   const handleAddExtraText = () => {
     const newId = `extra-${Date.now()}`;
     const newTextItem = {
@@ -59,11 +83,19 @@ export default function TextEditor({
       font: 'Inter, sans-serif',
       fontSize: 22,
       color: '#ffffff',
+      opacity: 100,
       outline: true,
       outlineColor: '#000000',
       outlineThickness: 3,
       bgEnabled: true,
-      bgColor: 'rgba(0, 0, 0, 0.75)',
+      bgColor: '#000000',
+      bgOpacity: 75,
+      bgPadding: 6,
+      bgRadius: 8,
+      textTransform: 'none',
+      fontStyle: 'normal',
+      letterSpacing: 0,
+      displayMode: 'all',
       customX: 50, // center %
       customY: 88  // bottom %
     };
@@ -82,6 +114,156 @@ export default function TextEditor({
     });
   };
 
+  const stylePresets = [
+    {
+      id: 'viral-meme',
+      name: 'Viral Meme',
+      badge: '🔥 Top Trend',
+      description: 'Impact bold with black outline for high CTR',
+      previewBg: 'bg-black',
+      previewText: 'VIRAL MEME',
+      previewTextColor: '#ffffff',
+      previewFont: 'Impact, sans-serif',
+      settings: {
+        font: 'Impact, sans-serif',
+        color: '#ffffff',
+        opacity: 100,
+        outline: true,
+        outlineColor: '#000000',
+        outlineThickness: 4,
+        bgEnabled: false,
+        textTransform: 'uppercase',
+        fontStyle: 'normal',
+        letterSpacing: 2
+      }
+    },
+    {
+      id: 'neon-cyber',
+      name: 'Neon Cyber',
+      badge: '⚡ Gaming',
+      description: 'Cyan glow with pink shadow & dark backdrop',
+      previewBg: 'bg-slate-950 border border-cyan-500/40',
+      previewText: 'NEON CYBER',
+      previewTextColor: '#00ffff',
+      previewFont: 'Inter, sans-serif',
+      settings: {
+        font: 'Inter, sans-serif',
+        color: '#00ffff',
+        opacity: 100,
+        outline: true,
+        outlineColor: '#ff007f',
+        outlineThickness: 3,
+        bgEnabled: true,
+        bgColor: '#090a0f',
+        bgOpacity: 85,
+        bgPadding: 8,
+        textTransform: 'uppercase',
+        fontStyle: 'normal',
+        letterSpacing: 4
+      }
+    },
+    {
+      id: 'movie-cinema',
+      name: 'Movie Cinema',
+      badge: '🎬 Dramatic',
+      description: 'Elegant serif subtitle with golden yellow warmth',
+      previewBg: 'bg-black/90',
+      previewText: 'Movie Cinema',
+      previewTextColor: '#fef08a',
+      previewFont: 'Georgia, serif',
+      settings: {
+        font: 'Georgia, serif',
+        color: '#fef08a',
+        opacity: 100,
+        outline: true,
+        outlineColor: '#000000',
+        outlineThickness: 2,
+        bgEnabled: true,
+        bgColor: '#000000',
+        bgOpacity: 75,
+        bgPadding: 8,
+        textTransform: 'none',
+        fontStyle: 'italic',
+        letterSpacing: 2
+      }
+    },
+    {
+      id: 'red-alert',
+      name: 'Red Alert',
+      badge: '🚨 Urgent',
+      description: 'Punchy red badge for suspense & news hooks',
+      previewBg: 'bg-red-600',
+      previewText: 'RED ALERT',
+      previewTextColor: '#ffffff',
+      previewFont: 'Impact, sans-serif',
+      settings: {
+        font: 'Impact, sans-serif',
+        color: '#ffffff',
+        opacity: 100,
+        outline: true,
+        outlineColor: '#7f1d1d',
+        outlineThickness: 3,
+        bgEnabled: true,
+        bgColor: '#ef4444',
+        bgOpacity: 90,
+        bgPadding: 8,
+        textTransform: 'uppercase',
+        fontStyle: 'normal',
+        letterSpacing: 2
+      }
+    },
+    {
+      id: 'golden-luxe',
+      name: 'Golden Luxe',
+      badge: '👑 Premium',
+      description: 'Warm gold typography with deep espresso contrast',
+      previewBg: 'bg-stone-900',
+      previewText: 'Golden Luxe',
+      previewTextColor: '#fbbf24',
+      previewFont: 'Georgia, serif',
+      settings: {
+        font: 'Georgia, serif',
+        color: '#fbbf24',
+        opacity: 100,
+        outline: true,
+        outlineColor: '#78350f',
+        outlineThickness: 2,
+        bgEnabled: true,
+        bgColor: '#1c1917',
+        bgOpacity: 85,
+        bgPadding: 8,
+        textTransform: 'capitalize',
+        fontStyle: 'normal',
+        letterSpacing: 2
+      }
+    },
+    {
+      id: 'minimal-clean',
+      name: 'Minimal Clean',
+      badge: '✨ Subtle',
+      description: 'Semi-transparent modern pill for documentary & vlogs',
+      previewBg: 'bg-slate-900/80',
+      previewText: 'Minimal Clean',
+      previewTextColor: '#ffffff',
+      previewFont: 'Inter, sans-serif',
+      settings: {
+        font: 'Inter, sans-serif',
+        color: '#ffffff',
+        opacity: 95,
+        outline: false,
+        outlineColor: '#000000',
+        outlineThickness: 2,
+        bgEnabled: true,
+        bgColor: '#000000',
+        bgOpacity: 60,
+        bgPadding: 8,
+        textTransform: 'none',
+        fontStyle: 'normal',
+        letterSpacing: 0
+      }
+    }
+  ];
+
   const positions = [
     { id: 'top-left', label: 'Top Left' },
     { id: 'top-center', label: 'Top Center' },
@@ -96,8 +278,14 @@ export default function TextEditor({
     { id: 'Inter, sans-serif', name: 'Clean Sans (Inter)' },
     { id: 'Impact, sans-serif', name: 'Impact (Viral Bold)' },
     { id: 'Arial, sans-serif', name: 'Arial' },
-    { id: 'Georgia, serif', name: 'Georgia' },
+    { id: 'Georgia, serif', name: 'Georgia (Cinema)' },
     { id: 'monospace', name: 'Monospace' }
+  ];
+
+  const displayModes = [
+    { id: 'all', label: 'All Parts (Full Series)', desc: 'Visible on every generated clip' },
+    { id: 'first', label: 'Part 1 Only', desc: 'Introduces title on first part only' },
+    { id: 'last', label: 'Final Part Only', desc: 'Call to action on concluding part' }
   ];
 
   const overlayTemplatePresets = [
@@ -119,11 +307,15 @@ export default function TextEditor({
   const startPart = Math.max(1, parseInt(textSettings.startPart) || 1);
   const partFormatted = textSettings.zeroPad ? String(startPart).padStart(2, '0') : String(startPart);
 
-  const previewRenderedOverlay = (textSettings.template || '{movie} - Part {part}')
+  let rawPreview = (textSettings.template || '{movie} - Part {part}')
     .replace(/\{movie\}/gi, overlayTitle)
     .replace(/\{title\}/gi, overlayTitle)
     .replace(/\{text\}/gi, overlayTitle)
     .replace(/\{part\}/gi, partFormatted);
+
+  if (textSettings.textTransform === 'uppercase') rawPreview = rawPreview.toUpperCase();
+  else if (textSettings.textTransform === 'lowercase') rawPreview = rawPreview.toLowerCase();
+  else if (textSettings.textTransform === 'capitalize') rawPreview = rawPreview.replace(/\b\w/g, c => c.toUpperCase());
 
   return (
     <div className="space-y-4 sm:space-y-5">
@@ -299,14 +491,44 @@ export default function TextEditor({
               </div>
             </div>
 
-            {/* Field 4: Live Rendered Overlay Text Preview */}
+            {/* Field 4: Staying / Display Mode in Clip Sequence */}
+            <div className="space-y-1.5 pt-1 border-t border-slate-800/80">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-slate-200 flex items-center space-x-1.5">
+                  <Clock className="w-3.5 h-3.5 text-orange-400" />
+                  <span>Display Mode (Staying Across Clips)</span>
+                </label>
+                <span className="text-[10px] font-mono text-slate-400">
+                  {displayModes.find((m) => m.id === (textSettings.displayMode || 'all'))?.label}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 sm:gap-2">
+                {displayModes.map((mode) => (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    onClick={() => updateSetting('displayMode', mode.id)}
+                    className={`p-2 rounded-xl border text-left transition-all cursor-pointer touch-manipulation ${
+                      (textSettings.displayMode || 'all') === mode.id
+                        ? 'bg-orange-500/20 border-orange-500 text-white shadow-sm'
+                        : 'bg-slate-900/80 hover:bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <div className="text-xs font-bold leading-tight">{mode.label}</div>
+                    <div className="text-[10px] text-slate-400 mt-0.5 leading-tight">{mode.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Field 5: Live Rendered Overlay Text Preview */}
             <div className="bg-slate-900/90 border border-orange-500/20 rounded-xl p-3 sm:p-3.5 flex items-center justify-between gap-2 shadow-sm">
               <div className="min-w-0 flex-1">
                 <span className="text-[10px] font-bold text-orange-400 uppercase tracking-wider block mb-0.5">
                   Live Overlay Text Preview:
                 </span>
-                <p className="text-xs font-bold text-white font-mono break-words">
-                  "{previewRenderedOverlay}"
+                <p className="text-xs font-bold text-white font-mono break-words" style={{ fontStyle: textSettings.fontStyle || 'normal' }}>
+                  "{rawPreview}"
                 </p>
               </div>
               <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-orange-500/10 border border-orange-500/30 text-orange-300 shrink-0">
@@ -319,7 +541,49 @@ export default function TextEditor({
 
       {textSettings.enabled && (
         <>
-          {/* ── CARD 2: POSITION & PLACEMENT ── */}
+          {/* ── CARD 2: ONE-CLICK TEXT STYLING PRESETS ── */}
+          <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3.5 shadow-lg animate-fadeIn">
+            <div className="flex items-center justify-between pb-2.5 border-b border-slate-800">
+              <div className="flex items-center space-x-2">
+                <Wand2 className="w-4 h-4 text-orange-400" />
+                <h4 className="text-xs sm:text-sm font-bold text-white">1-Click Style Presets</h4>
+              </div>
+              <span className="text-[10px] text-slate-400 font-mono">
+                Click any style to apply instantly
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
+              {stylePresets.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => updateMultipleSettings(preset.settings)}
+                  className="group p-2.5 rounded-xl border bg-slate-900/80 hover:bg-slate-900 border-slate-800 hover:border-orange-500/50 text-left transition-all cursor-pointer touch-manipulation hover:shadow-md flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-slate-300">
+                        {preset.badge}
+                      </span>
+                    </div>
+                    <div className="text-xs font-bold text-white group-hover:text-orange-300 transition-colors">
+                      {preset.name}
+                    </div>
+                    <div className="text-[10px] text-slate-400 leading-tight mt-0.5">
+                      {preset.description}
+                    </div>
+                  </div>
+
+                  <div className={`mt-2 py-1 px-2 rounded-lg text-center font-bold text-[11px] ${preset.previewBg}`} style={{ color: preset.previewTextColor, fontFamily: preset.previewFont }}>
+                    {preset.previewText}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* ── CARD 3: POSITION & PLACEMENT ── */}
           <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3.5 shadow-lg animate-fadeIn">
             <div className="flex items-center justify-between pb-2.5 border-b border-slate-800">
               <div className="flex items-center space-x-2">
@@ -366,10 +630,11 @@ export default function TextEditor({
                 </div>
                 <input
                   type="range"
-                  min="4"
-                  max="96"
+                  min="2"
+                  max="98"
+                  step="2"
                   value={textSettings.customY ?? 10}
-                  onChange={(e) => updateSetting('customY', parseInt(e.target.value))}
+                  onChange={(e) => updateSetting('customY', Math.max(2, parseInt(e.target.value)))}
                   className="w-full h-2 sm:h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500 touch-manipulation"
                 />
               </div>
@@ -384,26 +649,30 @@ export default function TextEditor({
                 </div>
                 <input
                   type="range"
-                  min="4"
-                  max="96"
+                  min="2"
+                  max="98"
+                  step="2"
                   value={textSettings.customX ?? 50}
-                  onChange={(e) => updateSetting('customX', parseInt(e.target.value))}
+                  onChange={(e) => updateSetting('customX', Math.max(2, parseInt(e.target.value)))}
                   className="w-full h-2 sm:h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500 touch-manipulation"
                 />
               </div>
             </div>
           </div>
 
-          {/* ── CARD 3: TYPOGRAPHY, COLORS & STYLING ── */}
+          {/* ── CARD 4: TYPOGRAPHY, OPACITY & STYLING CONTROLS ── */}
           <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4 shadow-lg animate-fadeIn">
             <div className="flex items-center justify-between pb-2.5 border-b border-slate-800">
               <div className="flex items-center space-x-2">
                 <Palette className="w-4 h-4 text-orange-400" />
                 <h4 className="text-xs sm:text-sm font-bold text-white">Typography &amp; Styling</h4>
               </div>
+              <span className="text-[10px] font-mono text-slate-400">
+                Min 2px Stepping / Opacity Sliders
+              </span>
             </div>
 
-            {/* Font Family, Size & Color */}
+            {/* Row 1: Font Family, Font Size (min 2px) & Text Color */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
               <div className="space-y-1">
                 <label className="text-xs text-slate-300 font-medium">Font Family</label>
@@ -422,15 +691,16 @@ export default function TextEditor({
 
               <div className="space-y-1">
                 <div className="flex justify-between text-xs text-slate-300 font-medium">
-                  <span>Font Size</span>
-                  <span className="font-mono text-amber-400 font-bold">{textSettings.fontSize || 28}px</span>
+                  <span>Font Size (min 2px)</span>
+                  <span className="font-mono text-amber-400 font-bold">{Math.max(2, textSettings.fontSize || 28)}px</span>
                 </div>
                 <input
                   type="range"
-                  min="16"
-                  max="64"
-                  value={textSettings.fontSize || 28}
-                  onChange={(e) => updateSetting('fontSize', parseInt(e.target.value))}
+                  min="2"
+                  max="96"
+                  step="2"
+                  value={Math.max(2, textSettings.fontSize || 28)}
+                  onChange={(e) => updateSetting('fontSize', Math.max(2, parseInt(e.target.value)))}
                   className="w-full h-2 sm:h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500 touch-manipulation"
                 />
               </div>
@@ -449,51 +719,197 @@ export default function TextEditor({
               </div>
             </div>
 
-            {/* Outline Shadow & Background Pill */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-900/40 p-3 rounded-xl border border-slate-800">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    id="outlineToggle"
-                    checked={textSettings.outline !== false}
-                    onChange={(e) => updateSetting('outline', e.target.checked)}
-                    className="rounded bg-slate-950 border-slate-700 text-orange-500 focus:ring-0 cursor-pointer"
-                  />
-                  <label htmlFor="outlineToggle" className="text-xs text-slate-300 cursor-pointer font-medium">
-                    Text Shadow Outline
-                  </label>
+            {/* Row 2: Text Opacity Bar (0 - 100%) & Letter Spacing (min 0, step 2px) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 pt-1 border-t border-slate-800/80">
+              <div className="space-y-1">
+                <div className="flex justify-between text-xs text-slate-300 font-medium">
+                  <span className="flex items-center space-x-1.5">
+                    <Sliders className="w-3.5 h-3.5 text-orange-400" />
+                    <span>Text Opacity</span>
+                  </span>
+                  <span className="font-mono text-amber-400 font-bold">{textSettings.opacity ?? 100}%</span>
                 </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="2"
+                  value={textSettings.opacity ?? 100}
+                  onChange={(e) => updateSetting('opacity', parseInt(e.target.value))}
+                  className="w-full h-2 sm:h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500 touch-manipulation"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex justify-between text-xs text-slate-300 font-medium">
+                  <span>Letter Spacing (min 2px step)</span>
+                  <span className="font-mono text-amber-400 font-bold">{textSettings.letterSpacing || 0}px</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="20"
+                  step="2"
+                  value={textSettings.letterSpacing || 0}
+                  onChange={(e) => updateSetting('letterSpacing', parseInt(e.target.value))}
+                  className="w-full h-2 sm:h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500 touch-manipulation"
+                />
+              </div>
+            </div>
+
+            {/* Row 3: Text Case (Transform) and Font Style (Italic) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-900/50 p-3 rounded-xl border border-slate-800">
+              <div className="space-y-1.5">
+                <label className="text-xs text-slate-300 font-medium block">Text Transform Case</label>
+                <div className="flex items-center space-x-1">
+                  {[
+                    { id: 'none', label: 'Normal' },
+                    { id: 'uppercase', label: 'UPPER' },
+                    { id: 'lowercase', label: 'lower' },
+                    { id: 'capitalize', label: 'Capital' }
+                  ].map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => updateSetting('textTransform', t.id)}
+                      className={`px-2.5 py-1 text-[11px] rounded-lg border font-medium transition-colors cursor-pointer touch-manipulation ${
+                        (textSettings.textTransform || 'none') === t.id
+                          ? 'bg-orange-500/20 border-orange-500 text-orange-300 font-bold'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs text-slate-300 font-medium block">Font Style</label>
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => updateSetting('fontStyle', textSettings.fontStyle === 'italic' ? 'normal' : 'italic')}
+                    className={`px-3 py-1 text-[11px] rounded-lg border font-medium flex items-center space-x-1.5 cursor-pointer touch-manipulation transition-colors ${
+                      textSettings.fontStyle === 'italic'
+                        ? 'bg-orange-500/20 border-orange-500 text-orange-300 font-bold'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Italic className="w-3.5 h-3.5" />
+                    <span>Italic Accent</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Row 4: Outline Shadow & Background Pill Box with Opacity Bar */}
+            <div className="space-y-3 bg-slate-900/40 p-3.5 rounded-xl border border-slate-800">
+              {/* Outline Shadow */}
+              <div className="space-y-2 pb-2.5 border-b border-slate-800/80">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id="outlineToggle"
+                      checked={textSettings.outline !== false}
+                      onChange={(e) => updateSetting('outline', e.target.checked)}
+                      className="rounded bg-slate-950 border-slate-700 text-orange-500 focus:ring-0 cursor-pointer"
+                    />
+                    <label htmlFor="outlineToggle" className="text-xs text-slate-300 cursor-pointer font-medium">
+                      Text Shadow Outline
+                    </label>
+                  </div>
+                  {textSettings.outline !== false && (
+                    <input
+                      type="color"
+                      value={textSettings.outlineColor || '#000000'}
+                      onChange={(e) => updateSetting('outlineColor', e.target.value)}
+                      className="w-6 h-6 rounded border border-slate-700 bg-transparent cursor-pointer"
+                    />
+                  )}
+                </div>
+
                 {textSettings.outline !== false && (
-                  <input
-                    type="color"
-                    value={textSettings.outlineColor || '#000000'}
-                    onChange={(e) => updateSetting('outlineColor', e.target.value)}
-                    className="w-6 h-6 rounded border border-slate-700 bg-transparent cursor-pointer"
-                  />
+                  <div className="space-y-1 pl-6">
+                    <div className="flex justify-between text-[11px] text-slate-400">
+                      <span>Outline Thickness (min 2px step)</span>
+                      <span className="font-mono text-amber-400 font-bold">{Math.max(2, textSettings.outlineThickness || 3)}px</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="2"
+                      max="16"
+                      step="2"
+                      value={Math.max(2, textSettings.outlineThickness || 3)}
+                      onChange={(e) => updateSetting('outlineThickness', Math.max(2, parseInt(e.target.value)))}
+                      className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500 touch-manipulation"
+                    />
+                  </div>
                 )}
               </div>
 
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    id="bgToggle"
-                    checked={Boolean(textSettings.bgEnabled)}
-                    onChange={(e) => updateSetting('bgEnabled', e.target.checked)}
-                    className="rounded bg-slate-950 border-slate-700 text-orange-500 focus:ring-0 cursor-pointer"
-                  />
-                  <label htmlFor="bgToggle" className="text-xs text-slate-300 cursor-pointer font-medium">
-                    Pill Box Background
-                  </label>
+              {/* Background Pill Box & Opacity Bar */}
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id="bgToggle"
+                      checked={Boolean(textSettings.bgEnabled)}
+                      onChange={(e) => updateSetting('bgEnabled', e.target.checked)}
+                      className="rounded bg-slate-950 border-slate-700 text-orange-500 focus:ring-0 cursor-pointer"
+                    />
+                    <label htmlFor="bgToggle" className="text-xs text-slate-300 cursor-pointer font-medium">
+                      Pill Box Background
+                    </label>
+                  </div>
+                  {textSettings.bgEnabled && (
+                    <input
+                      type="color"
+                      value={textSettings.bgColor && textSettings.bgColor.startsWith('#') ? textSettings.bgColor : '#000000'}
+                      onChange={(e) => updateSetting('bgColor', e.target.value)}
+                      className="w-6 h-6 rounded border border-slate-700 bg-transparent cursor-pointer"
+                    />
+                  )}
                 </div>
+
                 {textSettings.bgEnabled && (
-                  <input
-                    type="color"
-                    value={textSettings.bgColor && textSettings.bgColor.startsWith('#') ? textSettings.bgColor : '#000000'}
-                    onChange={(e) => updateSetting('bgColor', e.target.value)}
-                    className="w-6 h-6 rounded border border-slate-700 bg-transparent cursor-pointer"
-                  />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pl-6 pt-1">
+                    {/* Background Opacity Bar */}
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-[11px] text-slate-400">
+                        <span>Background Opacity Bar</span>
+                        <span className="font-mono text-amber-400 font-bold">{textSettings.bgOpacity ?? 75}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="2"
+                        value={textSettings.bgOpacity ?? 75}
+                        onChange={(e) => updateSetting('bgOpacity', parseInt(e.target.value))}
+                        className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500 touch-manipulation"
+                      />
+                    </div>
+
+                    {/* Box Padding (min 2px) */}
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-[11px] text-slate-400">
+                        <span>Box Padding (min 2px step)</span>
+                        <span className="font-mono text-amber-400 font-bold">{Math.max(2, textSettings.bgPadding ?? 8)}px</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="2"
+                        max="32"
+                        step="2"
+                        value={Math.max(2, textSettings.bgPadding ?? 8)}
+                        onChange={(e) => updateSetting('bgPadding', Math.max(2, parseInt(e.target.value)))}
+                        className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500 touch-manipulation"
+                      />
+                    </div>
+                  </div>
                 )}
               </div>
             </div>
@@ -508,7 +924,7 @@ export default function TextEditor({
             <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400 shrink-0" />
             <div className="min-w-0">
               <h4 className="text-xs sm:text-sm font-semibold text-white truncate">Extra Text Overlays</h4>
-              <p className="text-[11px] sm:text-xs text-slate-400 truncate">Social handles, CTA, custom banners</p>
+              <p className="text-[11px] sm:text-xs text-slate-400 truncate">Social handles, CTA banners, callouts</p>
             </div>
           </div>
 
@@ -532,18 +948,19 @@ export default function TextEditor({
             <p className="text-[11px] text-slate-500">Click to add handle, CTA, or custom overlay</p>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-4">
             {extraTexts.map((item, index) => (
               <div
                 key={item.id}
-                className="bg-slate-950/90 border border-slate-800 rounded-xl p-3 sm:p-3.5 space-y-3 shadow"
+                className="bg-slate-950/90 border border-slate-800 rounded-2xl p-3.5 sm:p-4 space-y-3.5 shadow-lg"
               >
-                <div className="flex items-center justify-between">
+                {/* Header with Title and Visibility/Delete controls */}
+                <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
                   <div className="flex items-center space-x-2 min-w-0">
                     <span className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold text-[10px] flex items-center justify-center font-mono shrink-0">
                       #{index + 1}
                     </span>
-                    <span className="text-xs font-bold text-white truncate max-w-[150px] sm:max-w-xs">
+                    <span className="text-xs font-bold text-white truncate max-w-[170px] sm:max-w-xs">
                       {item.text || 'Custom Text'}
                     </span>
                   </div>
@@ -574,90 +991,418 @@ export default function TextEditor({
                 </div>
 
                 {item.enabled && (
-                  <div className="space-y-3 pt-1">
-                    {/* Text Input */}
-                    <input
-                      type="text"
-                      value={item.text}
-                      onChange={(e) => updateExtraText(item.id, 'text', e.target.value)}
-                      placeholder="e.g. Follow for Part 2! 🔥 or @myhandle"
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:border-orange-500 focus:outline-none"
-                    />
-
-                    {/* Position Sliders */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-[11px] text-slate-400">
-                          <span>Vertical Height (Y)</span>
-                          <span className="font-mono text-amber-400 font-bold">{item.customY ?? 88}%</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="4"
-                          max="96"
-                          value={item.customY ?? 88}
-                          onChange={(e) => updateExtraText(item.id, 'customY', parseInt(e.target.value))}
-                          className="w-full h-2 sm:h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500 touch-manipulation"
-                        />
+                  <div className="space-y-3.5 pt-0.5">
+                    {/* 1. Text Input & Quick Suggestions */}
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between items-center text-xs">
+                        <label className="text-slate-300 font-medium">Text Content</label>
+                        <span className="text-[10px] font-mono text-slate-500">Overlay Line</span>
                       </div>
-
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-[11px] text-slate-400">
-                          <span>Horizontal Offset (X)</span>
-                          <span className="font-mono text-amber-400 font-bold">{item.customX ?? 50}%</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="4"
-                          max="96"
-                          value={item.customX ?? 50}
-                          onChange={(e) => updateExtraText(item.id, 'customX', parseInt(e.target.value))}
-                          className="w-full h-2 sm:h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500 touch-manipulation"
-                        />
+                      <input
+                        type="text"
+                        value={item.text || ''}
+                        onChange={(e) => updateExtraText(item.id, 'text', e.target.value)}
+                        placeholder="e.g. Follow for Part 2! 🔥 or @myhandle"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs sm:text-sm text-white focus:border-emerald-500 focus:outline-none"
+                      />
+                      <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                        <span className="text-[10px] text-slate-500 mr-1">Quick:</span>
+                        {[
+                          'Follow for Part 2! 🔥',
+                          '@mychannel',
+                          'Link in bio 🔗',
+                          'Part 2 tomorrow! 🎬',
+                          'Subscribe for more! ⭐'
+                        ].map((quickText) => (
+                          <button
+                            key={quickText}
+                            type="button"
+                            onClick={() => updateExtraText(item.id, 'text', quickText)}
+                            className="px-2 py-0.5 text-[10px] bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 rounded transition-colors cursor-pointer"
+                          >
+                            {quickText}
+                          </button>
+                        ))}
                       </div>
                     </div>
 
-                    {/* Size, Color & Background */}
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-[11px] text-slate-400">
-                          <span>Size</span>
-                          <span className="font-mono text-amber-400 font-bold">{item.fontSize || 22}px</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="14"
-                          max="48"
-                          value={item.fontSize || 22}
-                          onChange={(e) => updateExtraText(item.id, 'fontSize', parseInt(e.target.value))}
-                          className="w-full h-2 sm:h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500 touch-manipulation"
-                        />
+                    {/* 2. 1-Click Style Presets for this Extra Text */}
+                    <div className="space-y-1.5 bg-slate-900/40 p-2.5 rounded-xl border border-slate-800">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-slate-300 flex items-center space-x-1.5">
+                          <Wand2 className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>1-Click Style Presets</span>
+                        </span>
+                        <span className="text-[10px] text-slate-500 font-mono">Apply to #{index + 1}</span>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                        {stylePresets.map((preset) => (
+                          <button
+                            key={preset.id}
+                            type="button"
+                            onClick={() => updateMultipleExtraText(item.id, preset.settings)}
+                            className="p-1.5 rounded-lg border bg-slate-950/80 hover:bg-slate-900 border-slate-800 hover:border-emerald-500/50 text-left transition-all cursor-pointer flex items-center justify-between gap-1"
+                          >
+                            <span className="text-[11px] font-medium text-slate-300 truncate">{preset.name}</span>
+                            <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-slate-800 text-slate-400 shrink-0">
+                              {preset.badge.split(' ')[0]}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* 3. Staying / Display Mode across Video Clips */}
+                    <div className="space-y-1.5 bg-slate-900/40 p-2.5 rounded-xl border border-slate-800">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-slate-300 flex items-center space-x-1.5">
+                          <Clock className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Staying Display Mode</span>
+                        </span>
+                        <span className="text-[10px] font-mono text-slate-400">
+                          {displayModes.find((m) => m.id === (item.displayMode || 'all'))?.label}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+                        {displayModes.map((mode) => (
+                          <button
+                            key={mode.id}
+                            type="button"
+                            onClick={() => updateExtraText(item.id, 'displayMode', mode.id)}
+                            className={`px-2 py-1.5 rounded-lg border text-left transition-all cursor-pointer touch-manipulation ${
+                              (item.displayMode || 'all') === mode.id
+                                ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 font-semibold shadow-sm'
+                                : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                            }`}
+                          >
+                            <div className="text-[11px] font-bold leading-tight">{mode.label}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* 4. Placement & Position Sliders */}
+                    <div className="space-y-2 bg-slate-900/40 p-2.5 rounded-xl border border-slate-800">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-slate-300 flex items-center space-x-1.5">
+                          <Layout className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Position &amp; Placement</span>
+                        </span>
+                        <span className="text-[10px] text-amber-400 font-mono">🖱️ Drag on player enabled</span>
                       </div>
 
-                      <div className="space-y-1">
-                        <span className="text-[11px] text-slate-400">Color</span>
-                        <div className="flex items-center space-x-1.5">
+                      {/* Quick position alignment buttons */}
+                      <div className="grid grid-cols-4 sm:grid-cols-7 gap-1">
+                        {[
+                          { label: 'Top L', x: 15, y: 12 },
+                          { label: 'Top C', x: 50, y: 12 },
+                          { label: 'Top R', x: 85, y: 12 },
+                          { label: 'Center', x: 50, y: 50 },
+                          { label: 'Bot L', x: 15, y: 88 },
+                          { label: 'Bot C', x: 50, y: 88 },
+                          { label: 'Bot R', x: 85, y: 88 }
+                        ].map((pos) => (
+                          <button
+                            key={pos.label}
+                            type="button"
+                            onClick={() => updateMultipleExtraText(item.id, { customX: pos.x, customY: pos.y })}
+                            className="px-1.5 py-1 text-[10px] bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-slate-200 rounded text-center transition-colors cursor-pointer"
+                          >
+                            {pos.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Fine-tuning sliders */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-[11px] text-slate-400">
+                            <span className="flex items-center space-x-1">
+                              <MoveVertical className="w-3 h-3 text-emerald-400" />
+                              <span>Vertical Height (Y)</span>
+                            </span>
+                            <span className="font-mono text-amber-400 font-bold">{item.customY ?? 88}%</span>
+                          </div>
                           <input
-                            type="color"
-                            value={item.color || '#ffffff'}
-                            onChange={(e) => updateExtraText(item.id, 'color', e.target.value)}
-                            className="w-6 h-6 rounded border border-slate-700 bg-transparent cursor-pointer"
+                            type="range"
+                            min="2"
+                            max="98"
+                            step="2"
+                            value={item.customY ?? 88}
+                            onChange={(e) => updateExtraText(item.id, 'customY', Math.max(2, parseInt(e.target.value)))}
+                            className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500 touch-manipulation"
                           />
-                          <span className="text-[10px] font-mono text-slate-400">{item.color || '#ffffff'}</span>
+                        </div>
+
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-[11px] text-slate-400">
+                            <span className="flex items-center space-x-1">
+                              <MoveHorizontal className="w-3 h-3 text-emerald-400" />
+                              <span>Horizontal Offset (X)</span>
+                            </span>
+                            <span className="font-mono text-amber-400 font-bold">{item.customX ?? 50}%</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="2"
+                            max="98"
+                            step="2"
+                            value={item.customX ?? 50}
+                            onChange={(e) => updateExtraText(item.id, 'customX', Math.max(2, parseInt(e.target.value)))}
+                            className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500 touch-manipulation"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 5. Typography & Styling Controls */}
+                    <div className="space-y-3 bg-slate-900/40 p-2.5 rounded-xl border border-slate-800">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-slate-300 flex items-center space-x-1.5">
+                          <Palette className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Typography &amp; Opacity</span>
+                        </span>
+                        <span className="text-[10px] font-mono text-slate-400">Min 2px Stepping</span>
+                      </div>
+
+                      {/* Font Family, Size (min 2px) & Color */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                        <div className="space-y-1">
+                          <label className="text-[11px] text-slate-300 font-medium">Font Family</label>
+                          <select
+                            value={item.font || 'Inter, sans-serif'}
+                            onChange={(e) => updateExtraText(item.id, 'font', e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:border-emerald-500 focus:outline-none cursor-pointer"
+                          >
+                            {fonts.map((f) => (
+                              <option key={f.id} value={f.id}>
+                                {f.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-[11px] text-slate-300 font-medium">
+                            <span>Font Size (min 2px)</span>
+                            <span className="font-mono text-amber-400 font-bold">{Math.max(2, item.fontSize || 22)}px</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="2"
+                            max="96"
+                            step="2"
+                            value={Math.max(2, item.fontSize || 22)}
+                            onChange={(e) => updateExtraText(item.id, 'fontSize', Math.max(2, parseInt(e.target.value)))}
+                            className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500 touch-manipulation"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="text-[11px] text-slate-300 font-medium">Text Color</label>
+                          <div className="flex items-center space-x-2">
+                            <input
+                              type="color"
+                              value={item.color || '#ffffff'}
+                              onChange={(e) => updateExtraText(item.id, 'color', e.target.value)}
+                              className="w-7 h-7 rounded border border-slate-700 bg-transparent cursor-pointer"
+                            />
+                            <span className="text-[11px] font-mono text-slate-400">{item.color || '#ffffff'}</span>
+                          </div>
                         </div>
                       </div>
 
-                      <div className="flex items-center space-x-2 pt-3">
-                        <input
-                          type="checkbox"
-                          id={`bg-${item.id}`}
-                          checked={Boolean(item.bgEnabled)}
-                          onChange={(e) => updateExtraText(item.id, 'bgEnabled', e.target.checked)}
-                          className="rounded bg-slate-950 border-slate-700 text-orange-500 focus:ring-0 cursor-pointer"
-                        />
-                        <label htmlFor={`bg-${item.id}`} className="text-[11px] text-slate-300 cursor-pointer">
-                          Pill Box
-                        </label>
+                      {/* Text Opacity Bar (0 - 100%) & Letter Spacing (min 0, step 2px) */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 border-t border-slate-800/80">
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-[11px] text-slate-300 font-medium">
+                            <span className="flex items-center space-x-1">
+                              <Sliders className="w-3 h-3 text-emerald-400" />
+                              <span>Text Opacity Bar</span>
+                            </span>
+                            <span className="font-mono text-amber-400 font-bold">{item.opacity ?? 100}%</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            step="2"
+                            value={item.opacity ?? 100}
+                            onChange={(e) => updateExtraText(item.id, 'opacity', parseInt(e.target.value))}
+                            className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500 touch-manipulation"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-[11px] text-slate-300 font-medium">
+                            <span>Letter Spacing (min 2px step)</span>
+                            <span className="font-mono text-amber-400 font-bold">{item.letterSpacing || 0}px</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max="20"
+                            step="2"
+                            value={item.letterSpacing || 0}
+                            onChange={(e) => updateExtraText(item.id, 'letterSpacing', parseInt(e.target.value))}
+                            className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500 touch-manipulation"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Text Transform Case & Italic Accent */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                        <div className="space-y-1">
+                          <label className="text-[11px] text-slate-300 font-medium block">Text Transform Case</label>
+                          <div className="flex items-center space-x-1">
+                            {[
+                              { id: 'none', label: 'Normal' },
+                              { id: 'uppercase', label: 'UPPER' },
+                              { id: 'lowercase', label: 'lower' },
+                              { id: 'capitalize', label: 'Capital' }
+                            ].map((t) => (
+                              <button
+                                key={t.id}
+                                type="button"
+                                onClick={() => updateExtraText(item.id, 'textTransform', t.id)}
+                                className={`px-2 py-0.5 text-[10px] rounded border font-medium transition-colors cursor-pointer ${
+                                  (item.textTransform || 'none') === t.id
+                                    ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 font-bold'
+                                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                                }`}
+                              >
+                                {t.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="text-[11px] text-slate-300 font-medium block">Font Style</label>
+                          <button
+                            type="button"
+                            onClick={() => updateExtraText(item.id, 'fontStyle', item.fontStyle === 'italic' ? 'normal' : 'italic')}
+                            className={`px-3 py-1 text-[11px] rounded-lg border font-medium flex items-center space-x-1.5 cursor-pointer touch-manipulation transition-colors ${
+                              item.fontStyle === 'italic'
+                                ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 font-bold'
+                                : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            <Italic className="w-3.5 h-3.5" />
+                            <span>Italic Accent</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 6. Outline Shadow & Pill Box Background with Opacity Bar */}
+                    <div className="space-y-3 bg-slate-900/40 p-2.5 rounded-xl border border-slate-800">
+                      {/* Outline Shadow */}
+                      <div className="space-y-2 pb-2 border-b border-slate-800/80">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-2">
+                            <input
+                              type="checkbox"
+                              id={`outline-${item.id}`}
+                              checked={item.outline !== false}
+                              onChange={(e) => updateExtraText(item.id, 'outline', e.target.checked)}
+                              className="rounded bg-slate-950 border-slate-700 text-emerald-500 focus:ring-0 cursor-pointer"
+                            />
+                            <label htmlFor={`outline-${item.id}`} className="text-xs text-slate-300 cursor-pointer font-medium">
+                              Text Shadow Outline
+                            </label>
+                          </div>
+                          {item.outline !== false && (
+                            <input
+                              type="color"
+                              value={item.outlineColor || '#000000'}
+                              onChange={(e) => updateExtraText(item.id, 'outlineColor', e.target.value)}
+                              className="w-6 h-6 rounded border border-slate-700 bg-transparent cursor-pointer"
+                            />
+                          )}
+                        </div>
+
+                        {item.outline !== false && (
+                          <div className="space-y-1 pl-6">
+                            <div className="flex justify-between text-[11px] text-slate-400">
+                              <span>Outline Thickness (min 2px step)</span>
+                              <span className="font-mono text-amber-400 font-bold">{Math.max(2, item.outlineThickness || 3)}px</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="2"
+                              max="16"
+                              step="2"
+                              value={Math.max(2, item.outlineThickness || 3)}
+                              onChange={(e) => updateExtraText(item.id, 'outlineThickness', Math.max(2, parseInt(e.target.value)))}
+                              className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500 touch-manipulation"
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Pill Box Background & Opacity Bar */}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-2">
+                            <input
+                              type="checkbox"
+                              id={`bg-${item.id}`}
+                              checked={Boolean(item.bgEnabled)}
+                              onChange={(e) => updateExtraText(item.id, 'bgEnabled', e.target.checked)}
+                              className="rounded bg-slate-950 border-slate-700 text-emerald-500 focus:ring-0 cursor-pointer"
+                            />
+                            <label htmlFor={`bg-${item.id}`} className="text-xs text-slate-300 cursor-pointer font-medium">
+                              Pill Box Background
+                            </label>
+                          </div>
+                          {item.bgEnabled && (
+                            <input
+                              type="color"
+                              value={item.bgColor && item.bgColor.startsWith('#') ? item.bgColor : '#000000'}
+                              onChange={(e) => updateExtraText(item.id, 'bgColor', e.target.value)}
+                              className="w-6 h-6 rounded border border-slate-700 bg-transparent cursor-pointer"
+                            />
+                          )}
+                        </div>
+
+                        {item.bgEnabled && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pl-6 pt-1">
+                            {/* Background Opacity Bar */}
+                            <div className="space-y-1">
+                              <div className="flex justify-between text-[11px] text-slate-400">
+                                <span>Background Opacity Bar</span>
+                                <span className="font-mono text-amber-400 font-bold">{item.bgOpacity ?? 75}%</span>
+                              </div>
+                              <input
+                                type="range"
+                                min="0"
+                                max="100"
+                                step="2"
+                                value={item.bgOpacity ?? 75}
+                                onChange={(e) => updateExtraText(item.id, 'bgOpacity', parseInt(e.target.value))}
+                                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500 touch-manipulation"
+                              />
+                            </div>
+
+                            {/* Box Padding (min 2px) */}
+                            <div className="space-y-1">
+                              <div className="flex justify-between text-[11px] text-slate-400">
+                                <span>Box Padding (min 2px step)</span>
+                                <span className="font-mono text-amber-400 font-bold">{Math.max(2, item.bgPadding ?? 6)}px</span>
+                              </div>
+                              <input
+                                type="range"
+                                min="2"
+                                max="32"
+                                step="2"
+                                value={Math.max(2, item.bgPadding ?? 6)}
+                                onChange={(e) => updateExtraText(item.id, 'bgPadding', Math.max(2, parseInt(e.target.value)))}
+                                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500 touch-manipulation"
+                              />
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -670,3 +1415,5 @@ export default function TextEditor({
     </div>
   );
 }
+
+

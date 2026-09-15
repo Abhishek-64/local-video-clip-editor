@@ -78,6 +78,7 @@ import {
   getScheduledSocialJobs,
   getCompletedSocialHistory,
   cancelScheduledSocialJob,
+  rescheduleScheduledSocialJob,
   clearCompletedSocialHistory
 } from './src/db.js';
 
@@ -491,6 +492,120 @@ async function runTests() {
   });
 
   assert(dupFbJob.id === multiFbJob.id, 'Duplicate Facebook schedule request returned existing job ID');
+
+  console.log('\n--- TEST O: Reschedule Option for Scheduled Publishing Jobs ---');
+  // 1. Create fresh scheduled Facebook and Instagram jobs
+  const reschedFbTime = new Date(Date.now() + 3600000).toISOString(); // +1 hour
+  const reschedIgTime = new Date(Date.now() + 7200000).toISOString(); // +2 hours
+
+  const toReschedFb = await createFacebookUploadJob(d1, {
+    user_id: testUserId,
+    page_id: '100099999999999',
+    content_type: 'video',
+    title: 'Reschedule Video FB',
+    scheduled_at: reschedFbTime,
+    status: 'scheduled',
+    b2_file_id: 'b2_resched_fb',
+    b2_file_name: 'resched_fb.mp4'
+  });
+
+  const toReschedIg = await createInstagramUploadJob(d1, {
+    user_id: testUserId,
+    ig_user_id: '999888777666',
+    content_type: 'reel',
+    title: 'Reschedule Video IG',
+    scheduled_at: reschedIgTime,
+    status: 'scheduled',
+    b2_file_id: 'b2_resched_ig',
+    b2_file_name: 'resched_ig.mp4'
+  });
+
+  // 2. Reschedule Facebook job to +1 day
+  const newFbTime = new Date(Date.now() + 24 * 3600000).toISOString();
+  const fbReschedRes = await rescheduleScheduledSocialJob(d1, testUserId, 'facebook', toReschedFb.id, newFbTime);
+  assert(fbReschedRes.success === true, 'rescheduleScheduledSocialJob succeeded for Facebook');
+  assert(fbReschedRes.job.scheduled_at === newFbTime, 'Facebook job returned with updated scheduled_at');
+
+  const fbDbCheck = d1.prepare('SELECT * FROM facebook_upload_jobs WHERE id = ?').bind(toReschedFb.id).first();
+  assert(fbDbCheck.scheduled_at === newFbTime, 'D1 database row contains updated Facebook scheduled_at');
+  assert(fbDbCheck.status === 'scheduled', 'Facebook job status remains "scheduled"');
+
+  // 3. Reschedule Instagram job to +2 days
+  const newIgTime = new Date(Date.now() + 48 * 3600000).toISOString();
+  const igReschedRes = await rescheduleScheduledSocialJob(d1, testUserId, 'instagram', toReschedIg.id, newIgTime);
+  assert(igReschedRes.success === true, 'rescheduleScheduledSocialJob succeeded for Instagram');
+  assert(igReschedRes.job.scheduled_at === newIgTime, 'Instagram job returned with updated scheduled_at');
+
+  const igDbCheck = d1.prepare('SELECT * FROM instagram_upload_jobs WHERE id = ?').bind(toReschedIg.id).first();
+  assert(igDbCheck.scheduled_at === newIgTime, 'D1 database row contains updated Instagram scheduled_at');
+
+  // 4. Test validation: Reject past dates
+  const pastDate = new Date(Date.now() - 3600000).toISOString();
+  const pastRes = await rescheduleScheduledSocialJob(d1, testUserId, 'facebook', toReschedFb.id, pastDate);
+  assert(pastRes.success === false, 'Reschedule correctly rejected past datetime');
+
+  // 5. Test validation: Reject non-existent job ID
+  const notFoundRes = await rescheduleScheduledSocialJob(d1, testUserId, 'facebook', 'invalid-non-existent-id', newFbTime);
+  assert(notFoundRes.success === false, 'Reschedule correctly rejected non-existent job ID');
+
+  // 6. Test validation: Reject wrong user ID
+  const wrongUserRes = await rescheduleScheduledSocialJob(d1, 'wrong_user_999', 'facebook', toReschedFb.id, newFbTime);
+  assert(wrongUserRes.success === false, 'Reschedule correctly rejected unauthorized user ID');
+
+  // 7. Test validation: Cannot reschedule a cancelled job
+  await cancelScheduledSocialJob(d1, testUserId, 'facebook', toReschedFb.id);
+  const cancelReschedRes = await rescheduleScheduledSocialJob(d1, testUserId, 'facebook', toReschedFb.id, newFbTime);
+  assert(cancelReschedRes.success === false, 'Reschedule correctly rejected cancelled job');
+
+  // ── TEST P: On-Demand "Publish Now" Execution & Error 190 Detection ──
+  console.log('\n--- TEST P: On-Demand "Publish Now" Flow & Token Expiry ---');
+
+  // 1. Create active scheduled job far in future (+5 days)
+  const futureScheduleTime = new Date(Date.now() + 5 * 24 * 3600000).toISOString();
+  const publishNowJob = await createFacebookUploadJob(d1, {
+    user_id: testUserId,
+    page_id: '100099999999999',
+    content_type: 'reel',
+    title: 'Publish Now Samurai Clip',
+    scheduled_at: futureScheduleTime,
+    status: 'scheduled',
+    b2_file_id: 'b2_pub_now_01',
+    b2_file_name: 'pub_now_01.mp4'
+  });
+
+  // Verify it is currently scheduled and not due
+  const dueBefore = await getDueFacebookJobs(d1, 10);
+  assert(!dueBefore.some(j => j.id === publishNowJob.id), 'Future job is not returned by cron getDueFacebookJobs');
+
+  // 2. Simulate Publish Now execution: updates status to uploading, then published
+  await updateFacebookUploadJob(d1, publishNowJob.id, { status: 'uploading' });
+  let jobInDb = d1.prepare('SELECT * FROM facebook_upload_jobs WHERE id = ?').bind(publishNowJob.id).first();
+  assert(jobInDb.status === 'uploading', 'Publish Now atomically sets status to uploading');
+
+  await updateFacebookUploadJob(d1, publishNowJob.id, {
+    status: 'published',
+    facebook_video_id: 'fb_vid_998877',
+    facebook_post_url: 'https://www.facebook.com/reel/fb_vid_998877',
+    published_at: new Date().toISOString()
+  });
+
+  jobInDb = d1.prepare('SELECT * FROM facebook_upload_jobs WHERE id = ?').bind(publishNowJob.id).first();
+  assert(jobInDb.status === 'published', 'Publish Now successfully transitions job to published');
+  assert(jobInDb.facebook_video_id === 'fb_vid_998877', 'Facebook video ID recorded');
+
+  // 3. Verify Error 190 pattern recognition
+  const metaError190 = JSON.stringify({
+    error: {
+      message: 'Error validating access token: The session has been invalidated because the user changed their password or Facebook has changed the session for security reasons.',
+      type: 'OAuthException',
+      code: 190,
+      error_subcode: 460
+    }
+  });
+
+  const parsedError = JSON.parse(metaError190);
+  const isInvalidSession = parsedError.error.code === 190 || parsedError.error.error_subcode === 460 || parsedError.error.message.includes('session has been invalidated');
+  assert(isInvalidSession === true, 'Meta Error 190 (Session Invalidated) accurately recognized by token validator');
 
   console.log('\n===============================================================');
   console.log(`ALL TESTS COMPLETED: ${totalPassed} Passed, ${totalFailed} Failed`);

@@ -1063,6 +1063,67 @@ export async function cancelScheduledSocialJob(db, userId, platform, jobId) {
 }
 
 /**
+ * Reschedule an active scheduled publishing job (Facebook or Instagram) to a new date/time.
+ * Only allows rescheduling if job status is 'scheduled' or 'pending'.
+ * Ensures the target time is a valid future ISO datetime.
+ */
+export async function rescheduleScheduledSocialJob(db, userId, platform, jobId, newScheduledAt) {
+  if (!userId || !jobId) return { success: false, error: 'User ID and Job ID are required' };
+  if (!['facebook', 'instagram'].includes(platform)) {
+    return { success: false, error: 'Invalid platform. Must be facebook or instagram' };
+  }
+  if (!newScheduledAt) {
+    return { success: false, error: 'New scheduled date/time is required' };
+  }
+
+  const parsedDate = new Date(newScheduledAt);
+  if (isNaN(parsedDate.getTime())) {
+    return { success: false, error: 'Invalid date/time format provided' };
+  }
+  if (parsedDate.getTime() <= Date.now()) {
+    return { success: false, error: 'Scheduled time must be in the future' };
+  }
+
+  const targetUtcIso = parsedDate.toISOString();
+  const table = platform === 'facebook' ? 'facebook_upload_jobs' : 'instagram_upload_jobs';
+
+  // 1. Verify job exists and belongs to user
+  const existing = await db.prepare(`SELECT * FROM ${table} WHERE id = ? AND user_id = ?`).bind(jobId, userId).first();
+  if (!existing) {
+    return { success: false, error: 'Job not found or does not belong to you' };
+  }
+
+  if (!['scheduled', 'pending'].includes(existing.status)) {
+    return { success: false, error: `Job cannot be rescheduled in status: ${existing.status}` };
+  }
+
+  // 2. Atomically update scheduled_at and ensure status is 'scheduled'
+  const res = await db.prepare(`
+    UPDATE ${table}
+    SET scheduled_at = ?, status = 'scheduled', updated_at = datetime('now')
+    WHERE id = ? AND user_id = ? AND status IN ('scheduled', 'pending')
+  `).bind(targetUtcIso, jobId, userId).run();
+
+  const success = (res?.meta?.changes ?? 0) > 0;
+  if (!success) {
+    return { success: false, error: 'Could not update schedule. The job may have already started publishing.' };
+  }
+
+  const updatedJob = {
+    ...existing,
+    scheduled_at: targetUtcIso,
+    status: 'scheduled',
+    platform
+  };
+
+  return {
+    success: true,
+    job: updatedJob,
+    scheduled_at: targetUtcIso
+  };
+}
+
+/**
  * Safely clear completed/failed/cancelled upload history for Facebook and/or Instagram.
  * STRICT SAFETY RULE:
  * NEVER deletes 'scheduled', 'pending', 'uploading', or 'processing' jobs.

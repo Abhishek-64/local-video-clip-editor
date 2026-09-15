@@ -70,6 +70,7 @@ import {
   getScheduledSocialJobs,
   getCompletedSocialHistory,
   cancelScheduledSocialJob,
+  rescheduleScheduledSocialJob,
   clearCompletedSocialHistory,
   clearUserDataByScope,
   wipeAllUserData,
@@ -882,6 +883,7 @@ app.get('/api/facebook/account', withUser, async (c) => {
 });
 
 /**
+ * GET /api/facebook/debug-account
  * GET /api/facebook/debug-page
  * Returns safe diagnostic info without exposing any token.
  */
@@ -895,7 +897,8 @@ app.get('/api/facebook/debug-page', withUser, async (c) => {
       page_id: null,
       page_name: null,
       has_page_access_token: false,
-      can_publish: false
+      can_publish: false,
+      error: 'No Facebook Page connected.'
     });
   }
 
@@ -909,7 +912,40 @@ app.get('/api/facebook/debug-page', withUser, async (c) => {
     page_id: account.page_id,
     page_name: diag.page_name || account.page_name,
     has_page_access_token: Boolean(decryptedPageToken),
-    can_publish: diag.can_publish
+    can_publish: diag.can_publish,
+    token_expired: diag.token_expired || false,
+    error: diag.error || null
+  });
+});
+
+app.get('/api/facebook/debug-account', withUser, async (c) => {
+  const userId = c.get('userId');
+  const account = await getFacebookAccount(c.env.DB, userId);
+
+  if (!account || !account.page_id) {
+    return c.json({
+      connected: false,
+      page_id: null,
+      page_name: null,
+      has_page_access_token: false,
+      can_publish: false,
+      error: 'No Facebook Page connected.'
+    });
+  }
+
+  const secretKey = c.env.ENCRYPTION_KEY || c.env.FACEBOOK_APP_SECRET || '7a279df54155e4f8f70991df0a4e9c9c';
+  const decryptedPageToken = await decryptToken(account.page_access_token, secretKey);
+
+  const diag = await verifyPagePublishCapability(c.env, decryptedPageToken, account.page_id);
+
+  return c.json({
+    connected: diag.connected,
+    page_id: account.page_id,
+    page_name: diag.page_name || account.page_name,
+    has_page_access_token: Boolean(decryptedPageToken),
+    can_publish: diag.can_publish,
+    token_expired: diag.token_expired || false,
+    error: diag.error || null
   });
 });
 
@@ -2223,6 +2259,257 @@ app.post('/api/social/cancel', withUser, async (c) => {
   }
 
   return c.json({ success: true, message: 'Schedule cancelled successfully', job: cancelRes.job });
+});
+
+/**
+ * POST /api/social/reschedule
+ * Section 1: Reschedules an active scheduled publishing job (Facebook or Instagram) to a new future time.
+ */
+app.post('/api/social/reschedule', withUser, async (c) => {
+  const userId = c.get('userId');
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Invalid JSON body' }, 400);
+  }
+
+  const { platform, jobId, scheduledAt, scheduled_at } = body || {};
+  const targetTime = scheduledAt || scheduled_at;
+
+  if (!platform || !jobId || !targetTime) {
+    return c.json({ error: 'platform, jobId, and scheduledAt are required' }, 400);
+  }
+
+  const parsedDate = new Date(targetTime);
+  if (isNaN(parsedDate.getTime())) {
+    return c.json({ error: 'Invalid scheduled date/time provided' }, 400);
+  }
+
+  if (parsedDate.getTime() <= Date.now()) {
+    return c.json({ error: 'Scheduled time must be in the future' }, 400);
+  }
+
+  const normalizedIso = parsedDate.toISOString();
+  const rescheduleRes = await rescheduleScheduledSocialJob(c.env.DB, userId, platform, jobId, normalizedIso);
+
+  if (!rescheduleRes.success) {
+    return c.json({ error: rescheduleRes.error || 'Failed to reschedule publishing job' }, 400);
+  }
+
+  return c.json({
+    success: true,
+    message: 'Job rescheduled successfully',
+    job: rescheduleRes.job,
+    scheduled_at: normalizedIso
+  });
+});
+
+/**
+ * POST /api/social/publish-now
+ * Section 1: Immediately executes an active scheduled publishing job (Facebook or Instagram) on-demand.
+ * Ingests video directly from B2 to Meta Graph API, updates status to published, and cleans up B2 safely.
+ */
+app.post('/api/social/publish-now', withUser, async (c) => {
+  const userId = c.get('userId');
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Invalid JSON body' }, 400);
+  }
+
+  const { platform, jobId } = body || {};
+  if (!platform || !jobId) {
+    return c.json({ error: 'platform and jobId are required' }, 400);
+  }
+
+  const secretKey = c.env.ENCRYPTION_KEY || c.env.FACEBOOK_APP_SECRET || '7a279df54155e4f8f70991df0a4e9c9c';
+
+  if (platform === 'facebook') {
+    const job = await getFacebookUploadJob(c.env.DB, jobId);
+    if (!job || job.user_id !== userId) {
+      return c.json({ error: 'Job not found or unauthorized' }, 404);
+    }
+    if (!['scheduled', 'pending', 'failed'].includes(job.status)) {
+      return c.json({ error: `Job cannot be published in status: ${job.status}` }, 400);
+    }
+
+    const account = await getFacebookAccount(c.env.DB, userId);
+    if (!account) {
+      return c.json({ error: 'No Facebook account connected. Please connect Facebook first.' }, 400);
+    }
+
+    let encryptedPageToken = account.page_access_token;
+    if (job.page_id && account.available_pages) {
+      try {
+        const pages = typeof account.available_pages === 'string' ? JSON.parse(account.available_pages || '[]') : (account.available_pages || []);
+        const match = pages.find(p => p.page_id === job.page_id);
+        if (match && match.page_access_token) {
+          encryptedPageToken = match.page_access_token;
+        }
+      } catch {}
+    }
+
+    const activePageToken = await decryptToken(encryptedPageToken, secretKey);
+    if (!activePageToken) {
+      return c.json({ error: 'Could not decrypt Facebook Page access token. Please reconnect your Facebook account.' }, 400);
+    }
+
+    if (!job.b2_file_name) {
+      return c.json({ error: 'Missing B2 video file for this job.' }, 400);
+    }
+
+    // Set job status to uploading
+    await updateFacebookUploadJob(c.env.DB, job.id, { status: 'uploading' });
+
+    try {
+      const b2DownloadUrl = await b2GetDownloadUrl(c.env, job.b2_file_name, 3600);
+
+      let hashtagsArr = [];
+      try {
+        hashtagsArr = typeof job.hashtags === 'string' ? JSON.parse(job.hashtags || '[]') : (job.hashtags || []);
+      } catch {}
+
+      const hashtagsStr = Array.isArray(hashtagsArr) && hashtagsArr.length > 0
+        ? hashtagsArr.map(t => `#${t.replace(/^#+/, '')}`).join(' ')
+        : '';
+      const fullCaption = `${job.caption ? job.caption.trim() : ''}${hashtagsStr ? (job.caption ? '\n\n' : '') + hashtagsStr : ''}`;
+
+      let publishResult;
+      if (job.content_type === 'video') {
+        publishResult = await publishFacebookPageVideo(c.env, activePageToken, job.page_id || account.page_id, {
+          b2DownloadUrl,
+          title: job.title || '',
+          description: fullCaption || job.description || ''
+        });
+      } else {
+        publishResult = await publishFacebookReel(c.env, activePageToken, job.page_id || account.page_id, {
+          b2DownloadUrl,
+          caption: fullCaption,
+          title: job.title || ''
+        });
+      }
+
+      await updateFacebookUploadJob(c.env.DB, job.id, {
+        status: 'published',
+        facebook_video_id: publishResult.videoId,
+        facebook_post_url: publishResult.postUrl,
+        published_at: new Date().toISOString()
+      });
+
+      // Safe B2 lifecycle check
+      if (job.b2_file_name) {
+        const needed = await isB2FileNeededByOtherJobs(c.env.DB, job.b2_file_name, job.id);
+        if (!needed && job.b2_file_id) {
+          try {
+            await b2DeleteFile(c.env, job.b2_file_id, job.b2_file_name);
+            console.log(`[Publish Now] Cleaned up temporary B2 file: ${job.b2_file_name}`);
+          } catch (delErr) {
+            console.warn('[Publish Now] B2 cleanup warning:', delErr.message);
+          }
+        }
+      }
+
+      return c.json({
+        success: true,
+        message: 'Facebook Reel published successfully!',
+        videoId: publishResult.videoId,
+        postUrl: publishResult.postUrl,
+        status: 'published'
+      });
+    } catch (err) {
+      console.error('[Publish Now] Facebook publish error:', err);
+      await updateFacebookUploadJob(c.env.DB, job.id, {
+        status: 'failed',
+        error_message: err.message
+      });
+      return c.json({ success: false, error: err.message }, 500);
+    }
+  } else if (platform === 'instagram') {
+    const job = await getInstagramUploadJob(c.env.DB, jobId);
+    if (!job || job.user_id !== userId) {
+      return c.json({ error: 'Job not found or unauthorized' }, 404);
+    }
+    if (!['scheduled', 'pending', 'failed'].includes(job.status)) {
+      return c.json({ error: `Job cannot be published in status: ${job.status}` }, 400);
+    }
+
+    const account = await getInstagramAccount(c.env.DB, userId);
+    if (!account || !account.access_token || !account.ig_user_id) {
+      return c.json({ error: 'No Instagram account connected. Please connect Instagram first.' }, 400);
+    }
+
+    const activeToken = await decryptToken(account.access_token, secretKey);
+    if (!activeToken) {
+      return c.json({ error: 'Could not decrypt Instagram access token. Please reconnect your account.' }, 400);
+    }
+
+    if (!job.b2_file_name) {
+      return c.json({ error: 'Missing B2 video file for this job.' }, 400);
+    }
+
+    // Set job status to uploading
+    await updateInstagramUploadJob(c.env.DB, job.id, { status: 'uploading' });
+
+    try {
+      const b2DownloadUrl = await b2GetDownloadUrl(c.env, job.b2_file_name, 3600);
+
+      let hashtagsArr = [];
+      try {
+        hashtagsArr = typeof job.hashtags === 'string' ? JSON.parse(job.hashtags || '[]') : (job.hashtags || []);
+      } catch {}
+
+      const hashtagsStr = Array.isArray(hashtagsArr) && hashtagsArr.length > 0
+        ? hashtagsArr.map(t => `#${t.replace(/^#+/, '')}`).join(' ')
+        : '';
+      const fullCaption = `${job.caption ? job.caption.trim() : ''}${hashtagsStr ? (job.caption ? '\n\n' : '') + hashtagsStr : ''}`;
+
+      const publishResult = await publishInstagramReel(c.env, activeToken, job.ig_user_id || account.ig_user_id, {
+        b2DownloadUrl,
+        caption: fullCaption,
+        shareToFeed: true
+      });
+
+      await updateInstagramUploadJob(c.env.DB, job.id, {
+        status: 'published',
+        instagram_container_id: publishResult.containerId,
+        instagram_media_id: publishResult.mediaId,
+        instagram_post_url: publishResult.postUrl,
+        published_at: new Date().toISOString()
+      });
+
+      // Safe B2 lifecycle check
+      if (job.b2_file_name) {
+        const needed = await isB2FileNeededByOtherJobs(c.env.DB, job.b2_file_name, job.id);
+        if (!needed && job.b2_file_id) {
+          try {
+            await b2DeleteFile(c.env, job.b2_file_id, job.b2_file_name);
+            console.log(`[Publish Now] Cleaned up temporary B2 file: ${job.b2_file_name}`);
+          } catch (delErr) {
+            console.warn('[Publish Now] B2 cleanup warning:', delErr.message);
+          }
+        }
+      }
+
+      return c.json({
+        success: true,
+        message: 'Instagram Reel published successfully!',
+        mediaId: publishResult.mediaId,
+        postUrl: publishResult.postUrl,
+        status: 'published'
+      });
+    } catch (err) {
+      console.error('[Publish Now] Instagram publish error:', err);
+      await updateInstagramUploadJob(c.env.DB, job.id, {
+        status: 'failed',
+        error_message: err.message
+      });
+      return c.json({ success: false, error: err.message }, 500);
+    }
+  } else {
+    return c.json({ error: 'Invalid platform. Must be facebook or instagram' }, 400);
+  }
 });
 
 /**

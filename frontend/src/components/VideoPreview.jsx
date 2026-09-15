@@ -678,6 +678,23 @@ export default function VideoPreview({
       .replace(/\{part\}/gi, formattedPart);
   };
 
+  // Helper to convert hex or rgb string to rgba with opacity
+  const hexOrColorToRgba = (colorStr, alphaPercent = 75) => {
+    const alpha = Math.max(0, Math.min(1, (alphaPercent ?? 75) / 100));
+    if (!colorStr) return `rgba(0, 0, 0, ${alpha})`;
+    if (colorStr.startsWith('rgba(')) return colorStr.replace(/[\d\.]+\)$/g, `${alpha})`);
+    if (colorStr.startsWith('rgb(')) return colorStr.replace('rgb(', 'rgba(').replace(')', `, ${alpha})`);
+    if (colorStr.startsWith('#')) {
+      let hex = colorStr.slice(1);
+      if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+      const r = parseInt(hex.slice(0, 2), 16) || 0;
+      const g = parseInt(hex.slice(2, 4), 16) || 0;
+      const b = parseInt(hex.slice(4, 6), 16) || 0;
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+    return colorStr;
+  };
+
   // Compute Primary Text overlay position style
   const getTextOverlayStyle = () => {
     if (!textSettings) return {};
@@ -687,15 +704,19 @@ export default function VideoPreview({
     const isBottom = pos.startsWith('bottom');
 
     const previewFontSize = previewMode === 'vertical'
-      ? Math.max(11, Math.round((textSettings.fontSize || 28) * (236 / 540)))
-      : Math.round((textSettings.fontSize || 28) * 0.85);
+      ? Math.max(2, Math.round((textSettings.fontSize || 28) * (236 / 540)))
+      : Math.max(2, Math.round((textSettings.fontSize || 28) * 0.85));
 
     const style = {
       position: 'absolute',
       fontFamily: textSettings.font || 'Inter, sans-serif',
       fontSize: `${previewFontSize}px`,
       color: textSettings.color || '#ffffff',
+      opacity: Math.max(0, Math.min(1, (textSettings.opacity ?? 100) / 100)),
       fontWeight: 'bold',
+      fontStyle: textSettings.fontStyle || 'normal',
+      textTransform: textSettings.textTransform || 'none',
+      letterSpacing: textSettings.letterSpacing ? `${textSettings.letterSpacing}px` : 'normal',
       whiteSpace: 'pre-line',
       lineHeight: 1.25,
       zIndex: 40,
@@ -734,13 +755,14 @@ export default function VideoPreview({
     }
 
     if (textSettings.bgEnabled) {
-      style.backgroundColor = textSettings.bgColor || 'rgba(0, 0, 0, 0.75)';
-      style.padding = '4px 10px';
-      style.borderRadius = '6px';
+      const pad = Math.max(2, textSettings.bgPadding ?? 6);
+      style.backgroundColor = hexOrColorToRgba(textSettings.bgColor, textSettings.bgOpacity ?? 75);
+      style.padding = `${pad}px ${Math.max(4, Math.round(pad * 1.5))}px`;
+      style.borderRadius = `${textSettings.bgRadius ?? 6}px`;
     }
 
     if (textSettings.outline) {
-      const thickness = Math.max(1.5, Math.round((textSettings.outlineThickness || 3) * 0.7));
+      const thickness = Math.max(2, Math.round((textSettings.outlineThickness || 3) * 0.8));
       const color = textSettings.outlineColor || '#000000';
       style.textShadow = `
         -${thickness}px -${thickness}px 0 ${color},
@@ -760,15 +782,19 @@ export default function VideoPreview({
   // Compute Extra Text overlay position style
   const getExtraTextStyle = (extra) => {
     const previewFontSize = previewMode === 'vertical'
-      ? Math.max(10, Math.round((extra.fontSize || 22) * (236 / 540)))
-      : Math.round((extra.fontSize || 22) * 0.85);
+      ? Math.max(2, Math.round((extra.fontSize || 22) * (236 / 540)))
+      : Math.max(2, Math.round((extra.fontSize || 22) * 0.85));
 
     const style = {
       position: 'absolute',
       fontFamily: extra.font || 'Inter, sans-serif',
       fontSize: `${previewFontSize}px`,
       color: extra.color || '#ffffff',
+      opacity: Math.max(0, Math.min(1, (extra.opacity ?? 100) / 100)),
       fontWeight: 'bold',
+      fontStyle: extra.fontStyle || 'normal',
+      textTransform: extra.textTransform || 'none',
+      letterSpacing: extra.letterSpacing ? `${extra.letterSpacing}px` : 'normal',
       whiteSpace: 'pre-line',
       lineHeight: 1.25,
       zIndex: 42,
@@ -783,13 +809,14 @@ export default function VideoPreview({
     };
 
     if (extra.bgEnabled) {
-      style.backgroundColor = extra.bgColor || 'rgba(0, 0, 0, 0.75)';
-      style.padding = '3px 8px';
-      style.borderRadius = '6px';
+      const pad = Math.max(2, extra.bgPadding ?? 5);
+      style.backgroundColor = hexOrColorToRgba(extra.bgColor || '#000000', extra.bgOpacity ?? 75);
+      style.padding = `${pad}px ${Math.max(4, Math.round(pad * 1.5))}px`;
+      style.borderRadius = `${extra.bgRadius ?? 6}px`;
     }
 
     if (extra.outline !== false) {
-      const thickness = Math.max(1.5, Math.round((extra.outlineThickness || 3) * 0.7));
+      const thickness = Math.max(2, Math.round((extra.outlineThickness || 3) * 0.8));
       const color = extra.outlineColor || '#000000';
       style.textShadow = `
         -${thickness}px -${thickness}px 0 ${color},

@@ -506,6 +506,29 @@ export default function InstagramPanel({
             </div>
           </div>
 
+          {/* Session Expiry / Error Alert */}
+          {(accountError || (publishError && (publishError.includes('190') || publishError.toLowerCase().includes('session') || publishError.toLowerCase().includes('re-authenticate')))) && (
+            <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-start justify-between gap-3 text-xs text-amber-300 animate-fadeIn">
+              <div className="flex items-start space-x-2 min-w-0">
+                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <div className="space-y-1 min-w-0">
+                  <p className="font-bold text-white">Meta Session Needs Re-authentication</p>
+                  <p className="text-[11px] text-amber-200/90 leading-relaxed">
+                    {accountError || publishError}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={connectInstagram}
+                className="px-3 py-1.5 bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white font-bold text-xs rounded-lg shadow-sm shrink-0 flex items-center space-x-1 cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Re-authenticate</span>
+              </button>
+            </div>
+          )}
+
           {/* Diagnostics Inspector Modal / Drawer */}
           {showDiagnostics && (
             <div className="p-3.5 bg-slate-900 border border-pink-500/30 rounded-xl space-y-2.5 text-xs animate-fadeIn">
@@ -545,13 +568,22 @@ export default function InstagramPanel({
                   </div>
                   <div className="p-2 bg-slate-950 rounded-lg border border-slate-800">
                     <span className="text-slate-400 block">Token Status</span>
-                    <span className="text-emerald-400 font-semibold">
-                      ✓ Long-lived (~60d)
+                    <span className={diagnosticsData.token_expired ? 'text-rose-400 font-semibold' : 'text-emerald-400 font-semibold'}>
+                      {diagnosticsData.token_expired ? '✕ Session Invalidated' : '✓ Long-lived (~60d)'}
                     </span>
                   </div>
                   {diagnosticsData.error && (
-                    <div className="sm:col-span-3 p-2 bg-rose-500/10 border border-rose-500/30 rounded text-rose-300 text-[11px]">
-                      {diagnosticsData.error}
+                    <div className="sm:col-span-3 p-2 bg-rose-500/10 border border-rose-500/30 rounded text-rose-300 text-[11px] flex items-center justify-between gap-2">
+                      <span>{diagnosticsData.error}</span>
+                      {diagnosticsData.token_expired && (
+                        <button
+                          type="button"
+                          onClick={connectInstagram}
+                          className="px-2.5 py-1 bg-pink-600 hover:bg-pink-500 text-white font-bold text-[10px] rounded shrink-0 cursor-pointer"
+                        >
+                          Reconnect
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>

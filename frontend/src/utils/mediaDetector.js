@@ -24,36 +24,41 @@ export function detectVideoQuality(width, height) {
   if (maxDim >= 3500 || minDim >= 2000) {
     return {
       label: `4K Ultra HD (${width} × ${height})`,
-      resolutionKey: '4k',
+      resolutionKey: 'original',
+      recommendedRes: 'original',
       shortName: '4K UHD',
       aspectRatio
     };
   } else if (maxDim >= 2400 || minDim >= 1350) {
     return {
       label: `1440p 2K Quad HD (${width} × ${height})`,
-      resolutionKey: '1440p',
+      resolutionKey: 'original',
+      recommendedRes: 'original',
       shortName: '2K QHD',
       aspectRatio
     };
   } else if (maxDim >= 1800 || minDim >= 1000) {
     return {
       label: `1080p Full HD (${width} × ${height})`,
-      resolutionKey: '1080p',
+      resolutionKey: 'original',
+      recommendedRes: 'original',
       shortName: '1080p FHD',
       aspectRatio
     };
   } else if (maxDim >= 1200 || minDim >= 700) {
     return {
       label: `720p HD (${width} × ${height})`,
-      resolutionKey: '720p',
+      resolutionKey: 'original',
+      recommendedRes: 'original',
       shortName: '720p HD',
       aspectRatio
     };
   } else {
     return {
-      label: `480p SD (${width} × ${height})`,
-      resolutionKey: '720p',
-      shortName: '480p SD',
+      label: `${height}p Source (${width} × ${height})`,
+      resolutionKey: 'original',
+      recommendedRes: 'original',
+      shortName: `${height}p`,
       aspectRatio
     };
   }

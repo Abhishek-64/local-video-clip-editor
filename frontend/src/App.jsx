@@ -12,6 +12,7 @@ import MobileBottomNav from './components/MobileBottomNav';
 import MobileEditSheet from './components/MobileEditSheet';
 import UnifiedPublishModal from './components/UnifiedPublishModal';
 import GeneratedVideoPlayer from './components/GeneratedVideoPlayer';
+import PhotoEditor from './components/PhotoEditor';
 import { generateClipFilename } from './utils/filename';
 import { calculateSingleScheduleTime, formatScheduledDateTime, getDefaultScheduleStartTime, toDateTimeLocalString, getIntervalSeconds } from './utils/scheduler';
 import { cleanVideoFilename } from './utils/titleCleaner';
@@ -23,6 +24,13 @@ import { useInstagram } from './hooks/useInstagram';
 import { useAuth } from './hooks/useAuth';
 import { useTemplates } from './hooks/useTemplates';
 import sharedUploadCache from './services/sharedUploadCache';
+import {
+  getB2UploadTarget,
+  uploadToB2,
+  publishToFacebook,
+  publishToInstagram,
+  setYouTubeThumbnail
+} from './services/apiService';
 import {
   Check, Info, X, Film, Palette, Layers, Sparkles,
   Scissors, Crop, Image as ImageIcon, Type, Volume2, SlidersHorizontal,
@@ -66,8 +74,19 @@ export default function App() {
 
   // Central Unified Publish / Schedule Modal State (Accessible across Queue and Clips)
   const [publishModalClips, setPublishModalClips] = useState(null);
+  const [publishModalPhoto, setPublishModalPhoto] = useState(null);
   const [preRenderContext, setPreRenderContext] = useState(null);
   const handleClipCompletedRef = useRef(null);
+
+  // Studio Mode: 'video' (Video Clips & Cut Editor) vs 'photo' (Photo & Thumbnail Studio)
+  const [studioMode, setStudioMode] = useState('video');
+  const [photoDataUrl, setPhotoDataUrl] = useState(null);
+
+  const handleCaptureFrame = useCallback((dataUrl) => {
+    setPhotoDataUrl(dataUrl);
+    setStudioMode('photo');
+    setToastMessage({ message: 'Frame captured to Photo Studio!', type: 'success' });
+  }, []);
 
   // Background Video Preview Suspension State (for performance when previewing generated clips)
   const [isEditorPreviewSuspended, setIsEditorPreviewSuspended] = useState(false);
@@ -139,7 +158,7 @@ export default function App() {
 
   // Editing Settings State
   const [cropSettings, setCropSettings] = useState({
-    mode: '9:16',
+    mode: 'original',
     fillMode: 'fit',
     customWidth: 60,
     customHeight: 85,
@@ -223,10 +242,10 @@ export default function App() {
   const [exportSettings, setExportSettings] = useState({
     movieName: 'My Movie',
     format: 'mp4',
-    resolution: '1080p',
-    bitrate: 'high',
+    resolution: 'original',
+    bitrate: 'ultra',
     fps: 'original',
-    audioBitrate: '256k',
+    audioBitrate: '320k',
     concurrency: 1,
     fileTemplate: '{movie} - Part {part}'
   });
@@ -638,14 +657,12 @@ export default function App() {
       }
     }
 
-    // Auto configure smart export profile based on detected media
-    if (data.detectedQuality || data.detectedFps) {
-      setExportSettings((prev) => ({
-        ...prev,
-        resolution: data.detectedQuality?.recommendedRes || prev.resolution,
-        fps: data.detectedFps?.recommendedFps || prev.fps
-      }));
-    }
+    // Ensure export profile preserves original native resolution & FPS
+    setExportSettings((prev) => ({
+      ...prev,
+      resolution: 'original',
+      fps: data.detectedFps?.recommendedFps || 'original'
+    }));
 
     if (data.preset) {
       showToast(`⚡ Loaded Demo Video: "${data.preset.title}" with 3 split parts & social templates!`, 'success');
@@ -1340,6 +1357,76 @@ export default function App() {
 
   // ── Central Unified Publishing & Scheduling Orchestrator ─────────────────────
   const handleUnifiedPublish = useCallback(async (config) => {
+    // Photo Mode: Publish or Schedule Image Post
+    if (config.isPhoto) {
+      const { photoItem, platforms, mode } = config;
+      const isScheduling = mode === 'schedule';
+      showToast(`${isScheduling ? 'Scheduling' : 'Publishing'} photo post...`, 'info');
+
+      try {
+        const res = await fetch(photoItem.dataUrl);
+        const photoBlob = await res.blob();
+        const photoFileName = `photo_${Date.now()}_${(photoItem.aspectRatio || '1x1').replace(':', 'x')}.jpg`;
+
+        let b2Info = null;
+        if (platforms.facebook?.enabled || platforms.instagram?.enabled) {
+          try {
+            const target = await getB2UploadTarget();
+            b2Info = await uploadToB2(target.uploadUrl, target.authorizationToken, photoBlob, photoFileName);
+          } catch (b2Err) {
+            console.error('[Photo Publish] B2 upload error:', b2Err);
+            showToast(`Photo storage upload failed: ${b2Err.message}`, 'error');
+            return;
+          }
+        }
+
+        // Facebook Photo Post
+        if (platforms.facebook?.enabled && b2Info) {
+          try {
+            await publishToFacebook({
+              contentType: 'image',
+              b2FileId: b2Info.fileId || b2Info.id,
+              b2FileName: b2Info.fileName || photoFileName,
+              title: photoItem.title,
+              caption: photoItem.caption,
+              scheduledAt: platforms.facebook.scheduledAt || null
+            });
+            if (platforms.facebook.scheduledAt) {
+              showToast('Facebook Photo scheduled successfully!', 'success');
+            } else {
+              showToast('Facebook Photo published to Page successfully!', 'success');
+            }
+          } catch (fbErr) {
+            showToast(`Facebook photo error: ${fbErr.message}`, 'error');
+          }
+        }
+
+        // Instagram Photo Post
+        if (platforms.instagram?.enabled && b2Info) {
+          try {
+            await publishToInstagram({
+              contentType: 'image',
+              b2FileId: b2Info.fileId || b2Info.id,
+              b2FileName: b2Info.fileName || photoFileName,
+              caption: photoItem.caption,
+              scheduledAt: platforms.instagram.scheduledAt || null
+            });
+            if (platforms.instagram.scheduledAt) {
+              showToast('Instagram Photo scheduled successfully!', 'success');
+            } else {
+              showToast('Instagram Photo published to Feed successfully!', 'success');
+            }
+          } catch (igErr) {
+            showToast(`Instagram photo error: ${igErr.message}`, 'error');
+          }
+        }
+      } catch (err) {
+        console.error('[handleUnifiedPublish] Photo error:', err);
+        showToast(`Photo publish failed: ${err.message}`, 'error');
+      }
+      return;
+    }
+
     // If opened in pre-render mode, start rendering queue with publishConfig attached
     if (preRenderContext) {
       const savedContext = preRenderContext;
@@ -1763,41 +1850,83 @@ export default function App() {
         isIgConnected={isIgConnected}
         activeTab={activeEditorTab}
         onNavigateTab={handleNavigateTab}
+        studioMode={studioMode}
+        onStudioModeChange={setStudioMode}
       />
 
       {/* Main Application Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 pb-24 lg:pb-8 space-y-4 sm:space-y-6">
-        {/* Step 1: Video Uploader Area */}
-        <section className="space-y-2">
-          <VideoUploader onVideoSelect={handleVideoSelect} currentVideo={videoData} />
-        </section>
-
-        {/* Workspace Grid (When video is loaded) */}
-        {videoData && (
+        {studioMode === 'photo' ? (
+          <PhotoEditor
+            initialImage={photoDataUrl}
+            movieName={exportSettings.movieName || textSettings.movieName}
+            videoData={videoData}
+            currentVideoTime={currentTime}
+            onCaptureVideoFrame={() => {
+              if (videoData) {
+                setStudioMode('video');
+                showToast('Play or pause the video at any frame, then click "Snap Frame"!', 'info');
+              } else {
+                showToast('Upload a video first to capture video frames', 'info');
+              }
+            }}
+            onPublishPhoto={(photoPayload) => {
+              setPublishModalPhoto(photoPayload);
+              setPublishModalClips([photoPayload]);
+            }}
+            onSetYouTubeThumbnail={async (dataUrl) => {
+              try {
+                const latestYtJob = uploadHistory?.find(j => j.youtube_video_id);
+                if (latestYtJob?.youtube_video_id) {
+                  showToast('Setting thumbnail on YouTube...', 'info');
+                  await setYouTubeThumbnail(latestYtJob.youtube_video_id, dataUrl);
+                  showToast(`Thumbnail set successfully on YouTube: ${latestYtJob.title || latestYtJob.youtube_video_id}!`, 'success');
+                } else {
+                  showToast('Please upload a YouTube video first to assign custom thumbnails.', 'info');
+                }
+              } catch (err) {
+                showToast(`Failed to set YouTube thumbnail: ${err.message}`, 'error');
+              }
+            }}
+            isFbConnected={isFbConnected}
+            isIgConnected={isIgConnected}
+            isYtConnected={isConnected}
+            showToast={showToast}
+          />
+        ) : (
           <>
-            {/* Desktop 2-Column Workspace Layout & Single Column on Mobile */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
-              {/* Left Column: Player, Timeline & Mobile Quick Tool Strip */}
-              <div className="lg:col-span-7 space-y-4 sm:space-y-6">
-                <VideoPreview
-                  videoData={videoData}
-                  currentTime={currentTime}
-                  onTimeUpdate={handleTimeUpdate}
-                  cropSettings={cropSettings}
-                  onCropChange={setCropSettings}
-                  bgSettings={bgSettings}
-                  textSettings={textSettings}
-                  onTextChange={setTextSettings}
-                  logoSettings={logoSettings}
-                  onLogoChange={setLogoSettings}
-                  effectsSettings={effectsSettings}
-                  audioSettings={audioSettings}
-                  customParts={customParts}
-                  skipDeletedCuts={skipDeletedCuts}
-                  onSplitAtPlayhead={handleSplitAtPlayhead}
-                  onToggleCutAtPlayhead={handleToggleCutAtPlayhead}
-                  isSuspended={isEditorPreviewSuspended || Boolean(previewClipModal)}
-                />
+            {/* Step 1: Video Uploader Area */}
+            <section className="space-y-2">
+              <VideoUploader onVideoSelect={handleVideoSelect} currentVideo={videoData} />
+            </section>
+
+            {/* Workspace Grid (When video is loaded) */}
+            {videoData && (
+              <>
+                {/* Desktop 2-Column Workspace Layout & Single Column on Mobile */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
+                  {/* Left Column: Player, Timeline & Mobile Quick Tool Strip */}
+                  <div className="lg:col-span-7 space-y-4 sm:space-y-6">
+                    <VideoPreview
+                      videoData={videoData}
+                      currentTime={currentTime}
+                      onTimeUpdate={handleTimeUpdate}
+                      cropSettings={cropSettings}
+                      onCropChange={setCropSettings}
+                      bgSettings={bgSettings}
+                      textSettings={textSettings}
+                      onTextChange={setTextSettings}
+                      logoSettings={logoSettings}
+                      onLogoChange={setLogoSettings}
+                      effectsSettings={effectsSettings}
+                      audioSettings={audioSettings}
+                      customParts={customParts}
+                      skipDeletedCuts={skipDeletedCuts}
+                      onSplitAtPlayhead={handleSplitAtPlayhead}
+                      onToggleCutAtPlayhead={handleToggleCutAtPlayhead}
+                      onCaptureFrame={handleCaptureFrame}
+                      isSuspended={isEditorPreviewSuspended || Boolean(previewClipModal)}
+                    />
 
                 {/* Timeline Range Scrubber & Manual Parts Time Table */}
                 <Timeline
@@ -1936,6 +2065,8 @@ export default function App() {
             </div>
           </>
         )}
+          </>
+        )}
       </main>
 
       {/* Mobile Slide-Up Edit Sheet (< lg) */}
@@ -2028,9 +2159,12 @@ export default function App() {
           isOpen={Boolean(publishModalClips)}
           onClose={() => {
             setPublishModalClips(null);
+            setPublishModalPhoto(null);
             setPreRenderContext(null);
           }}
           clips={publishModalClips}
+          isPhotoMode={Boolean(publishModalPhoto)}
+          photoItem={publishModalPhoto}
           movieName={exportSettings.movieName || textSettings.movieName}
           youtubeName={exportSettings.movieName || ytSettings?.yt_name || textSettings.movieName}
           textSettings={textSettings}

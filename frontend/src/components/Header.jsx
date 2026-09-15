@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   ShieldCheck, Film, Sparkles, User, LogOut, Youtube, ChevronDown,
   CheckCircle2, Database, LayoutTemplate, Bookmark, Share2, Instagram,
-  Menu, X
+  Menu, X, Image as ImageIcon, Camera
 } from 'lucide-react';
 
 export default function Header({
@@ -22,7 +22,9 @@ export default function Header({
   isFbConnected = false,
   isIgConnected = false,
   activeTab = 'split-cut',
-  onNavigateTab
+  onNavigateTab,
+  studioMode = 'video',
+  onStudioModeChange
 }) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
@@ -83,6 +85,38 @@ export default function Header({
 
           {/* Desktop Right Actions (Hidden on mobile where drawer holds secondary items) */}
           <div className="flex items-center space-x-1.5 sm:space-x-2.5 shrink-0">
+            {/* Studio Mode Switcher */}
+            {onStudioModeChange && (
+              <div className="flex items-center p-0.5 bg-slate-950/80 border border-slate-800 rounded-xl shadow-inner">
+                <button
+                  type="button"
+                  onClick={() => onStudioModeChange('video')}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    studioMode === 'video'
+                      ? 'bg-orange-500 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                  title="Video Clips Studio"
+                >
+                  <Film className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Video Studio</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onStudioModeChange('photo')}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    studioMode === 'photo'
+                      ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                  title="Photo & Thumbnail Studio"
+                >
+                  <ImageIcon className="w-3.5 h-3.5 text-amber-300" />
+                  <span className="hidden sm:inline">Photo Studio</span>
+                </button>
+              </div>
+            )}
+
             {/* Templates / Presets Button (Desktop) */}
             <button
               onClick={onOpenTemplates}

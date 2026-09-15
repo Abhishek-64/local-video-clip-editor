@@ -453,14 +453,135 @@ export async function createInstagramReelContainer(env, accessToken, igUserId, {
     throw new Error(friendlyMessage);
   }
 
+  return containerId;
+}
+
+/**
+ * Phase 1 (Photo): Create Instagram Photo / Single Image Media Container
+ */
+export async function createInstagramImageContainer(env, accessToken, igUserId, {
+  b2DownloadUrl,
+  caption = '',
+  isCarouselItem = false
+}) {
+  const version = getGraphVersion(env);
+  const cleanIgUserId = String(igUserId || '').trim();
+
+  if (!cleanIgUserId || !accessToken) {
+    throw new Error('Instagram User ID and Access Token are required for photo publishing.');
+  }
+
+  if (!b2DownloadUrl) {
+    throw new Error('Image download URL is required for Instagram ingestion.');
+  }
+
+  const containerUrl = `${GRAPH_BASE}/${version}/${cleanIgUserId}/media`;
+  const containerPayload = {
+    image_url: b2DownloadUrl,
+    access_token: accessToken
+  };
+
+  if (isCarouselItem) {
+    containerPayload.is_carousel_item = true;
+  } else if (caption) {
+    containerPayload.caption = caption;
+  }
+
+  console.log('[IG Publish] Creating Photo container for igUserId:', cleanIgUserId);
+  const containerRes = await fetch(containerUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(containerPayload)
+  });
+
+  if (!containerRes.ok) {
+    const errText = await containerRes.text();
+    let friendlyMessage = `Failed to create Instagram Photo container: ${errText}`;
+    try {
+      const errObj = JSON.parse(errText);
+      if (errObj?.error?.message) {
+        friendlyMessage = `Meta API Error: ${errObj.error.message}`;
+      }
+    } catch {}
+    throw new Error(friendlyMessage);
+  }
+
   const containerData = await containerRes.json();
   const containerId = containerData.id;
 
   if (!containerId) {
-    throw new Error('Meta did not return a valid Instagram container_id.');
+    throw new Error('Meta did not return a valid Instagram image container_id.');
   }
 
   return containerId;
+}
+
+/**
+ * Phase 1 (Story): Create Instagram Photo Story Media Container
+ */
+export async function createInstagramStoryContainer(env, accessToken, igUserId, {
+  b2DownloadUrl
+}) {
+  const version = getGraphVersion(env);
+  const cleanIgUserId = String(igUserId || '').trim();
+
+  const containerUrl = `${GRAPH_BASE}/${version}/${cleanIgUserId}/media`;
+  const containerPayload = {
+    media_type: 'STORIES',
+    image_url: b2DownloadUrl,
+    access_token: accessToken
+  };
+
+  const containerRes = await fetch(containerUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(containerPayload)
+  });
+
+  if (!containerRes.ok) {
+    const errText = await containerRes.text();
+    throw new Error(`Failed to create Instagram Story container: ${errText}`);
+  }
+
+  const containerData = await containerRes.json();
+  return containerData.id;
+}
+
+/**
+ * Phase 1 (Carousel): Create Parent Carousel Container for Multiple Media IDs
+ */
+export async function createInstagramCarouselContainer(env, accessToken, igUserId, {
+  children = [],
+  caption = ''
+}) {
+  const version = getGraphVersion(env);
+  const cleanIgUserId = String(igUserId || '').trim();
+
+  if (!children || children.length < 2) {
+    throw new Error('Instagram Carousel requires at least 2 media items.');
+  }
+
+  const containerUrl = `${GRAPH_BASE}/${version}/${cleanIgUserId}/media`;
+  const containerPayload = {
+    media_type: 'CAROUSEL',
+    children: children,
+    caption: caption || '',
+    access_token: accessToken
+  };
+
+  const containerRes = await fetch(containerUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(containerPayload)
+  });
+
+  if (!containerRes.ok) {
+    const errText = await containerRes.text();
+    throw new Error(`Failed to create Instagram Carousel container: ${errText}`);
+  }
+
+  const containerData = await containerRes.json();
+  return containerData.id;
 }
 
 /**
@@ -595,6 +716,72 @@ export async function publishInstagramReel(env, accessToken, igUserId, {
 }
 
 /**
+ * Publish an Instagram Single Photo Post
+ */
+export async function publishInstagramPhoto(env, accessToken, igUserId, {
+  b2DownloadUrl,
+  caption = '',
+  scheduledAt = null
+}) {
+  const containerId = await createInstagramImageContainer(env, accessToken, igUserId, {
+    b2DownloadUrl,
+    caption
+  });
+
+  console.log('[IG Publish] Photo Container created:', containerId, 'Waiting for ready...');
+
+  // Image containers process virtually instantly, poll up to 6 times (~10s max)
+  let isFinished = false;
+  let attempts = 0;
+  while (!isFinished && attempts < 8) {
+    attempts++;
+    await sleep(1200);
+    const statusInfo = await checkInstagramContainerStatus(env, accessToken, containerId);
+    if (statusInfo.isFinished) {
+      isFinished = true;
+      break;
+    } else if (statusInfo.isError) {
+      throw new Error(`Instagram photo processing failed: ${statusInfo.statusText || 'Transcoding error'}`);
+    }
+  }
+
+  // If status check is not strictly required by Instagram or finishes, attempt publish
+  const pub = await publishInstagramMediaContainer(env, accessToken, igUserId, containerId);
+
+  return {
+    success: true,
+    mediaId: pub.mediaId,
+    containerId,
+    postUrl: pub.postUrl,
+    status: scheduledAt ? 'scheduled' : 'published',
+    publishData: pub.publishData
+  };
+}
+
+/**
+ * Publish an Instagram Photo Story
+ */
+export async function publishInstagramStory(env, accessToken, igUserId, {
+  b2DownloadUrl
+}) {
+  const containerId = await createInstagramStoryContainer(env, accessToken, igUserId, {
+    b2DownloadUrl
+  });
+
+  await sleep(2000);
+  const pub = await publishInstagramMediaContainer(env, accessToken, igUserId, containerId);
+
+  return {
+    success: true,
+    mediaId: pub.mediaId,
+    containerId,
+    postUrl: `https://www.instagram.com/`,
+    status: 'published',
+    publishData: pub.publishData
+  };
+}
+
+/**
  * Processes due scheduled Instagram upload jobs from the D1 database.
  * Invoked by Cloudflare Worker cron trigger (* * * * *) or manual maintenance API.
  */
@@ -708,14 +895,24 @@ export async function processScheduledInstagramJobs(env) {
         const fullCaption = `${job.caption ? job.caption.trim() : ''}${hashtagsStr ? (job.caption ? '\n\n' : '') + hashtagsStr : ''}`;
 
         const publishStart = new Date().toISOString();
-        console.log(`[SCHEDULER] jobId=${job.id} platform=instagram publishStart=${publishStart}`);
-
-        // Phase 1: Create Container
-        const containerId = await createInstagramReelContainer(env, activeToken, job.ig_user_id, {
-          b2DownloadUrl,
-          caption: fullCaption,
-          shareToFeed: true
-        });
+        // Phase 1: Create Container based on content type
+        let containerId;
+        if (job.content_type === 'image' || job.content_type === 'photo') {
+          containerId = await createInstagramImageContainer(env, activeToken, job.ig_user_id, {
+            b2DownloadUrl,
+            caption: fullCaption
+          });
+        } else if (job.content_type === 'story') {
+          containerId = await createInstagramStoryContainer(env, activeToken, job.ig_user_id, {
+            b2DownloadUrl
+          });
+        } else {
+          containerId = await createInstagramReelContainer(env, activeToken, job.ig_user_id, {
+            b2DownloadUrl,
+            caption: fullCaption,
+            shareToFeed: true
+          });
+        }
 
         // Save container ID and set status to processing
         await updateInstagramUploadJob(env.DB, job.id, {

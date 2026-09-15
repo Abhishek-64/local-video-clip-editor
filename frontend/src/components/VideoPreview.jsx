@@ -12,7 +12,9 @@ import {
   Smartphone,
   LayoutGrid,
   GripVertical,
-  Scissors
+  Scissors,
+  Camera,
+  Image as ImageIcon
 } from 'lucide-react';
 import { formatTime } from '../utils/time';
 
@@ -33,6 +35,7 @@ export default function VideoPreview({
   skipDeletedCuts = true,
   onSplitAtPlayhead,
   onToggleCutAtPlayhead,
+  onCaptureFrame,
   isSuspended = false
 }) {
   const videoRef = useRef(null);
@@ -101,6 +104,21 @@ export default function VideoPreview({
       }
     };
   }, []);
+
+  // Frame snapshot grabber for Photo Studio & Thumbnails
+  const handleSnapFrame = useCallback(() => {
+    if (!videoRef.current) return;
+    const video = videoRef.current;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth || 1920;
+    canvas.height = video.videoHeight || 1080;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+    if (onCaptureFrame) {
+      onCaptureFrame(dataUrl);
+    }
+  }, [onCaptureFrame]);
 
   // Frame-Driven Background Canvas Blit for 100% Zero-Lag Playback & Zero Idle CPU Usage
   useEffect(() => {
@@ -1410,6 +1428,18 @@ export default function VideoPreview({
                 >
                   <span className="hidden xs:inline">Cut/Keep</span>
                   <span className="xs:hidden">Cut</span>
+                </button>
+              )}
+
+              {/* Quick Capture Frame for Photo & Thumbnails */}
+              {onCaptureFrame && (
+                <button
+                  onClick={handleSnapFrame}
+                  className="min-h-[44px] px-3 sm:min-h-[32px] sm:px-2.5 sm:py-1 bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/30 text-orange-300 rounded-xl sm:rounded-lg text-xs font-semibold flex items-center space-x-1 transition-all cursor-pointer touch-manipulation active:scale-95"
+                  title="Capture frame to Photo & Thumbnail Studio"
+                >
+                  <Camera className="w-3.5 h-3.5 text-orange-400" />
+                  <span className="hidden sm:inline">Snap Frame</span>
                 </button>
               )}
 

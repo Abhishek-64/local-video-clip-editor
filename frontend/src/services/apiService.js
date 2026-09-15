@@ -400,6 +400,45 @@ export function buildYouTubeUrl(videoId) {
   return `https://www.youtube.com/watch?v=${videoId}`;
 }
 
+/**
+ * Set custom thumbnail on a YouTube video.
+ * @param {string} videoId - YouTube video ID
+ * @param {Blob|string} imageBlobOrBase64 - Image Blob or Base64 data string
+ * @param {string} mimeType - Image mime type
+ */
+export async function setYouTubeThumbnail(videoId, imageBlobOrBase64, mimeType = 'image/jpeg') {
+  if (typeof imageBlobOrBase64 === 'string') {
+    return apiFetch('/api/youtube/set-thumbnail', {
+      method: 'POST',
+      body: JSON.stringify({
+        videoId,
+        imageBase64: imageBlobOrBase64,
+        mimeType
+      })
+    });
+  } else {
+    const userId = getClientUserId();
+    const token = getAuthToken();
+    const headers = {
+      'Content-Type': mimeType || imageBlobOrBase64.type || 'image/jpeg',
+      'X-User-Id': userId
+    };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(`${API_URL}/api/youtube/set-thumbnail?videoId=${encodeURIComponent(videoId)}`, {
+      method: 'POST',
+      headers,
+      body: imageBlobOrBase64
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      let err = text;
+      try { err = JSON.parse(text).error || text; } catch {}
+      throw new Error(err);
+    }
+    return res.json();
+  }
+}
+
 // ─── Storage & Database Data Management ───────────────────────────────────────
 
 /**

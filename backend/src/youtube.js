@@ -235,3 +235,48 @@ export function buildYouTubeUrl(videoId) {
 export function buildYouTubeStudioUrl(videoId) {
   return `https://studio.youtube.com/video/${videoId}/edit`;
 }
+
+/**
+ * Set custom thumbnail on a YouTube video.
+ * Uses YouTube Data API v3 thumbnails.set endpoint.
+ *
+ * @param {string} accessToken - Valid YouTube OAuth access token
+ * @param {string} videoId - Target YouTube video ID
+ * @param {ArrayBuffer|Blob|Uint8Array} imageBytes - Thumbnail image binary
+ * @param {string} mimeType - Image mime type (image/jpeg, image/png)
+ */
+export async function setVideoThumbnail(accessToken, videoId, imageBytes, mimeType = 'image/jpeg') {
+  if (!accessToken || !videoId) {
+    throw new Error('Access token and videoId are required to set a video thumbnail.');
+  }
+
+  const endpoint = `${YT_UPLOAD_BASE}/thumbnails/set?videoId=${encodeURIComponent(videoId)}&uploadType=media`;
+
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': mimeType || 'image/jpeg'
+    },
+    body: imageBytes
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    let msg = `Failed to set YouTube thumbnail: ${errText}`;
+    try {
+      const errObj = JSON.parse(errText);
+      if (errObj?.error?.message) {
+        msg = `YouTube Thumbnail Error: ${errObj.error.message}`;
+      }
+    } catch {}
+    throw new Error(msg);
+  }
+
+  const data = await res.json();
+  return {
+    success: true,
+    videoId,
+    items: data.items || []
+  };
+}

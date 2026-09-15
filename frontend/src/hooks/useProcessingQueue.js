@@ -18,9 +18,9 @@ export function calculateJobComplexity(job) {
   const duration = Math.max(0, parseFloat(job.duration || (job.endTime - job.startTime) || 0));
   const fps = parseFloat(job.exportSettings?.fps || job.settings?.export?.fps || 30) || 30;
   const estimatedFrames = Math.round(duration * fps);
-  const resolution = job.exportSettings?.resolution || job.settings?.export?.resolution || '1080p';
-  const width = resolution === '4k' ? 3840 : resolution === '1440p' ? 2560 : resolution === '720p' ? 1280 : 1920;
-  const height = resolution === '4k' ? 2160 : resolution === '1440p' ? 1440 : resolution === '720p' ? 720 : 1080;
+  const resolution = job.exportSettings?.resolution || job.settings?.export?.resolution || 'original';
+  const width = job.videoData?.width || (resolution === '4k' ? 3840 : resolution === '1440p' ? 2560 : resolution === '720p' ? 1280 : 1920);
+  const height = job.videoData?.height || (resolution === '4k' ? 2160 : resolution === '1440p' ? 1440 : resolution === '720p' ? 720 : 1080);
   const estimatedPixels = width * height * estimatedFrames;
   const isFaceTracking = Boolean(job.cropSettings?.faceTracking || job.settings?.crop?.faceTracking);
 

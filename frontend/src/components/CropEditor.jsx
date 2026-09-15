@@ -31,6 +31,14 @@ export default function CropEditor({
 
   const platformModes = [
     {
+      id: 'original',
+      label: 'Original Source Aspect',
+      badge: 'Auto Native',
+      icon: Layers,
+      color: 'text-emerald-400',
+      desc: 'Preserves 100% original video dimensions & format'
+    },
+    {
       id: '9:16',
       label: 'Instagram Reel / Shorts / TikTok',
       badge: '9:16 · 1080×1920',
@@ -77,14 +85,6 @@ export default function CropEditor({
       icon: Crop,
       color: 'text-orange-400',
       desc: 'Custom drag & resize box to crop any area'
-    },
-    {
-      id: 'original',
-      label: 'Original Source Aspect',
-      badge: 'Auto Native',
-      icon: Layers,
-      color: 'text-emerald-400',
-      desc: 'Preserves original video dimensions unchanged'
     }
   ];
 
@@ -123,7 +123,7 @@ export default function CropEditor({
     });
   };
 
-  const currentMode = cropSettings.mode || '9:16';
+  const currentMode = cropSettings.mode || 'original';
   const currentFillMode = cropSettings.fillMode || 'fit';
 
   return (

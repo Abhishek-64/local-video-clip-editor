@@ -414,14 +414,14 @@ export async function processVideoClipLegacy({
       const initialCrop = calculateCropDimensions({
         sourceWidth: srcWidth,
         sourceHeight: srcHeight,
-        mode: crop.mode || '9:16',
+        mode: crop.mode || 'original',
         fillMode: crop.fillMode || 'fit',
         manualX: crop.x || 0,
         manualY: crop.y || 0,
         customWidth: crop.customWidth ?? 60,
         customHeight: crop.customHeight ?? 85,
         zoom: crop.zoom || 1,
-        resolution: exportConfig.resolution || '1080p'
+        resolution: exportConfig.resolution || 'original'
       });
 
       const canvas = document.createElement('canvas');
@@ -630,7 +630,7 @@ export async function processVideoClipLegacy({
         const cropBox = calculateCropDimensions({
           sourceWidth: srcWidth,
           sourceHeight: srcHeight,
-          mode: crop.mode || '9:16',
+          mode: crop.mode || 'original',
           fillMode: crop.fillMode || 'fit',
           manualX: crop.x || 0,
           manualY: crop.y || 0,
@@ -638,7 +638,7 @@ export async function processVideoClipLegacy({
           customHeight: crop.customHeight ?? 85,
           zoom: crop.zoom || 1,
           faceCenter: crop.faceTracking ? cachedFaceCenter : null,
-          resolution: exportConfig.resolution || '1080p'
+          resolution: exportConfig.resolution || 'original'
         });
 
         // 15. Render Background Layer (Ultra-Fast Hardware Bilinear Blur)

@@ -21,9 +21,17 @@ import {
   SlidersHorizontal,
   Undo2,
   Hash,
-  Sparkles
+  Sparkles,
+  Clock,
+  AlertCircle
 } from 'lucide-react';
-import { formatTime, splitKeptParts } from '../utils/time';
+import {
+  formatTime,
+  splitKeptParts,
+  parseFlexibleTime,
+  parseMultipleTimestamps,
+  splitPartsAtTimestamps
+} from '../utils/time';
 
 export default function SplitCutEditor({
   duration = 0,
@@ -40,6 +48,9 @@ export default function SplitCutEditor({
   movieName = 'My Movie'
 }) {
   const [expandedPartId, setExpandedPartId] = useState(null);
+  const [customTimeInput, setCustomTimeInput] = useState('');
+  const [timeInputError, setTimeInputError] = useState(null);
+  const [timeSplitSuccess, setTimeSplitSuccess] = useState(null);
 
   // Helper to ensure segments exist
   const getEnsureParts = () => {
@@ -264,6 +275,68 @@ export default function SplitCutEditor({
     if (onCustomPartsChange) onCustomPartsChange(renumbered);
   };
 
+  // ── Action: Apply Exact / Flexible Time Split (Single or Multiple Timestamps) ──
+  const handleApplyCustomTimeSplit = (e) => {
+    if (e) e.preventDefault();
+    setTimeInputError(null);
+    setTimeSplitSuccess(null);
+
+    const raw = customTimeInput.trim();
+    if (!raw) {
+      setTimeInputError('Please enter timestamp(s) e.g. "01:30", "1m 20s" or "00:30, 01:15"');
+      return;
+    }
+
+    // Check for "every <time>" syntax e.g. "every 30s", "every 1m", "every 90s"
+    if (raw.toLowerCase().startsWith('every ')) {
+      const intervalStr = raw.slice(6).trim();
+      const intervalSec = parseFlexibleTime(intervalStr);
+      if (!intervalSec || intervalSec <= 0) {
+        setTimeInputError(`Invalid interval "${intervalStr}". Try e.g. "every 30s" or "every 1m"`);
+        return;
+      }
+      const newParts = splitKeptParts(partsList, duration, 'duration', intervalSec);
+      if (onCustomPartsChange) onCustomPartsChange(newParts);
+      setTimeSplitSuccess(`✓ Split into ${newParts.length} parts (every ${intervalSec}s)`);
+      setCustomTimeInput('');
+      setTimeout(() => setTimeSplitSuccess(null), 4000);
+      return;
+    }
+
+    // Parse one or multiple timestamps
+    const timestamps = parseMultipleTimestamps(raw, duration);
+    if (!timestamps || timestamps.length === 0) {
+      setTimeInputError(`No valid timestamps found within video (0s - ${formatTime(duration)}). Examples: "01:30", "1m 20s", "00:45, 02:15"`);
+      return;
+    }
+
+    const updated = splitPartsAtTimestamps(partsList, duration, timestamps);
+    if (onCustomPartsChange) onCustomPartsChange(updated);
+
+    const formattedPoints = timestamps.map((t) => formatTime(t)).join(', ');
+    setTimeSplitSuccess(`✓ Split video at [${formattedPoints}] into ${updated.length} parts!`);
+    setCustomTimeInput('');
+    setTimeout(() => setTimeSplitSuccess(null), 4000);
+  };
+
+  const handleQuickIntervalSplit = (sec) => {
+    if (!duration || duration <= 0) return;
+    const newParts = splitKeptParts(partsList, duration, 'duration', sec);
+    if (onCustomPartsChange) onCustomPartsChange(newParts);
+    setTimeSplitSuccess(`✓ Split into ${newParts.length} parts (every ${formatTime(sec)})`);
+    setTimeout(() => setTimeSplitSuccess(null), 3000);
+  };
+
+  const handleAppendCurrentTimeToInput = () => {
+    const formatted = formatTime(currentTime);
+    setCustomTimeInput((prev) => {
+      const trimmed = prev.trim();
+      if (!trimmed) return formatted;
+      return `${trimmed}, ${formatted}`;
+    });
+    setTimeInputError(null);
+  };
+
   const canSplitAtPlayhead = partsList.some(
     (p) => currentTime > p.startTime + 0.2 && currentTime < p.endTime - 0.2
   );
@@ -329,6 +402,110 @@ export default function SplitCutEditor({
           {skipDeletedCuts ? <Eye className="w-3.5 h-3.5 text-emerald-400" /> : <EyeOff className="w-3.5 h-3.5 text-slate-500" />}
           <span>{skipDeletedCuts ? 'Skip Cuts' : 'Play All'}</span>
         </button>
+      </div>
+
+      {/* 2. Exact Custom Time Split Input Bar (Supports Min, Hour, Sec, Multiple Timestamps) */}
+      <div className="bg-slate-950/90 border border-slate-800/90 rounded-2xl p-2.5 sm:p-3 space-y-2 shadow-sm">
+        <form onSubmit={handleApplyCustomTimeSplit} className="space-y-2">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+            {/* Input with Clock icon & Current Playhead inserter */}
+            <div className="relative flex-1">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                <Clock className="w-4 h-4 text-amber-400/90" />
+              </div>
+              <input
+                type="text"
+                id="custom-split-time-input"
+                value={customTimeInput}
+                onChange={(e) => {
+                  setCustomTimeInput(e.target.value);
+                  if (timeInputError) setTimeInputError(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleApplyCustomTimeSplit(e);
+                  }
+                }}
+                placeholder="Split at time: e.g. 01:30 or 1h 20m 30s or 00:30, 01:15, 02:45"
+                className="w-full bg-slate-900 border border-slate-700/80 rounded-xl pl-9 pr-24 py-2 text-xs sm:text-sm font-mono text-white placeholder:text-slate-500 placeholder:font-sans focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500 transition-all"
+              />
+              {/* Insert Current Time Badge inside input right side */}
+              <button
+                type="button"
+                onClick={handleAppendCurrentTimeToInput}
+                className="absolute inset-y-1.5 right-1.5 px-2 bg-slate-800 hover:bg-slate-700 active:scale-95 text-amber-300 hover:text-amber-200 text-[11px] font-mono font-semibold rounded-lg border border-slate-700 flex items-center space-x-1 cursor-pointer transition-all"
+                title={`Insert current playhead time (${formatTime(currentTime)})`}
+              >
+                <Target className="w-3 h-3" />
+                <span>{formatTime(currentTime)}</span>
+              </button>
+            </div>
+
+            {/* Split Button */}
+            <button
+              type="submit"
+              id="apply-split-time-btn"
+              className="min-h-[38px] px-4 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 active:scale-95 text-slate-950 font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center space-x-1.5 cursor-pointer touch-manipulation shrink-0"
+            >
+              <Split className="w-3.5 h-3.5 shrink-0" />
+              <span>Split Video (Enter)</span>
+            </button>
+          </div>
+
+          {/* Quick Helper Chips: Intervals & Format Examples */}
+          <div className="flex flex-wrap items-center justify-between gap-1.5 text-[11px] pt-0.5">
+            <div className="flex items-center space-x-1 text-slate-400 font-medium">
+              <span className="text-slate-500 text-[10px] sm:text-[11px]">Interval:</span>
+              <button
+                type="button"
+                onClick={() => handleQuickIntervalSplit(30)}
+                className="px-2 py-0.5 bg-slate-900 hover:bg-slate-800 hover:text-amber-300 text-slate-300 border border-slate-800 rounded-md font-mono text-[10px] transition-colors cursor-pointer"
+              >
+                Every 30s
+              </button>
+              <button
+                type="button"
+                onClick={() => handleQuickIntervalSplit(60)}
+                className="px-2 py-0.5 bg-slate-900 hover:bg-slate-800 hover:text-amber-300 text-slate-300 border border-slate-800 rounded-md font-mono text-[10px] transition-colors cursor-pointer"
+              >
+                Every 1m
+              </button>
+              <button
+                type="button"
+                onClick={() => handleQuickIntervalSplit(120)}
+                className="px-2 py-0.5 bg-slate-900 hover:bg-slate-800 hover:text-amber-300 text-slate-300 border border-slate-800 rounded-md font-mono text-[10px] transition-colors cursor-pointer"
+              >
+                Every 2m
+              </button>
+              <button
+                type="button"
+                onClick={() => handleQuickIntervalSplit(300)}
+                className="px-2 py-0.5 bg-slate-900 hover:bg-slate-800 hover:text-amber-300 text-slate-300 border border-slate-800 rounded-md font-mono text-[10px] transition-colors cursor-pointer"
+              >
+                Every 5m
+              </button>
+            </div>
+
+            <span className="text-[10px] text-slate-500 hidden md:inline">
+              Supports: <code className="text-slate-400">01:30</code>, <code className="text-slate-400">1h 20m 30s</code>, <code className="text-slate-400">00:30, 01:15, 02:45</code>
+            </span>
+          </div>
+
+          {/* Feedback banners */}
+          {timeInputError && (
+            <div className="flex items-center space-x-1.5 text-rose-400 bg-rose-950/40 border border-rose-800/50 rounded-lg px-2.5 py-1.5 text-xs animate-fadeIn">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+              <span>{timeInputError}</span>
+            </div>
+          )}
+          {timeSplitSuccess && (
+            <div className="flex items-center space-x-1.5 text-emerald-300 bg-emerald-950/40 border border-emerald-800/50 rounded-lg px-2.5 py-1.5 text-xs animate-fadeIn">
+              <Check className="w-3.5 h-3.5 shrink-0 text-emerald-400" />
+              <span>{timeSplitSuccess}</span>
+            </div>
+          )}
+        </form>
       </div>
 
       {/* 2. Compact Visual Mini-Strip */}

@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {
   X, Send, Calendar, Clock, Youtube, Share2, Instagram, CheckCircle2,
-  AlertCircle, Film, Sparkles, CheckSquare, Square
+  AlertCircle, Film, Sparkles, CheckSquare, Square, Image as ImageIcon, Camera
 } from 'lucide-react';
 import {
   toDateTimeLocalString,
@@ -18,6 +18,9 @@ export default function UnifiedPublishModal({
   movieName = 'Movie',
   youtubeName,
   textSettings = {},
+  // Photo Mode Props
+  isPhotoMode = false,
+  photoItem = null,
   // YouTube Props
   isYtConnected = false,
   ytAccount = null,
@@ -36,6 +39,16 @@ export default function UnifiedPublishModal({
   publishProgress = 0,
   isPreRender = false
 }) {
+  // Photo mode custom caption state
+  const [photoCaption, setPhotoCaption] = useState(photoItem?.caption || '');
+  const [photoTitle, setPhotoTitle] = useState(photoItem?.title || '');
+
+  useEffect(() => {
+    if (photoItem) {
+      setPhotoCaption(photoItem.caption || '');
+      setPhotoTitle(photoItem.title || '');
+    }
+  }, [photoItem]);
   // Normalize clips to array
   const clipList = useMemo(() => {
     if (!clips) return [];
@@ -139,7 +152,7 @@ export default function UnifiedPublishModal({
     return true;
   }, [publishMode, selectedPlatforms, ytScheduleTime, fbScheduleTime, igScheduleTime]);
 
-  const canSubmit = !isBusy && clipList.length > 0 && (
+  const canSubmit = !isBusy && (isPhotoMode ? !!photoItem : clipList.length > 0) && (
     publishMode === 'local_only' ||
     (hasSelectedPlatform && isScheduleValid)
   );
@@ -150,32 +163,65 @@ export default function UnifiedPublishModal({
     setIsSubmittingLocal(true);
 
     try {
-      const config = {
-        clips: clipList,
-        mode: publishMode,
-        batchInterval,
-        batchIntervalMinutes: getIntervalSeconds(batchInterval) / 60,
-        platforms: {
-          youtube: {
-            enabled: publishMode !== 'local_only' && selectedPlatforms.youtube && canYt,
-            mode: publishMode,
-            scheduledAt: publishMode === 'schedule' ? new Date(ytScheduleTime).toISOString() : null,
-            scheduleTime: publishMode === 'schedule' ? new Date(ytScheduleTime).toISOString() : null
+      let config;
+      if (isPhotoMode) {
+        config = {
+          isPhoto: true,
+          photoItem: {
+            ...photoItem,
+            title: photoTitle,
+            caption: photoCaption
           },
-          facebook: {
-            enabled: publishMode !== 'local_only' && selectedPlatforms.facebook && canFb,
-            mode: publishMode,
-            scheduledAt: publishMode === 'schedule' ? new Date(fbScheduleTime).toISOString() : null,
-            scheduleTime: publishMode === 'schedule' ? new Date(fbScheduleTime).toISOString() : null
-          },
-          instagram: {
-            enabled: publishMode !== 'local_only' && selectedPlatforms.instagram && canIg,
-            mode: publishMode,
-            scheduledAt: publishMode === 'schedule' ? new Date(igScheduleTime).toISOString() : null,
-            scheduleTime: publishMode === 'schedule' ? new Date(igScheduleTime).toISOString() : null
+          mode: publishMode,
+          platforms: {
+            youtube: {
+              enabled: selectedPlatforms.youtube && canYt,
+              mode: publishMode,
+              scheduledAt: publishMode === 'schedule' ? new Date(ytScheduleTime).toISOString() : null,
+              scheduleTime: publishMode === 'schedule' ? new Date(ytScheduleTime).toISOString() : null
+            },
+            facebook: {
+              enabled: selectedPlatforms.facebook && canFb,
+              mode: publishMode,
+              scheduledAt: publishMode === 'schedule' ? new Date(fbScheduleTime).toISOString() : null,
+              scheduleTime: publishMode === 'schedule' ? new Date(fbScheduleTime).toISOString() : null
+            },
+            instagram: {
+              enabled: selectedPlatforms.instagram && canIg,
+              mode: publishMode,
+              scheduledAt: publishMode === 'schedule' ? new Date(igScheduleTime).toISOString() : null,
+              scheduleTime: publishMode === 'schedule' ? new Date(igScheduleTime).toISOString() : null
+            }
           }
-        }
-      };
+        };
+      } else {
+        config = {
+          clips: clipList,
+          mode: publishMode,
+          batchInterval,
+          batchIntervalMinutes: getIntervalSeconds(batchInterval) / 60,
+          platforms: {
+            youtube: {
+              enabled: publishMode !== 'local_only' && selectedPlatforms.youtube && canYt,
+              mode: publishMode,
+              scheduledAt: publishMode === 'schedule' ? new Date(ytScheduleTime).toISOString() : null,
+              scheduleTime: publishMode === 'schedule' ? new Date(ytScheduleTime).toISOString() : null
+            },
+            facebook: {
+              enabled: publishMode !== 'local_only' && selectedPlatforms.facebook && canFb,
+              mode: publishMode,
+              scheduledAt: publishMode === 'schedule' ? new Date(fbScheduleTime).toISOString() : null,
+              scheduleTime: publishMode === 'schedule' ? new Date(fbScheduleTime).toISOString() : null
+            },
+            instagram: {
+              enabled: publishMode !== 'local_only' && selectedPlatforms.instagram && canIg,
+              mode: publishMode,
+              scheduledAt: publishMode === 'schedule' ? new Date(igScheduleTime).toISOString() : null,
+              scheduleTime: publishMode === 'schedule' ? new Date(igScheduleTime).toISOString() : null
+            }
+          }
+        };
+      }
 
       if (onConfirmPublish) {
         await onConfirmPublish(config);
@@ -199,12 +245,14 @@ export default function UnifiedPublishModal({
         {/* Modal Header */}
         <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/60 shrink-0">
           <div className="flex items-center space-x-2.5">
-            <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-blue-600 via-purple-600 to-pink-600 flex items-center justify-center text-white shadow-md shadow-purple-500/20">
-              <Share2 className="w-4 h-4" />
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-orange-500 via-amber-500 to-rose-500 flex items-center justify-center text-white shadow-md shadow-orange-500/20">
+              {isPhotoMode ? <ImageIcon className="w-4 h-4" /> : <Share2 className="w-4 h-4" />}
             </div>
             <div>
               <h3 className="text-sm sm:text-base font-bold text-white tracking-tight">
-                {isPreRender
+                {isPhotoMode
+                  ? publishMode === 'schedule' ? 'Schedule Photo Post' : 'Publish Photo Post'
+                  : isPreRender
                   ? `Render & Publishing Setup (${clipList.length} Clips)`
                   : publishMode === 'schedule'
                   ? 'Schedule Video Clips'
@@ -224,28 +272,72 @@ export default function UnifiedPublishModal({
 
         {/* Modal Body */}
         <div className="p-4 sm:p-5 space-y-4 sm:space-y-5 overflow-y-auto flex-1">
-          {/* 1. Target Clips Overview */}
-          <div className="p-3 bg-slate-950/80 border border-slate-800/80 rounded-xl flex items-center justify-between gap-3">
-            <div className="flex items-center space-x-2.5 min-w-0">
-              <div className="w-9 h-9 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center text-orange-400 shrink-0">
-                <Film className="w-4 h-4" />
+          {/* 1. Target Media Overview */}
+          {isPhotoMode && photoItem ? (
+            <div className="p-3 bg-slate-950/80 border border-slate-800/80 rounded-xl flex items-center justify-between gap-3">
+              <div className="flex items-center space-x-3 min-w-0">
+                {photoItem.dataUrl ? (
+                  <img
+                    src={photoItem.dataUrl}
+                    alt="Photo Post"
+                    className="w-12 h-12 object-cover rounded-lg border border-slate-700 shadow-sm shrink-0"
+                  />
+                ) : (
+                  <div className="w-12 h-12 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center text-orange-400 shrink-0">
+                    <ImageIcon className="w-5 h-5" />
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-white truncate">
+                    {photoTitle || 'Photo Post'}
+                  </p>
+                  <p className="text-[10px] text-slate-400 truncate">
+                    Ratio: {photoItem.aspectRatio || '1:1'} • High-Resolution Image
+                  </p>
+                </div>
               </div>
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-white truncate">
-                  {isBatch ? `${clipList.length} Clips Selected` : (primaryClip?.name || 'Generated Clip')}
-                </p>
-                <p className="text-[10px] text-slate-400 truncate">
-                  {isBatch
-                    ? clipList.map(c => `Part ${c.partNumber || 1}`).join(', ')
-                    : `Part ${primaryClip?.partNumber || 1}`}
-                </p>
-              </div>
-            </div>
 
-            <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">
-              {isPreRender ? 'Ready to Render' : 'HD Ready'}
-            </span>
-          </div>
+              <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-orange-500/10 text-orange-400 border border-orange-500/20 shrink-0">
+                Photo Ready
+              </span>
+            </div>
+          ) : (
+            <div className="p-3 bg-slate-950/80 border border-slate-800/80 rounded-xl flex items-center justify-between gap-3">
+              <div className="flex items-center space-x-2.5 min-w-0">
+                <div className="w-9 h-9 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center text-orange-400 shrink-0">
+                  <Film className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-white truncate">
+                    {isBatch ? `${clipList.length} Clips Selected` : (primaryClip?.name || 'Generated Clip')}
+                  </p>
+                  <p className="text-[10px] text-slate-400 truncate">
+                    {isBatch
+                      ? clipList.map(c => `Part ${c.partNumber || 1}`).join(', ')
+                      : `Part ${primaryClip?.partNumber || 1}`}
+                  </p>
+                </div>
+              </div>
+
+              <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">
+                {isPreRender ? 'Ready to Render' : 'HD Ready'}
+              </span>
+            </div>
+          )}
+
+          {/* Photo Caption & Hashtags Editor (in Photo Mode) */}
+          {isPhotoMode && (
+            <div className="p-3.5 bg-slate-950 rounded-xl border border-slate-800 space-y-2.5">
+              <label className="text-xs font-bold text-slate-300 block">Post Caption & Description</label>
+              <textarea
+                value={photoCaption}
+                onChange={(e) => setPhotoCaption(e.target.value)}
+                rows={3}
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white placeholder-slate-500 focus:border-orange-500 outline-none resize-none"
+                placeholder="Write your Facebook / Instagram caption and hashtags here..."
+              />
+            </div>
+          )}
 
           {/* 2. Action Mode Tabs: Schedule vs Publish Now vs Local Render Only */}
           <div className="space-y-2">

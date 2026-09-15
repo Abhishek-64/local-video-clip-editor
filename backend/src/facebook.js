@@ -482,6 +482,102 @@ export async function publishFacebookPageVideo(env, pageAccessToken, pageId, {
 }
 
 /**
+ * Publish a Facebook Page Photo Post
+ */
+export async function publishFacebookPhoto(env, pageAccessToken, pageId, {
+  b2DownloadUrl,
+  caption = '',
+  scheduledAt = null
+}) {
+  const version = getGraphVersion(env);
+  const photoUrl = `${GRAPH_BASE}/${version}/${pageId}/photos`;
+
+  const payload = {
+    url: b2DownloadUrl,
+    caption: caption,
+    access_token: pageAccessToken
+  };
+
+  if (scheduledAt) {
+    const scheduledEpoch = Math.floor(new Date(scheduledAt).getTime() / 1000);
+    const nowEpoch = Math.floor(Date.now() / 1000);
+    if (scheduledEpoch >= nowEpoch + 600 && scheduledEpoch <= nowEpoch + 75 * 86400) {
+      payload.published = false;
+      payload.scheduled_publish_time = scheduledEpoch;
+    } else {
+      payload.published = true;
+    }
+  } else {
+    payload.published = true;
+  }
+
+  const res = await fetch(photoUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    let msg = `Failed to publish Facebook Photo: ${errText}`;
+    try {
+      const errObj = JSON.parse(errText);
+      if (errObj?.error?.message) msg = `Facebook API Error: ${errObj.error.message}`;
+    } catch {}
+    throw new Error(msg);
+  }
+
+  const data = await res.json();
+  const photoId = data.id;
+  const postUrl = `https://www.facebook.com/${data.post_id || photoId}`;
+
+  return {
+    success: true,
+    photoId,
+    postId: data.post_id || photoId,
+    postUrl,
+    status: scheduledAt ? 'scheduled' : 'published',
+    data
+  };
+}
+
+/**
+ * Publish a Facebook Page Photo Story
+ */
+export async function publishFacebookPhotoStory(env, pageAccessToken, pageId, {
+  b2DownloadUrl
+}) {
+  const version = getGraphVersion(env);
+  const storyUrl = `${GRAPH_BASE}/${version}/${pageId}/photo_stories`;
+
+  const payload = {
+    url: b2DownloadUrl,
+    access_token: pageAccessToken
+  };
+
+  const res = await fetch(storyUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Failed to publish Facebook Photo Story: ${errText}`);
+  }
+
+  const data = await res.json();
+  const storyId = data.id || data.post_id;
+  return {
+    success: true,
+    storyId,
+    postUrl: `https://www.facebook.com/${pageId}`,
+    status: 'published',
+    data
+  };
+}
+
+/**
  * Processes due scheduled Facebook upload jobs from the D1 database.
  * Invoked by Cloudflare Worker cron trigger (* * * * *) or maintenance API.
  */
@@ -551,7 +647,16 @@ export async function processScheduledFacebookJobs(env) {
         console.log(`[SCHEDULER] jobId=${job.id} platform=facebook publishStart=${publishStart}`);
 
         let publishResult;
-        if (job.content_type === 'video') {
+        if (job.content_type === 'image' || job.content_type === 'photo') {
+          publishResult = await publishFacebookPhoto(env, activePageToken, job.page_id, {
+            b2DownloadUrl,
+            caption: fullCaption || job.title || ''
+          });
+        } else if (job.content_type === 'story') {
+          publishResult = await publishFacebookPhotoStory(env, activePageToken, job.page_id, {
+            b2DownloadUrl
+          });
+        } else if (job.content_type === 'video') {
           publishResult = await publishFacebookPageVideo(env, activePageToken, job.page_id, {
             b2DownloadUrl,
             title: job.title || '',
@@ -566,7 +671,7 @@ export async function processScheduledFacebookJobs(env) {
         }
 
         const publishEnd = new Date().toISOString();
-        console.log(`[SCHEDULER] jobId=${job.id} platform=facebook publishEnd=${publishEnd} videoId=${publishResult.videoId}`);
+        console.log(`[SCHEDULER] jobId=${job.id} platform=facebook publishEnd=${publishEnd} postId=${publishResult.postId || publishResult.videoId || publishResult.photoId}`);
 
         await updateFacebookUploadJob(env.DB, job.id, {
           status: 'published',

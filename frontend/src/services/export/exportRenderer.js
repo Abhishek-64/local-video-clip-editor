@@ -387,14 +387,14 @@ export class ExportRenderer {
     // 2. Crop Window Calculation (with caching for invariant crop)
     let cropBox;
     if (!crop.faceTracking) {
-      const cropKey = `${srcW}_${srcH}_${crop.mode || '9:16'}_${crop.fillMode || 'fit'}_${crop.x || 0}_${crop.y || 0}_${crop.customWidth ?? 60}_${crop.customHeight ?? 85}_${crop.zoom || 1}`;
+      const cropKey = `${srcW}_${srcH}_${crop.mode || 'original'}_${crop.fillMode || 'fit'}_${crop.x || 0}_${crop.y || 0}_${crop.customWidth ?? 60}_${crop.customHeight ?? 85}_${crop.zoom || 1}`;
       if (this._cachedCropKey === cropKey && this._cachedCropBox) {
         cropBox = this._cachedCropBox;
       } else {
         cropBox = calculateCropDimensions({
           sourceWidth: srcW,
           sourceHeight: srcH,
-          mode: crop.mode || '9:16',
+          mode: crop.mode || 'original',
           fillMode: crop.fillMode || 'fit',
           manualX: crop.x || 0,
           manualY: crop.y || 0,
@@ -402,7 +402,7 @@ export class ExportRenderer {
           customHeight: crop.customHeight ?? 85,
           zoom: crop.zoom || 1,
           faceCenter: null,
-          resolution: '1080p'
+          resolution: 'original'
         });
         this._cachedCropBox = cropBox;
         this._cachedCropKey = cropKey;
@@ -411,7 +411,7 @@ export class ExportRenderer {
       cropBox = calculateCropDimensions({
         sourceWidth: srcW,
         sourceHeight: srcH,
-        mode: crop.mode || '9:16',
+        mode: crop.mode || 'original',
         fillMode: crop.fillMode || 'fit',
         manualX: crop.x || 0,
         manualY: crop.y || 0,
@@ -419,7 +419,7 @@ export class ExportRenderer {
         customHeight: crop.customHeight ?? 85,
         zoom: crop.zoom || 1,
         faceCenter: this.cachedFaceCenter,
-        resolution: '1080p'
+        resolution: 'original'
       });
     }
 

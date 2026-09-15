@@ -25,7 +25,8 @@ import {
   updateVideoMetadata,
   getVideoStatus,
   buildYouTubeUrl,
-  normalizeYouTubeTags
+  normalizeYouTubeTags,
+  setVideoThumbnail
 } from './youtube.js';
 
 import {
@@ -93,6 +94,8 @@ import {
   verifyPagePublishCapability,
   publishFacebookReel,
   publishFacebookPageVideo,
+  publishFacebookPhoto,
+  publishFacebookPhotoStory,
   processScheduledFacebookJobs
 } from './facebook.js';
 
@@ -103,6 +106,10 @@ import {
   validateAndGetInstagramAccount,
   verifyInstagramPublishCapability,
   publishInstagramReel,
+  publishInstagramPhoto,
+  publishInstagramStory,
+  createInstagramImageContainer,
+  createInstagramCarouselContainer,
   processScheduledInstagramJobs
 } from './instagram.js';
 
@@ -1224,7 +1231,17 @@ app.post('/api/facebook/publish', withUser, async (c) => {
     const fullCaption = `${caption ? caption.trim() : ''}${hashtagsStr ? (caption ? '\n\n' : '') + hashtagsStr : ''}`;
 
     let publishResult;
-    if (contentType === 'reel') {
+    if (contentType === 'image' || contentType === 'photo') {
+      publishResult = await publishFacebookPhoto(c.env, activePageToken, activePageId, {
+        b2DownloadUrl,
+        caption: fullCaption || title || '',
+        scheduledAt: null
+      });
+    } else if (contentType === 'story') {
+      publishResult = await publishFacebookPhotoStory(c.env, activePageToken, activePageId, {
+        b2DownloadUrl
+      });
+    } else if (contentType === 'reel') {
       publishResult = await publishFacebookReel(c.env, activePageToken, activePageId, {
         b2DownloadUrl,
         caption: fullCaption,
@@ -1240,10 +1257,8 @@ app.post('/api/facebook/publish', withUser, async (c) => {
       });
     }
 
-    // 2. Safe retention of temporary file in Backblaze B2:
-    // Do NOT delete immediately. Retain for dependent platforms (e.g. Instagram Reels sharing this upload),
-    // and to allow Meta transcoders to stream all necessary chunks. Cleaned up safely by retention cron.
-    console.log(`[FB Ingest] Video published successfully (${publishResult.videoId}). Retaining B2 file ${b2FileName} for dependent platforms & Meta transcoding.`);
+    const postId = publishResult.postId || publishResult.videoId || publishResult.photoId || publishResult.storyId;
+    console.log(`[FB Ingest] Media published successfully (${postId}). Retaining B2 file ${b2FileName} for dependent platforms.`);
 
     // 3. Update job in D1
     const updatedJob = await updateFacebookUploadJob(c.env.DB, job.id, {
@@ -1961,18 +1976,28 @@ app.post('/api/instagram/publish', withUser, async (c) => {
       : '';
     const fullCaption = `${caption ? caption.trim() : ''}${hashtagsStr ? (caption ? '\n\n' : '') + hashtagsStr : ''}`;
 
-    // 2. Publish to Instagram Reel
-    const publishResult = await publishInstagramReel(c.env, activeToken, activeIgUserId, {
-      b2DownloadUrl,
-      caption: fullCaption,
-      shareToFeed,
-      scheduledAt: null // Immediate publish
-    });
+    // 2. Publish based on content type
+    let publishResult;
+    if (contentType === 'image' || contentType === 'photo') {
+      publishResult = await publishInstagramPhoto(c.env, activeToken, activeIgUserId, {
+        b2DownloadUrl,
+        caption: fullCaption,
+        scheduledAt: null
+      });
+    } else if (contentType === 'story') {
+      publishResult = await publishInstagramStory(c.env, activeToken, activeIgUserId, {
+        b2DownloadUrl
+      });
+    } else {
+      publishResult = await publishInstagramReel(c.env, activeToken, activeIgUserId, {
+        b2DownloadUrl,
+        caption: fullCaption,
+        shareToFeed,
+        scheduledAt: null // Immediate publish
+      });
+    }
 
-    // 3. Safe retention of temporary file in Backblaze B2:
-    // Do NOT delete immediately. Retain for dependent platforms and to allow Meta transcoders
-    // to stream all necessary chunks. Cleaned up safely by retention cron.
-    console.log(`[IG Ingest] Video published successfully (${publishResult.mediaId}). Retaining B2 file ${b2FileName} for dependent platforms & Meta transcoding.`);
+    console.log(`[IG Ingest] Media published successfully (${publishResult.mediaId}). Retaining B2 file ${b2FileName} for dependent platforms.`);
 
     // 4. Update job in D1
     await updateInstagramUploadJob(c.env.DB, job.id, {
@@ -2694,6 +2719,76 @@ app.post('/api/uploads/:id/retry', withUser, async (c) => {
   });
 
   return c.json({ success: true, jobId: id });
+});
+
+/**
+ * POST /api/youtube/set-thumbnail
+ * Sets a custom thumbnail image for an uploaded YouTube video.
+ * Supports binary image body (with ?videoId=...) or JSON { videoId, imageBase64, mimeType }
+ */
+app.post('/api/youtube/set-thumbnail', withUser, async (c) => {
+  const userId = c.get('userId');
+  let videoId = c.req.query('videoId') || c.req.header('x-video-id');
+  let imageBytes = null;
+  let mimeType = 'image/jpeg';
+
+  const contentType = c.req.header('content-type') || '';
+
+  if (contentType.includes('application/json')) {
+    try {
+      const body = await c.req.json();
+      videoId = videoId || body.videoId;
+      mimeType = body.mimeType || 'image/jpeg';
+      if (body.imageBase64) {
+        // Strip data URI prefix if present
+        const cleanBase64 = body.imageBase64.replace(/^data:image\/[a-zA-Z]+;base64,/, '');
+        const binaryStr = atob(cleanBase64);
+        const len = binaryStr.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          bytes[i] = binaryStr.charCodeAt(i);
+        }
+        imageBytes = bytes.buffer;
+      }
+    } catch (err) {
+      return c.json({ error: `Invalid JSON body: ${err.message}` }, 400);
+    }
+  } else {
+    mimeType = contentType.split(';')[0].trim() || 'image/jpeg';
+    imageBytes = await c.req.arrayBuffer();
+  }
+
+  if (!videoId) {
+    return c.json({ error: 'videoId is required to set YouTube thumbnail.' }, 400);
+  }
+
+  if (!imageBytes || imageBytes.byteLength === 0) {
+    return c.json({ error: 'Image data is required.' }, 400);
+  }
+
+  const account = await getYouTubeAccount(c.env.DB, userId);
+  if (!account) {
+    return c.json({ error: 'No YouTube account connected. Please connect YouTube first.' }, 401);
+  }
+
+  let accessToken;
+  try {
+    accessToken = await ensureValidToken(c.env, c.env.DB, account);
+  } catch (err) {
+    return c.json({ error: `YouTube token refresh failed: ${err.message}` }, 401);
+  }
+
+  try {
+    const result = await setVideoThumbnail(accessToken, videoId, imageBytes, mimeType);
+    return c.json({
+      success: true,
+      videoId,
+      result
+    });
+  } catch (err) {
+    console.error('[YouTube Thumbnail] Error setting thumbnail:', err);
+    return c.json({ error: err.message }, 500);
+  }
 });
 
 // ─── Schedule (convenience endpoint) ─────────────────────────────────────────

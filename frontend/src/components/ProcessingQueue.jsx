@@ -3,7 +3,8 @@ import {
   PlayCircle, Download, CheckCircle2, Clock, XCircle, AlertCircle, Trash2,
   StopCircle, RefreshCw, Hash, Sliders, Youtube, ExternalLink, Upload,
   Calendar, RotateCcw, Sparkles, Send, Check, ChevronDown, ChevronUp, Edit3,
-  Globe, Lock, ShieldCheck, Zap, Share2, Instagram
+  Globe, Lock, ShieldCheck, Zap, Share2, Instagram,
+  CheckSquare, Square, MinusSquare
 } from 'lucide-react';
 import { formatTime } from '../utils/time';
 import {
@@ -18,6 +19,8 @@ export default function ProcessingQueue({
   onGenerateQueue,
   onCancelJob,
   onClearQueue,
+  onDeleteSelectedJobs,
+  onRemoveClip,
   onPreviewClip,
   onDownloadClip,
   isProcessing,
@@ -64,7 +67,49 @@ export default function ProcessingQueue({
   const [generateOption, setGenerateOption] = useState('all');
   const [firstNCount, setFirstNCount] = useState(Math.min(3, totalPossibleParts));
   const [rangeStart, setRangeStart] = useState(1);
-  const [rangeEnd, setRangeEnd] = useState(Math.min(3, totalPossibleParts));
+  const [rangeEnd, setRangeEnd] = useState(totalPossibleParts || 1);
+
+  useEffect(() => {
+    if (totalPossibleParts > 0) {
+      setRangeEnd(prev => (prev === 1 || prev === 3 || prev > totalPossibleParts ? totalPossibleParts : prev));
+      setFirstNCount(prev => Math.min(prev, totalPossibleParts));
+    }
+  }, [totalPossibleParts]);
+
+  // Multi-select state for queue jobs
+  const [selectedJobIds, setSelectedJobIds] = useState(new Set());
+
+  const isAllSelected = (queue || []).length > 0 && queue.every(j => selectedJobIds.has(j.id));
+  const isSomeSelected = selectedJobIds.size > 0 && !isAllSelected;
+
+  const handleToggleSelect = (jobId) => {
+    setSelectedJobIds(prev => {
+      const next = new Set(prev);
+      if (next.has(jobId)) next.delete(jobId);
+      else next.add(jobId);
+      return next;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (isAllSelected) {
+      setSelectedJobIds(new Set());
+    } else {
+      setSelectedJobIds(new Set((queue || []).map(j => j.id)));
+    }
+  };
+
+  const handleDeleteSelected = () => {
+    if (selectedJobIds.size === 0) return;
+    if (!window.confirm(`Delete ${selectedJobIds.size} selected clip(s) from queue?`)) return;
+    const ids = Array.from(selectedJobIds);
+    if (onDeleteSelectedJobs) {
+      onDeleteSelectedJobs(ids);
+    } else {
+      ids.forEach(id => (onRemoveClip ? onRemoveClip(id) : onCancelJob(id)));
+    }
+    setSelectedJobIds(new Set());
+  };
 
   const completedJobs = (queue || []).filter(j => j.status === 'completed' && (j.outputUrl || j.blob));
 
@@ -258,6 +303,34 @@ export default function ProcessingQueue({
         </div>
 
         <div className="flex items-center space-x-2">
+          {selectedJobIds.size > 0 && (
+            <button
+              onClick={handleDeleteSelected}
+              className="px-3 py-1.5 text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 active:scale-98 rounded-lg shadow-sm flex items-center space-x-1.5 transition-all cursor-pointer touch-manipulation"
+              title="Delete selected queue jobs"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Delete Selected ({selectedJobIds.size})</span>
+            </button>
+          )}
+
+          {queue.length > 0 && (
+            <button
+              onClick={handleSelectAll}
+              className="px-2.5 py-1.5 text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg flex items-center space-x-1.5 transition-colors cursor-pointer touch-manipulation"
+              title={isAllSelected ? "Deselect all" : "Select all queue jobs"}
+            >
+              {isAllSelected ? (
+                <CheckSquare className="w-3.5 h-3.5 text-orange-400" />
+              ) : isSomeSelected ? (
+                <MinusSquare className="w-3.5 h-3.5 text-orange-400" />
+              ) : (
+                <Square className="w-3.5 h-3.5" />
+              )}
+              <span className="hidden sm:inline">Select All</span>
+            </button>
+          )}
+
           {completedJobs.length > 0 && onDownloadAllZip && (
             <button
               onClick={onDownloadAllZip}
@@ -363,9 +436,9 @@ export default function ProcessingQueue({
           )}
 
           {generateOption === 'range' && (
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs text-slate-300">Parts range:</span>
+            <div className="flex flex-wrap items-center justify-between w-full gap-2">
               <div className="flex items-center space-x-1.5 font-mono text-xs">
+                <span className="text-xs text-slate-300 font-sans">Parts range:</span>
                 <input
                   type="number"
                   min="1"
@@ -384,6 +457,35 @@ export default function ProcessingQueue({
                   className="w-14 bg-slate-900 border border-slate-700 text-white px-2 py-1 rounded-lg text-center font-bold focus:border-orange-500 focus:outline-none"
                 />
                 <span className="text-xs text-slate-400 font-sans">of {totalPossibleParts}</span>
+              </div>
+
+              {/* Quick Preset Buttons */}
+              <div className="flex items-center space-x-1 text-[10px] font-mono">
+                {totalPossibleParts >= 5 && (
+                  <button
+                    type="button"
+                    onClick={() => { setRangeStart(1); setRangeEnd(5); }}
+                    className="px-2 py-0.5 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded transition-colors cursor-pointer"
+                  >
+                    1–5
+                  </button>
+                )}
+                {totalPossibleParts >= 15 && (
+                  <button
+                    type="button"
+                    onClick={() => { setRangeStart(4); setRangeEnd(15); }}
+                    className="px-2 py-0.5 bg-orange-500/10 hover:bg-orange-500/20 text-orange-300 border border-orange-500/30 font-bold rounded transition-colors cursor-pointer"
+                  >
+                    4–15
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => { setRangeStart(1); setRangeEnd(totalPossibleParts); }}
+                  className="px-2 py-0.5 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 rounded transition-colors cursor-pointer"
+                >
+                  All ({totalPossibleParts})
+                </button>
               </div>
             </div>
           )}
@@ -404,7 +506,13 @@ export default function ProcessingQueue({
             ) : (
               <>
                 <Zap className="w-4 h-4 fill-current" />
-                <span>Render &amp; Schedule Selected Clips</span>
+                <span>
+                  {generateOption === 'range'
+                    ? `Render & Schedule Selected (${Math.max(1, rangeEnd - rangeStart + 1)} Clips: P${rangeStart}–P${rangeEnd})`
+                    : generateOption === 'first-n'
+                    ? `Render & Schedule First ${Math.min(firstNCount, totalPossibleParts)} Clips`
+                    : `Render & Schedule All ${totalPossibleParts} Clips`}
+                </span>
               </>
             )}
           </button>
@@ -425,67 +533,92 @@ export default function ProcessingQueue({
             return (
               <div
                 key={job.id}
-                className="bg-slate-950 border border-slate-800/90 rounded-xl p-3 sm:p-3.5 flex flex-wrap items-center justify-between gap-2.5 hover:border-slate-700 transition-colors"
+                className={`border rounded-xl p-3 sm:p-3.5 flex flex-wrap items-center justify-between gap-2.5 transition-colors ${
+                  selectedJobIds.has(job.id)
+                    ? 'bg-blue-950/25 border-blue-500/50'
+                    : 'bg-slate-950 border-slate-800/90 hover:border-slate-700'
+                }`}
               >
-                {/* Job Details */}
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center space-x-2 flex-wrap gap-1">
-                    <span className="font-bold text-xs text-white truncate max-w-[150px] sm:max-w-md">
-                      {job.name || `Part ${String(job.partNumber).padStart(2, '0')}`}
-                    </span>
-                    {getStatusBadge(job.status, job.progress, job)}
-                  </div>
+                {/* Job Checkbox & Details */}
+                <div className="flex items-start space-x-2.5 min-w-0 flex-1">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleSelect(job.id)}
+                    className="mt-0.5 text-slate-400 hover:text-white transition-colors cursor-pointer shrink-0"
+                    title={selectedJobIds.has(job.id) ? "Deselect" : "Select"}
+                  >
+                    {selectedJobIds.has(job.id) ? (
+                      <CheckSquare className="w-4 h-4 text-orange-400" />
+                    ) : (
+                      <Square className="w-4 h-4 text-slate-600 hover:text-slate-400" />
+                    )}
+                  </button>
 
-                  <div className="flex items-center space-x-2 text-[11px] text-slate-400 font-mono mt-1">
-                    <span>{formatTime(job.startTime)} → {formatTime(job.endTime)}</span>
-                    <span>•</span>
-                    <span>{formatTime(job.duration)}</span>
-                  </div>
-
-                  {/* Local Video Rendering Progress Line */}
-                  {job.status === 'processing' && (
-                    <div className="w-full bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
-                      <div
-                        className="h-full bg-gradient-to-r from-amber-500 to-orange-400 transition-all duration-300"
-                        style={{ width: `${job.progress || 0}%` }}
-                      />
-                    </div>
-                  )}
-
-                  {/* Platform Upload Progress (Shows Percentage Instead of the Line) */}
-                  {(isUploading || isFbPublishing || isIgPublishing) && (
-                    <div className="flex items-center justify-between mt-2 pt-1.5 border-t border-slate-800/80 text-xs font-mono">
-                      <div className="flex items-center space-x-1.5 text-slate-300">
-                        {isFbPublishing ? (
-                          <>
-                            <Share2 className="w-3.5 h-3.5 text-blue-400 animate-pulse" />
-                            <span className="font-semibold text-slate-200">Uploading to Facebook Reels:</span>
-                          </>
-                        ) : isIgPublishing ? (
-                          <>
-                            <Instagram className="w-3.5 h-3.5 text-pink-400 animate-pulse" />
-                            <span className="font-semibold text-slate-200">Uploading to Instagram Reels:</span>
-                          </>
-                        ) : (
-                          <>
-                            <Youtube className="w-3.5 h-3.5 text-red-400 animate-pulse" />
-                            <span className="font-semibold text-slate-200">Uploading to YouTube:</span>
-                          </>
-                        )}
-                      </div>
-                      <span className="text-xs font-mono font-bold text-white px-2 py-0.5 rounded bg-slate-900 border border-slate-700 shadow-inner">
-                        {isFbPublishing
-                          ? `${fbPublishProgress || 0}%`
-                          : isIgPublishing
-                          ? `${igPublishProgress || 0}%`
-                          : `${uploadState?.progress || 0}%`}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center space-x-2 flex-wrap gap-1">
+                      <span className="font-bold text-xs text-white truncate max-w-[150px] sm:max-w-md">
+                        {job.name || `Part ${String(job.partNumber).padStart(2, '0')}`}
                       </span>
+                      {getStatusBadge(job.status, job.progress, job)}
+                      {scheduledAt && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono font-medium bg-purple-500/15 text-purple-300 border border-purple-500/30 shrink-0">
+                          <Calendar className="w-3 h-3 mr-1 text-purple-400" />
+                          Scheduled: {new Date(scheduledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      )}
                     </div>
-                  )}
 
-                  {uploadState?.error && (
-                    <p className="text-[11px] text-rose-400 mt-1">{uploadState.error}</p>
-                  )}
+                    <div className="flex items-center space-x-2 text-[11px] text-slate-400 font-mono mt-1">
+                      <span>{formatTime(job.startTime)} → {formatTime(job.endTime)}</span>
+                      <span>•</span>
+                      <span>{formatTime(job.duration)}</span>
+                    </div>
+
+                    {/* Local Video Rendering Progress Line */}
+                    {job.status === 'processing' && (
+                      <div className="w-full bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-amber-500 to-orange-400 transition-all duration-300"
+                          style={{ width: `${job.progress || 0}%` }}
+                        />
+                      </div>
+                    )}
+
+                    {/* Platform Upload Progress (Shows Percentage Instead of the Line) */}
+                    {(isUploading || isFbPublishing || isIgPublishing) && (
+                      <div className="flex items-center justify-between mt-2 pt-1.5 border-t border-slate-800/80 text-xs font-mono">
+                        <div className="flex items-center space-x-1.5 text-slate-300">
+                          {isFbPublishing ? (
+                            <>
+                              <Share2 className="w-3.5 h-3.5 text-blue-400 animate-pulse" />
+                              <span className="font-semibold text-slate-200">Uploading to Facebook Reels:</span>
+                            </>
+                          ) : isIgPublishing ? (
+                            <>
+                              <Instagram className="w-3.5 h-3.5 text-pink-400 animate-pulse" />
+                              <span className="font-semibold text-slate-200">Uploading to Instagram Reels:</span>
+                            </>
+                          ) : (
+                            <>
+                              <Youtube className="w-3.5 h-3.5 text-red-400 animate-pulse" />
+                              <span className="font-semibold text-slate-200">Uploading to YouTube:</span>
+                            </>
+                          )}
+                        </div>
+                        <span className="text-xs font-mono font-bold text-white px-2 py-0.5 rounded bg-slate-900 border border-slate-700 shadow-inner">
+                          {isFbPublishing
+                            ? `${fbPublishProgress || 0}%`
+                            : isIgPublishing
+                            ? `${igPublishProgress || 0}%`
+                            : `${uploadState?.progress || 0}%`}
+                        </span>
+                      </div>
+                    )}
+
+                    {uploadState?.error && (
+                      <p className="text-[11px] text-rose-400 mt-1">{uploadState.error}</p>
+                    )}
+                  </div>
                 </div>
 
                 {/* Actions */}
@@ -537,6 +670,16 @@ export default function ProcessingQueue({
                     >
                       <Share2 className="w-3.5 h-3.5" />
                       <span>Publish / Schedule</span>
+                    </button>
+                  )}
+
+                  {(job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') && (
+                    <button
+                      onClick={() => (onRemoveClip ? onRemoveClip(job.id) : onCancelJob(job.id))}
+                      className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer touch-manipulation"
+                      title="Remove clip from queue"
+                    >
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   )}
 

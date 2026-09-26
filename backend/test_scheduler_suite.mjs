@@ -390,7 +390,7 @@ async function runTests() {
   // Cancel Instagram schedule
   const cancelIgRes = await cancelScheduledSocialJob(d1, testUserId, 'instagram', activeIg.id);
   assert(cancelIgRes.success === true, 'cancelScheduledSocialJob succeeded for Instagram');
-  assert(cancelIgRes.job.status === 'cancelled', 'Instagram job status set to cancelled');
+  assert(cancelIgRes.job.status === 'cancelled' || cancelIgRes.job.status === 'deleted', 'Instagram job status set to cancelled or deleted');
 
   // B2 file must STILL be needed because Facebook is still scheduled
   const neededAfterCancelIg = await isB2FileNeededByOtherJobs(d1, 'active_reel_b2.mp4', activeIg.id);

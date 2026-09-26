@@ -20,3 +20,5 @@ worker/secrets.json
 backend/secrets.json
 credential.txt
 credentials.json
+scratch/
+

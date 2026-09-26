@@ -8,47 +8,27 @@
  * Includes in-flight Promise deduplication so simultaneous dual-publish requests await the exact same upload.
  */
 
-const CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+const CACHE_TTL_MS = 3 * 60 * 1000; // 3 minutes (sufficient for simultaneous dual-platform publish)
 const SESSION_STORAGE_KEY = 'video_clip_editor_b2_shared_uploads';
 
 class SharedUploadCache {
   constructor() {
     this.cache = new Map();
     this.inFlightUploads = new Map(); // key -> Promise<{ b2FileId, b2FileName }>
-    this.hydrateFromSession();
+    // Purge any legacy stale sessionStorage entries so old uploads don't cause 404 B2 errors
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      try {
+        window.sessionStorage.removeItem(SESSION_STORAGE_KEY);
+      } catch {}
+    }
   }
 
   hydrateFromSession() {
-    if (typeof window === 'undefined' || !window.sessionStorage) return;
-    try {
-      const raw = window.sessionStorage.getItem(SESSION_STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      const now = Date.now();
-      for (const [key, entry] of Object.entries(parsed)) {
-        if (entry && entry.expiresAt > now) {
-          this.cache.set(key, entry);
-        }
-      }
-    } catch (e) {
-      console.warn('[SharedUploadCache] Failed to hydrate from sessionStorage:', e);
-    }
+    // Ephemeral uploads are held in memory only
   }
 
   saveToSession() {
-    if (typeof window === 'undefined' || !window.sessionStorage) return;
-    try {
-      const obj = {};
-      const now = Date.now();
-      for (const [key, entry] of this.cache.entries()) {
-        if (entry && entry.expiresAt > now) {
-          obj[key] = entry;
-        }
-      }
-      window.sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(obj));
-    } catch (e) {
-      console.warn('[SharedUploadCache] Failed to save to sessionStorage:', e);
-    }
+    // Ephemeral uploads are held in memory only
   }
 
   /**
@@ -152,7 +132,28 @@ class SharedUploadCache {
     if (key) {
       this.cache.delete(key);
       this.inFlightUploads.delete(key);
-      this.saveToSession();
+    }
+    if (extraKey && typeof extraKey === 'string') {
+      this.cache.delete(extraKey);
+      this.inFlightUploads.delete(extraKey);
+    }
+    if (clipOrBlob && typeof clipOrBlob === 'string') {
+      this.cache.delete(clipOrBlob);
+      this.inFlightUploads.delete(clipOrBlob);
+    }
+    this.saveToSession();
+  }
+
+  /**
+   * Invalidate any cache entries referencing a specific B2 file name
+   */
+  invalidateByFileName(b2FileName) {
+    if (!b2FileName) return;
+    for (const [key, entry] of this.cache.entries()) {
+      if (entry && (entry.b2FileName === b2FileName || entry.b2FileId === b2FileName)) {
+        this.cache.delete(key);
+        this.inFlightUploads.delete(key);
+      }
     }
   }
 

@@ -259,6 +259,7 @@ export default function FacebookPanel({
           caption: partCaption,
           title: partTitle,
           hashtags: fbSettings?.fb_tags || [],
+          isAiGenerated: Boolean(fbSettings?.fb_is_ai_generated),
           scheduledAt: fbScheduledAt,
           fileName,
           partNumber: partNum
@@ -762,6 +763,46 @@ export default function FacebookPanel({
             </div>
           </button>
         </div>
+      </div>
+
+      {/* ── Meta AI Label Disclosure ────────────────────────────────────── */}
+      <div className="p-3.5 bg-slate-950/60 border border-slate-800 rounded-2xl flex items-center justify-between gap-3">
+        <div className="flex items-start space-x-3 min-w-0">
+          <div className="w-8 h-8 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 shrink-0 mt-0.5">
+            <Sparkles className="w-4 h-4" />
+          </div>
+          <div className="min-w-0">
+            <span className="text-xs font-bold text-white block">Add AI label</span>
+            <span className="text-[11px] text-slate-400 block leading-tight mt-0.5">
+              We require you to label certain realistic content that's made with AI.{' '}
+              <a
+                href="https://www.facebook.com/help/586071470355444"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-400 hover:text-blue-300 underline inline"
+              >
+                Learn more
+              </a>
+            </span>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          role="switch"
+          aria-checked={fbSettings?.fb_is_ai_generated || false}
+          onClick={() => updateFbSettings({ fb_is_ai_generated: !fbSettings?.fb_is_ai_generated })}
+          className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+            fbSettings?.fb_is_ai_generated ? 'bg-blue-600' : 'bg-slate-700'
+          }`}
+        >
+          <span
+            aria-hidden="true"
+            className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+              fbSettings?.fb_is_ai_generated ? 'translate-x-5' : 'translate-x-0'
+            }`}
+          />
+        </button>
       </div>
 
       {/* ── 3. FACEBOOK METADATA, TITLE & PART FIELDS ──────────────────── */}

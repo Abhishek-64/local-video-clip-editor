@@ -42,6 +42,9 @@ export default function UnifiedPublishModal({
   // Photo mode custom caption state
   const [photoCaption, setPhotoCaption] = useState(photoItem?.caption || '');
   const [photoTitle, setPhotoTitle] = useState(photoItem?.title || '');
+  const [isAiGenerated, setIsAiGenerated] = useState(
+    Boolean(fbSettings?.fb_is_ai_generated || igSettings?.ig_is_ai_generated || false)
+  );
 
   useEffect(() => {
     if (photoItem) {
@@ -67,7 +70,7 @@ export default function UnifiedPublishModal({
 
   // ── Platform Checkbox Selection State ──────────────────────────────────────
   const [selectedPlatforms, setSelectedPlatforms] = useState(() => ({
-    youtube: canYt,
+    youtube: isPhotoMode ? false : canYt,
     facebook: canFb,
     instagram: canIg
   }));
@@ -75,11 +78,11 @@ export default function UnifiedPublishModal({
   // Sync default selection if connections load after mount
   useEffect(() => {
     setSelectedPlatforms({
-      youtube: canYt,
+      youtube: isPhotoMode ? false : canYt,
       facebook: canFb,
       instagram: canIg
     });
-  }, [canYt, canFb, canIg]);
+  }, [canYt, canFb, canIg, isPhotoMode]);
 
   const togglePlatform = (platform) => {
     setSelectedPlatforms(prev => ({
@@ -93,19 +96,19 @@ export default function UnifiedPublishModal({
 
   // ── Scheduling State (Independent Times per Platform) ──────────────────────
   const minFbTime = useMemo(() => {
-    return toDateTimeLocalString(new Date(Date.now() + 20 * 60 * 1000));
+    return toDateTimeLocalString(new Date(Date.now() + 2 * 60 * 1000));
   }, []);
 
   const minIgTime = useMemo(() => {
-    return toDateTimeLocalString(new Date(Date.now() + 20 * 60 * 1000));
+    return toDateTimeLocalString(new Date(Date.now() + 2 * 60 * 1000));
   }, []);
 
   const minYtTime = useMemo(() => {
-    return toDateTimeLocalString(new Date(Date.now() + 5 * 60 * 1000));
+    return toDateTimeLocalString(new Date(Date.now() + 2 * 60 * 1000));
   }, []);
 
   const defaultScheduleBase = useMemo(() => {
-    const d = new Date(Date.now() + 30 * 60 * 1000);
+    const d = new Date(Date.now() + 5 * 60 * 1000);
     const remainder = d.getMinutes() % 5;
     if (remainder !== 0) {
       d.setMinutes(d.getMinutes() + (5 - remainder));
@@ -115,7 +118,7 @@ export default function UnifiedPublishModal({
   }, []);
 
   const [ytScheduleTime, setYtScheduleTime] = useState(() => {
-    const d = new Date(defaultScheduleBase.getTime() + 60 * 60 * 1000);
+    const d = new Date(defaultScheduleBase.getTime() + (isPhotoMode ? 0 : 30 * 60 * 1000));
     return toDateTimeLocalString(d);
   });
 
@@ -124,7 +127,7 @@ export default function UnifiedPublishModal({
   });
 
   const [igScheduleTime, setIgScheduleTime] = useState(() => {
-    const d = new Date(defaultScheduleBase.getTime() + 15 * 60 * 1000);
+    const d = new Date(defaultScheduleBase.getTime() + (isPhotoMode ? 0 : 15 * 60 * 1000));
     return toDateTimeLocalString(d);
   });
 
@@ -135,22 +138,23 @@ export default function UnifiedPublishModal({
   const isBusy = isPublishing || isSubmittingLocal;
 
   // ── Validation ─────────────────────────────────────────────────────────────
-  const hasSelectedPlatform = selectedPlatforms.youtube || selectedPlatforms.facebook || selectedPlatforms.instagram;
+  const hasSelectedPlatform = (isPhotoMode ? false : selectedPlatforms.youtube) || selectedPlatforms.facebook || selectedPlatforms.instagram;
 
   const isScheduleValid = useMemo(() => {
     if (publishMode !== 'schedule') return true;
     const now = Date.now();
-    if (selectedPlatforms.youtube) {
-      if (!ytScheduleTime || new Date(ytScheduleTime).getTime() <= now) return false;
+    const minFutureMs = now + 60 * 1000; // Cloudflare Worker scheduler triggers every minute
+    if (selectedPlatforms.youtube && !isPhotoMode) {
+      if (!ytScheduleTime || new Date(ytScheduleTime).getTime() <= minFutureMs) return false;
     }
     if (selectedPlatforms.facebook) {
-      if (!fbScheduleTime || new Date(fbScheduleTime).getTime() <= now + 15 * 60 * 1000) return false;
+      if (!fbScheduleTime || new Date(fbScheduleTime).getTime() <= minFutureMs) return false;
     }
     if (selectedPlatforms.instagram) {
-      if (!igScheduleTime || new Date(igScheduleTime).getTime() <= now + 15 * 60 * 1000) return false;
+      if (!igScheduleTime || new Date(igScheduleTime).getTime() <= minFutureMs) return false;
     }
     return true;
-  }, [publishMode, selectedPlatforms, ytScheduleTime, fbScheduleTime, igScheduleTime]);
+  }, [publishMode, selectedPlatforms, ytScheduleTime, fbScheduleTime, igScheduleTime, isPhotoMode]);
 
   const canSubmit = !isBusy && (isPhotoMode ? !!photoItem : clipList.length > 0) && (
     publishMode === 'local_only' ||
@@ -167,6 +171,7 @@ export default function UnifiedPublishModal({
       if (isPhotoMode) {
         config = {
           isPhoto: true,
+          isAiGenerated,
           photoItem: {
             ...photoItem,
             title: photoTitle,
@@ -197,6 +202,7 @@ export default function UnifiedPublishModal({
       } else {
         config = {
           clips: clipList,
+          isAiGenerated,
           mode: publishMode,
           batchInterval,
           batchIntervalMinutes: getIntervalSeconds(batchInterval) / 60,
@@ -414,38 +420,40 @@ export default function UnifiedPublishModal({
                   <span>No social accounts connected yet. Please connect YouTube, Facebook, or Instagram.</span>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  {/* YouTube */}
-                  <div
-                    onClick={() => canYt && togglePlatform('youtube')}
-                    className={`p-3 rounded-xl border flex items-center justify-between gap-2 transition-all select-none ${
-                      !canYt
-                        ? 'bg-slate-950/40 border-slate-800/40 opacity-40 cursor-not-allowed'
-                        : selectedPlatforms.youtube
-                        ? 'bg-red-950/30 border-red-500/50 text-white cursor-pointer shadow-sm'
-                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700 cursor-pointer'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-2.5 min-w-0">
-                      <div className="w-7 h-7 rounded-lg bg-red-600 flex items-center justify-center text-white shrink-0 shadow-sm shadow-red-600/30">
-                        <Youtube className="w-3.5 h-3.5" />
+                <div className={`grid grid-cols-1 ${isPhotoMode ? 'sm:grid-cols-2' : 'sm:grid-cols-3'} gap-2`}>
+                  {/* YouTube (Only available for video clips) */}
+                  {!isPhotoMode && (
+                    <div
+                      onClick={() => canYt && togglePlatform('youtube')}
+                      className={`p-3 rounded-xl border flex items-center justify-between gap-2 transition-all select-none ${
+                        !canYt
+                          ? 'bg-slate-950/40 border-slate-800/40 opacity-40 cursor-not-allowed'
+                          : selectedPlatforms.youtube
+                          ? 'bg-red-950/30 border-red-500/50 text-white cursor-pointer shadow-sm'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700 cursor-pointer'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-2.5 min-w-0">
+                        <div className="w-7 h-7 rounded-lg bg-red-600 flex items-center justify-center text-white shrink-0 shadow-sm shadow-red-600/30">
+                          <Youtube className="w-3.5 h-3.5" />
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-xs font-bold block truncate">YouTube</span>
+                          <span className="text-[10px] text-slate-400 block truncate">
+                            {canYt ? (ytAccount?.channel_title || 'Connected') : 'Not Connected'}
+                          </span>
+                        </div>
                       </div>
-                      <div className="min-w-0">
-                        <span className="text-xs font-bold block truncate">YouTube</span>
-                        <span className="text-[10px] text-slate-400 block truncate">
-                          {canYt ? (ytAccount?.channel_title || 'Connected') : 'Not Connected'}
-                        </span>
-                      </div>
-                    </div>
 
-                    <input
-                      type="checkbox"
-                      checked={selectedPlatforms.youtube && canYt}
-                      disabled={!canYt}
-                      onChange={() => {}}
-                      className="rounded bg-slate-900 border-slate-700 text-red-600 pointer-events-none shrink-0"
-                    />
-                  </div>
+                      <input
+                        type="checkbox"
+                        checked={selectedPlatforms.youtube && canYt}
+                        disabled={!canYt}
+                        onChange={() => {}}
+                        className="rounded bg-slate-900 border-slate-700 text-red-600 pointer-events-none shrink-0"
+                      />
+                    </div>
+                  )}
 
                   {/* Facebook */}
                   <div
@@ -515,6 +523,48 @@ export default function UnifiedPublishModal({
             </div>
           )}
 
+          {/* Meta AI Label Disclosure Toggle (Facebook & Instagram) */}
+          {publishMode !== 'local_only' && (selectedPlatforms.facebook || selectedPlatforms.instagram) && (
+            <div className="p-3.5 bg-slate-950/80 border border-slate-800 rounded-xl flex items-center justify-between gap-3 animate-fadeIn">
+              <div className="flex items-start space-x-3 min-w-0">
+                <div className="w-8 h-8 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 shrink-0 mt-0.5">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-xs font-bold text-white block">Add AI label</span>
+                  <span className="text-[11px] text-slate-400 block leading-tight mt-0.5">
+                    We require you to label certain realistic content that's made with AI.{' '}
+                    <a
+                      href="https://www.facebook.com/help/586071470355444"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-400 hover:text-blue-300 underline inline"
+                    >
+                      Learn more
+                    </a>
+                  </span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                role="switch"
+                aria-checked={isAiGenerated}
+                onClick={() => setIsAiGenerated(prev => !prev)}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                  isAiGenerated ? 'bg-blue-600' : 'bg-slate-700'
+                }`}
+              >
+                <span
+                  aria-hidden="true"
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                    isAiGenerated ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+          )}
+
           {/* 4. Scheduling & Interval Controls (If Schedule Selected) */}
           {publishMode === 'schedule' && (
             <div className="p-3.5 sm:p-4 bg-slate-950/80 border border-slate-800 rounded-xl space-y-3.5 animate-fadeIn">
@@ -526,14 +576,15 @@ export default function UnifiedPublishModal({
                 <span className="text-[10px] text-slate-500">First clip release time</span>
               </div>
 
-              {/* YouTube Start Time */}
-              {selectedPlatforms.youtube && canYt && (
+              {/* YouTube Start Time (Only for video clips) */}
+              {!isPhotoMode && selectedPlatforms.youtube && canYt && (
                 <div className="p-2.5 bg-slate-900/80 border border-red-500/20 rounded-xl space-y-1">
                   <div className="flex items-center justify-between text-xs">
                     <span className="font-semibold text-red-400 flex items-center space-x-1">
                       <Youtube className="w-3.5 h-3.5" />
                       <span>YouTube Release Date &amp; Time</span>
                     </span>
+                    <span className="text-[10px] text-slate-500">Min 2m in future</span>
                   </div>
                   <input
                     type="datetime-local"
@@ -551,9 +602,9 @@ export default function UnifiedPublishModal({
                   <div className="flex items-center justify-between text-xs">
                     <span className="font-semibold text-blue-400 flex items-center space-x-1">
                       <Share2 className="w-3.5 h-3.5" />
-                      <span>Facebook Reels Release Date &amp; Time</span>
+                      <span>{isPhotoMode ? 'Facebook Photo Release Date & Time' : 'Facebook Reels Release Date & Time'}</span>
                     </span>
-                    <span className="text-[10px] text-slate-500">Min 20m in future</span>
+                    <span className="text-[10px] text-slate-500">Min 2m in future</span>
                   </div>
                   <input
                     type="datetime-local"
@@ -571,9 +622,9 @@ export default function UnifiedPublishModal({
                   <div className="flex items-center justify-between text-xs">
                     <span className="font-semibold text-pink-400 flex items-center space-x-1">
                       <Instagram className="w-3.5 h-3.5" />
-                      <span>Instagram Reels Release Date &amp; Time</span>
+                      <span>{isPhotoMode ? 'Instagram Photo Release Date & Time' : 'Instagram Reels Release Date & Time'}</span>
                     </span>
-                    <span className="text-[10px] text-slate-500">Min 20m in future</span>
+                    <span className="text-[10px] text-slate-500">Min 2m in future</span>
                   </div>
                   <input
                     type="datetime-local"
@@ -585,26 +636,44 @@ export default function UnifiedPublishModal({
                 </div>
               )}
 
-              {/* Interval Between Clips Selector (Prominent for all batches) */}
-              <div className="p-3 bg-slate-900 border border-purple-500/30 rounded-xl space-y-2">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <div className="flex items-center space-x-1.5 text-xs font-semibold text-purple-300">
-                    <Clock className="w-4 h-4 text-purple-400 shrink-0" />
-                    <span>Interval Between Clips:</span>
-                  </div>
-                  <select
-                    value={batchInterval}
-                    onChange={(e) => setBatchInterval(e.target.value)}
-                    className="bg-slate-950 border border-purple-500/50 text-white font-semibold text-xs px-3 py-1.5 rounded-lg outline-none cursor-pointer focus:border-purple-400"
-                  >
-                    {SCHEDULE_INTERVALS.map(i => (
-                      <option key={i.id} value={i.id}>{i.label}</option>
-                    ))}
-                  </select>
+              {/* Validation Warning Note */}
+              {!isScheduleValid && (
+                <div className="p-2.5 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-300 text-xs flex items-center space-x-2 animate-fadeIn">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
+                  <span>Please pick a future release time at least 2 minutes from now.</span>
                 </div>
+              )}
 
-                {/* Staggered Release Timeline Breakdown */}
-                {clipList.length > 1 && (
+              {/* Aspect Ratio Guide for Photos */}
+              {isPhotoMode && photoItem?.aspectRatio && (
+                <div className="p-2.5 bg-indigo-500/10 border border-indigo-500/30 rounded-xl text-indigo-300 text-xs flex items-center space-x-2 animate-fadeIn">
+                  <Sparkles className="w-4 h-4 shrink-0 text-indigo-400" />
+                  <span>
+                    Photo format: <strong>{photoItem.aspectRatio}</strong> ({photoItem.aspectRatio === '9:16' ? 'Vertical Story/Reel' : photoItem.aspectRatio === '1:1' ? 'Square Feed' : 'Standard'}). Scheduled for background publication.
+                  </span>
+                </div>
+              )}
+
+              {/* Interval Between Clips Selector (Only for batch video clips, not photo) */}
+              {!isPhotoMode && clipList.length > 1 && (
+                <div className="p-3 bg-slate-900 border border-purple-500/30 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center space-x-1.5 text-xs font-semibold text-purple-300">
+                      <Clock className="w-4 h-4 text-purple-400 shrink-0" />
+                      <span>Interval Between Clips:</span>
+                    </div>
+                    <select
+                      value={batchInterval}
+                      onChange={(e) => setBatchInterval(e.target.value)}
+                      className="bg-slate-950 border border-purple-500/50 text-white font-semibold text-xs px-3 py-1.5 rounded-lg outline-none cursor-pointer focus:border-purple-400"
+                    >
+                      {SCHEDULE_INTERVALS.map(i => (
+                        <option key={i.id} value={i.id}>{i.label}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Staggered Release Timeline Breakdown */}
                   <div className="pt-2 border-t border-slate-800/80 space-y-1 max-h-32 overflow-y-auto pr-1">
                     <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
                       Staggered Schedule Breakdown:
@@ -628,8 +697,8 @@ export default function UnifiedPublishModal({
                       );
                     })}
                   </div>
-                )}
-              </div>
+                </div>
+              )}
             </div>
           )}
 

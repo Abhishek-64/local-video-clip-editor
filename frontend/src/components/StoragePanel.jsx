@@ -1,13 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Database, HardDrive, Trash2, RefreshCw, AlertTriangle, ShieldCheck,
   CheckCircle2, ExternalLink, FileVideo, Youtube, Share2, Instagram,
-  FileText, X, AlertCircle, Sparkles, Layers, Check, Download
+  FileText, X, AlertCircle, Sparkles, Layers, Check, Download,
+  CheckSquare, Square, MinusSquare, Sparkle, Search
 } from 'lucide-react';
 import {
   getStorageOverview,
   deleteB2File,
   deleteAllB2Files,
+  deleteBatchB2Files,
+  triggerPermanentCleanup,
   clearDataScope,
   wipeAllUserData
 } from '../services/apiService';
@@ -22,6 +25,12 @@ export default function StoragePanel({
   const [deletingFileId, setDeletingFileId] = useState(null);
   const [isDeletingAllB2, setIsDeletingAllB2] = useState(false);
 
+  // Multi-select for B2 files
+  const [selectedB2FileIds, setSelectedB2FileIds] = useState(new Set());
+  const [isDeletingBatchB2, setIsDeletingBatchB2] = useState(false);
+  const [isCleaningDb, setIsCleaningDb] = useState(false);
+  const [fileSearchQuery, setFileSearchQuery] = useState('');
+
   // Scope clearance state: { scope, title, description }
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [isClearingScope, setIsClearingScope] = useState(false);
@@ -29,6 +38,17 @@ export default function StoragePanel({
   // Total wipe confirmation modal
   const [showWipeModal, setShowWipeModal] = useState(false);
   const [isWipingAll, setIsWipingAll] = useState(false);
+
+  const db = overview?.database || {};
+  const b2 = overview?.b2 || {};
+
+  // Filter B2 files by search query
+  const filteredFiles = useMemo(() => {
+    const files = b2.files || [];
+    if (!fileSearchQuery.trim()) return files;
+    const q = fileSearchQuery.toLowerCase().trim();
+    return files.filter(f => f.fileName && f.fileName.toLowerCase().includes(q));
+  }, [b2.files, fileSearchQuery]);
 
   const fetchOverview = async () => {
     setIsLoading(true);
@@ -89,6 +109,78 @@ export default function StoragePanel({
     }
   };
 
+  // Selection helpers for B2 files
+  const isAllB2Selected = useMemo(() => {
+    return filteredFiles.length > 0 && filteredFiles.every(f => selectedB2FileIds.has(f.fileId));
+  }, [filteredFiles, selectedB2FileIds]);
+
+  const isSomeB2Selected = useMemo(() => {
+    return selectedB2FileIds.size > 0 && !isAllB2Selected;
+  }, [selectedB2FileIds, isAllB2Selected]);
+
+  const handleToggleSelectB2 = (fileId) => {
+    setSelectedB2FileIds(prev => {
+      const next = new Set(prev);
+      if (next.has(fileId)) next.delete(fileId);
+      else next.add(fileId);
+      return next;
+    });
+  };
+
+  const handleSelectAllB2 = () => {
+    if (isAllB2Selected) {
+      setSelectedB2FileIds(new Set());
+    } else {
+      setSelectedB2FileIds(new Set(filteredFiles.map(f => f.fileId)));
+    }
+  };
+
+  const handleDeleteSelectedB2 = async () => {
+    if (selectedB2FileIds.size === 0 || isDeletingBatchB2) return;
+    if (!window.confirm(`Permanently delete ${selectedB2FileIds.size} selected file(s) from Backblaze B2 bucket?`)) return;
+
+    setIsDeletingBatchB2(true);
+    try {
+      const filesToDelete = (b2.files || [])
+        .filter(f => selectedB2FileIds.has(f.fileId))
+        .map(f => ({ fileId: f.fileId, fileName: f.fileName }));
+
+      const res = await deleteBatchB2Files(filesToDelete);
+      if (res?.success) {
+        if (showToast) showToast(`Permanently deleted ${res.deletedCount ?? filesToDelete.length} files from B2`, 'success');
+        setSelectedB2FileIds(new Set());
+        fetchOverview();
+      } else {
+        if (showToast) showToast(res?.error || 'Failed to delete selected B2 files', 'error');
+      }
+    } catch (err) {
+      if (showToast) showToast('Error deleting B2 files: ' + err.message, 'error');
+    } finally {
+      setIsDeletingBatchB2(false);
+    }
+  };
+
+  // Handle on-demand permanent database cleanup (expired sessions, stale guests, 30-day logs)
+  const handleRunPermanentCleanup = async () => {
+    if (isCleaningDb) return;
+    if (!window.confirm('Run permanent database cleanup? This will permanently purge expired sessions, stale guest data, and completed logs older than 30 days.')) return;
+
+    setIsCleaningDb(true);
+    try {
+      const res = await triggerPermanentCleanup();
+      if (res?.success) {
+        if (showToast) showToast(res.message || 'Permanent database cleanup completed successfully!', 'success');
+        fetchOverview();
+      } else {
+        if (showToast) showToast(res?.error || 'Database cleanup failed', 'error');
+      }
+    } catch (err) {
+      if (showToast) showToast('Cleanup error: ' + err.message, 'error');
+    } finally {
+      setIsCleaningDb(false);
+    }
+  };
+
   // Handle scope clearance
   const handleScopeClearConfirm = async () => {
     if (!confirmDialog) return;
@@ -129,9 +221,6 @@ export default function StoragePanel({
     }
   };
 
-  const db = overview?.database || {};
-  const b2 = overview?.b2 || {};
-
   return (
     <div className="space-y-4 sm:space-y-5 animate-fadeIn pb-8">
       {/* ── HEADER BANNER ── */}
@@ -163,7 +252,7 @@ export default function StoragePanel({
       <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-3.5 sm:p-5 shadow-md space-y-3.5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
           <div className="flex items-start sm:items-center space-x-3 min-w-0">
-            <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+            <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0 shadow-inner">
               <HardDrive className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
             <div className="min-w-0">
@@ -184,11 +273,23 @@ export default function StoragePanel({
             <span className="px-2.5 py-1 bg-slate-900 border border-slate-800 rounded-xl text-xs font-mono text-slate-300">
               <strong className="text-amber-400">{b2.fileCount || 0}</strong> files ({b2.totalMb || '0.00'} MB)
             </span>
+
+            {selectedB2FileIds.size > 0 && (
+              <button
+                onClick={handleDeleteSelectedB2}
+                disabled={isDeletingBatchB2}
+                className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-semibold flex items-center space-x-1 cursor-pointer transition-colors shadow-sm active:scale-98"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isDeletingBatchB2 ? 'Deleting...' : `Delete Selected (${selectedB2FileIds.size})`}</span>
+              </button>
+            )}
+
             {(b2.fileCount || 0) > 0 && (
               <button
                 onClick={handleDeleteAllB2}
                 disabled={isDeletingAllB2}
-                className="px-2.5 py-1 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 rounded-xl text-xs font-semibold flex items-center space-x-1 cursor-pointer transition-colors"
+                className="px-2.5 py-1 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 rounded-xl text-xs font-semibold flex items-center space-x-1 cursor-pointer transition-colors active:scale-98"
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>{isDeletingAllB2 ? 'Deleting...' : 'Delete All'}</span>
@@ -197,6 +298,29 @@ export default function StoragePanel({
           </div>
         </div>
 
+        {/* Search Bar when files exist */}
+        {b2.files && b2.files.length > 2 && (
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={fileSearchQuery}
+              onChange={(e) => setFileSearchQuery(e.target.value)}
+              placeholder="Search files by name..."
+              className="w-full pl-8 pr-7 py-1.5 bg-slate-900/80 border border-slate-800 focus:border-amber-500/50 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none transition-colors"
+            />
+            {fileSearchQuery && (
+              <button
+                type="button"
+                onClick={() => setFileSearchQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 p-0.5"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        )}
+
         {/* B2 Files Table / List */}
         {b2.error ? (
           <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl flex items-center space-x-2 text-rose-300 text-xs">
@@ -204,63 +328,127 @@ export default function StoragePanel({
             <span className="break-all">{b2.error}</span>
           </div>
         ) : (b2.files && b2.files.length > 0) ? (
-          <div className="overflow-x-auto rounded-xl border border-slate-800">
-            <table className="w-full min-w-[420px] text-left text-xs border-collapse">
-              <thead>
-                <tr className="bg-slate-900/90 border-b border-slate-800 text-slate-400 uppercase text-[10px] tracking-wider">
-                  <th className="py-2 px-3 font-semibold">File Name</th>
-                  <th className="py-2 px-3 font-semibold">Size</th>
-                  <th className="py-2 px-3 font-semibold">Uploaded</th>
-                  <th className="py-2 px-3 font-semibold text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/60 font-mono text-slate-300">
-                {b2.files.map((file) => {
-                  const sizeMb = (file.contentLength / (1024 * 1024)).toFixed(2);
-                  const uploadDate = file.uploadTimestamp ? new Date(file.uploadTimestamp).toLocaleDateString() : 'N/A';
-                  const isDeletingThis = deletingFileId === file.fileId;
-
-                  return (
-                    <tr key={file.fileId} className="hover:bg-slate-900/50 transition-colors">
-                      <td className="py-2 px-3 flex items-center space-x-2 font-sans font-medium text-white max-w-[180px] truncate">
-                        <FileVideo className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                        <span className="truncate" title={file.fileName}>{file.fileName}</span>
-                      </td>
-                      <td className="py-2 px-3 text-amber-300 font-semibold text-[11px]">
-                        {sizeMb} MB
-                      </td>
-                      <td className="py-2 px-3 text-[11px] text-slate-400 font-sans">
-                        {uploadDate}
-                      </td>
-                      <td className="py-2 px-3 text-right">
-                        <div className="flex items-center justify-end space-x-1.5">
-                          {file.downloadUrl && (
-                            <a
-                              href={file.downloadUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="p-1 bg-slate-900 hover:bg-slate-800 text-slate-300 rounded-lg transition-colors cursor-pointer"
-                              title="Download video"
-                            >
-                              <Download className="w-3 h-3" />
-                            </a>
+          filteredFiles.length === 0 && fileSearchQuery ? (
+            <div className="p-6 text-center space-y-2 bg-slate-950/40 rounded-xl border border-slate-800">
+              <Search className="w-6 h-6 text-slate-600 mx-auto" />
+              <p className="text-xs font-semibold text-white">No Matching Files</p>
+              <p className="text-[11px] text-slate-400">No B2 files matched "{fileSearchQuery}"</p>
+              <button
+                type="button"
+                onClick={() => setFileSearchQuery('')}
+                className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 rounded-lg transition-colors cursor-pointer"
+              >
+                Clear Filter
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="overflow-y-auto overflow-x-auto max-h-[380px] sm:max-h-[440px] rounded-xl border border-slate-800 custom-scrollbar">
+                <table className="w-full min-w-[440px] text-left text-xs border-collapse">
+                  <thead className="sticky top-0 z-10 bg-slate-900/95 backdrop-blur border-b border-slate-800 text-slate-400 uppercase text-[10px] tracking-wider">
+                    <tr>
+                      <th className="py-2.5 px-3 w-8 text-center bg-slate-900">
+                        <button
+                          type="button"
+                          onClick={handleSelectAllB2}
+                          className="text-slate-400 hover:text-white transition-colors cursor-pointer"
+                          title={isAllB2Selected ? "Deselect all" : "Select all B2 files"}
+                        >
+                          {isAllB2Selected ? (
+                            <CheckSquare className="w-3.5 h-3.5 text-amber-400" />
+                          ) : isSomeB2Selected ? (
+                            <MinusSquare className="w-3.5 h-3.5 text-amber-400" />
+                          ) : (
+                            <Square className="w-3.5 h-3.5" />
                           )}
-                          <button
-                            onClick={() => handleDeleteB2File(file)}
-                            disabled={isDeletingThis}
-                            className="px-2 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 rounded-lg text-[10px] font-sans font-semibold flex items-center space-x-1 transition-colors cursor-pointer disabled:opacity-50"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                            <span>{isDeletingThis ? '...' : 'Delete'}</span>
-                          </button>
-                        </div>
-                      </td>
+                        </button>
+                      </th>
+                      <th className="py-2.5 px-3 font-semibold bg-slate-900">File Name</th>
+                      <th className="py-2.5 px-3 font-semibold bg-slate-900">Size</th>
+                      <th className="py-2.5 px-3 font-semibold bg-slate-900">Uploaded</th>
+                      <th className="py-2.5 px-3 font-semibold text-right bg-slate-900">Actions</th>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 font-mono text-slate-300">
+                    {filteredFiles.map((file) => {
+                      const sizeMb = (file.contentLength / (1024 * 1024)).toFixed(2);
+                      const uploadDate = file.uploadTimestamp ? new Date(file.uploadTimestamp).toLocaleDateString() : 'N/A';
+                      const isDeletingThis = deletingFileId === file.fileId;
+                      const isSelected = selectedB2FileIds.has(file.fileId);
+
+                      return (
+                        <tr
+                          key={file.fileId}
+                          className={`transition-colors ${isSelected ? 'bg-amber-950/20 hover:bg-amber-950/30' : 'hover:bg-slate-900/50'}`}
+                        >
+                          <td className="py-2 px-3 text-center">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleSelectB2(file.fileId)}
+                              className="text-slate-400 hover:text-white transition-colors cursor-pointer"
+                              title={isSelected ? "Deselect" : "Select"}
+                            >
+                              {isSelected ? (
+                                <CheckSquare className="w-3.5 h-3.5 text-amber-400" />
+                              ) : (
+                                <Square className="w-3.5 h-3.5 text-slate-600 hover:text-slate-400" />
+                              )}
+                            </button>
+                          </td>
+                          <td className="py-2 px-3">
+                            <div className="flex items-center space-x-2 font-sans font-medium text-white min-w-0 max-w-[170px] sm:max-w-[260px]">
+                              <FileVideo className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                              <span className="truncate" title={file.fileName}>{file.fileName}</span>
+                            </div>
+                          </td>
+                          <td className="py-2 px-3 text-amber-300 font-semibold text-[11px] whitespace-nowrap">
+                            {sizeMb} MB
+                          </td>
+                          <td className="py-2 px-3 text-[11px] text-slate-400 font-sans whitespace-nowrap">
+                            {uploadDate}
+                          </td>
+                          <td className="py-2 px-3 text-right whitespace-nowrap">
+                            <div className="flex items-center justify-end space-x-1.5">
+                              {file.downloadUrl && (
+                                <a
+                                  href={file.downloadUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="p-1 bg-slate-900 hover:bg-slate-800 text-slate-300 rounded-lg transition-colors cursor-pointer"
+                                  title="Download video"
+                                >
+                                  <Download className="w-3 h-3" />
+                                </a>
+                              )}
+                              <button
+                                onClick={() => handleDeleteB2File(file)}
+                                disabled={isDeletingThis}
+                                className="px-2 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 rounded-lg text-[10px] font-sans font-semibold flex items-center space-x-1 transition-colors cursor-pointer disabled:opacity-50"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                <span>{isDeletingThis ? '...' : 'Delete'}</span>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Summary Footer */}
+              <div className="flex items-center justify-between text-[11px] text-slate-400 px-1 pt-0.5">
+                <span>
+                  Showing <strong className="text-white">{filteredFiles.length}</strong> {filteredFiles.length === 1 ? 'file' : 'files'}
+                  {fileSearchQuery && ` (filtered from ${b2.files.length})`}
+                </span>
+                <span className="font-mono text-amber-400">
+                  {b2.totalMb || '0.00'} MB total
+                </span>
+              </div>
+            </div>
+          )
         ) : (
           <div className="p-4 sm:p-5 text-center bg-slate-950/40 rounded-xl border border-dashed border-slate-800/80 space-y-1">
             <CheckCircle2 className="w-6 h-6 text-emerald-400/80 mx-auto" />
@@ -272,7 +460,7 @@ export default function StoragePanel({
 
       {/* ── SECTION 2: D1 DATABASE RECORDS BREAKDOWN ── */}
       <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-3.5 sm:p-5 shadow-md space-y-3.5">
-        <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
           <div className="flex items-center space-x-2.5">
             <div className="w-9 h-9 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shrink-0">
               <Database className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -284,6 +472,16 @@ export default function StoragePanel({
               </p>
             </div>
           </div>
+
+          <button
+            onClick={handleRunPermanentCleanup}
+            disabled={isCleaningDb}
+            className="px-3 py-1.5 bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/30 text-cyan-300 rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+            title="Clean expired sessions, stale guests, and 30-day logs permanently"
+          >
+            <Sparkles className={`w-3.5 h-3.5 ${isCleaningDb ? 'animate-spin' : ''}`} />
+            <span>{isCleaningDb ? 'Cleaning...' : 'Run Auto-Cleanup'}</span>
+          </button>
         </div>
 
         {/* 2-Column Responsive Grid on all screens */}

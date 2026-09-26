@@ -2,12 +2,15 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   History, Trash2, Filter, Instagram, Share2, ExternalLink,
   CheckCircle2, XCircle, AlertCircle, RefreshCw, Clock, Calendar,
-  ChevronDown, AlertTriangle, ShieldCheck, Youtube, RotateCcw
+  ChevronDown, AlertTriangle, ShieldCheck, Youtube, RotateCcw,
+  CheckSquare, Square, MinusSquare
 } from 'lucide-react';
 import {
   getSocialUploadHistory,
   clearSocialUploadHistory,
   clearPlatformHistory,
+  deleteSocialHistoryItems,
+  deleteSingleSocialHistoryItem,
   retryUploadJob
 } from '../services/apiService';
 
@@ -32,8 +35,8 @@ function formatDateTime(isoString) {
  * SocialUploadHistorySection
  * 
  * Displays unified upload/publishing history across YouTube, Facebook Reels, and Instagram Reels
- * in a consistent, clean table layout with live status indicators, external post links,
- * retry upload buttons for all platforms, and safe history clearing.
+ * in a consistent, clean table layout with multi-select checkboxes, permanent bulk delete,
+ * single-item deletion, live status indicators, external post links, and retry actions.
  */
 export default function SocialUploadHistorySection({
   refreshTrigger = 0,
@@ -43,6 +46,7 @@ export default function SocialUploadHistorySection({
   isLoadingHistory = false,
   onRetryUpload,
   refreshHistory,
+  removeHistoryRecords,
   completedClips = [],
   publishToFacebookPipeline,
   publishToInstagramPipeline,
@@ -57,6 +61,11 @@ export default function SocialUploadHistorySection({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [retryingId, setRetryingId] = useState(null);
+
+  // Multi-select state for deletion
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [isDeletingSelected, setIsDeletingSelected] = useState(false);
+  const [deletingSingleId, setDeletingSingleId] = useState(null);
 
   // Filters: platform ('all' | 'youtube' | 'instagram' | 'facebook'), status ('all' | 'published' | 'failed')
   const [platformFilter, setPlatformFilter] = useState('all');
@@ -275,6 +284,7 @@ export default function SocialUploadHistorySection({
           hashtags: ['reels', 'facebookreels', 'viral'],
           contentType: item.rawItem?.content_type || fbSettings?.fb_content_type || 'reel',
           pageId: item.rawItem?.page_id || item.rawItem?.facebook_account_id || fbAccount?.page_id,
+          isAiGenerated: Boolean(item.rawItem?.is_ai_generated !== undefined ? item.rawItem.is_ai_generated : fbSettings?.fb_is_ai_generated),
           scheduledAt: null
         });
 
@@ -332,6 +342,111 @@ export default function SocialUploadHistorySection({
     }
   };
 
+  // Selection helpers
+  const isAllSelected = useMemo(() => {
+    return unifiedHistory.length > 0 && unifiedHistory.every(item => selectedIds.has(`${item.platform}:${item.id}`));
+  }, [unifiedHistory, selectedIds]);
+
+  const isSomeSelected = useMemo(() => {
+    return selectedIds.size > 0 && !isAllSelected;
+  }, [selectedIds, isAllSelected]);
+
+  const handleToggleSelect = (item) => {
+    const key = `${item.platform}:${item.id}`;
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (isAllSelected) {
+      setSelectedIds(new Set());
+    } else {
+      const allKeys = unifiedHistory.map(item => `${item.platform}:${item.id}`);
+      setSelectedIds(new Set(allKeys));
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    if (selectedIds.size === 0 || isDeletingSelected) return;
+    const confirmMessage = `Permanently delete ${selectedIds.size} selected upload history record(s)? This action cannot be undone.`;
+    if (!window.confirm(confirmMessage)) return;
+
+    setIsDeletingSelected(true);
+    try {
+      const itemsToDelete = [];
+      const ytIdsToDelete = [];
+
+      selectedIds.forEach(key => {
+        const [platform, id] = key.split(':');
+        itemsToDelete.push({ platform, id });
+        if (platform === 'youtube') {
+          ytIdsToDelete.push(id);
+        }
+      });
+
+      const res = await deleteSocialHistoryItems(itemsToDelete);
+      if (res && res.success) {
+        showToast(`Permanently deleted ${res.deletedCount ?? itemsToDelete.length} history item(s).`, 'success');
+      }
+
+      // Prune local state
+      setHistory(prev => prev.filter(h => !selectedIds.has(`${h.platform}:${h.id}`)));
+      if (ytIdsToDelete.length > 0 && removeHistoryRecords) {
+        removeHistoryRecords(ytIdsToDelete);
+      }
+      setSelectedIds(new Set());
+      await Promise.allSettled([
+        fetchHistory(),
+        refreshHistory ? refreshHistory() : Promise.resolve()
+      ]);
+    } catch (err) {
+      console.error('Delete selected history error:', err);
+      showToast(`Failed to delete selected items: ${err.message}`, 'error');
+    } finally {
+      setIsDeletingSelected(false);
+    }
+  };
+
+  const handleDeleteSingle = async (item) => {
+    if (deletingSingleId) return;
+    const confirmMessage = `Permanently delete "${item.title || item.subtitle}" from upload history?`;
+    if (!window.confirm(confirmMessage)) return;
+
+    setDeletingSingleId(item.id);
+    try {
+      const res = await deleteSingleSocialHistoryItem(item.platform, item.id);
+      if (res && res.success) {
+        showToast(`Permanently deleted history item.`, 'success');
+      }
+
+      setHistory(prev => prev.filter(h => !(h.platform === item.platform && String(h.id) === String(item.id))));
+      if (item.platform === 'youtube' && removeHistoryRecords) {
+        removeHistoryRecords([item.id]);
+      }
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        next.delete(`${item.platform}:${item.id}`);
+        return next;
+      });
+      await Promise.allSettled([
+        fetchHistory(),
+        refreshHistory ? refreshHistory() : Promise.resolve()
+      ]);
+    } catch (err) {
+      console.error('Delete single history error:', err);
+      showToast(`Failed to delete item: ${err.message}`, 'error');
+    } finally {
+      setDeletingSingleId(null);
+    }
+  };
+
   // Handle Safe Clear History
   const handleConfirmClear = async () => {
     setIsClearing(true);
@@ -341,6 +456,9 @@ export default function SocialUploadHistorySection({
         const res = await clearPlatformHistory('youtube');
         if (res && res.success) {
           clearedCount = res.deletedCount || 0;
+        }
+        if (removeHistoryRecords && normalizedYtHistory.length > 0) {
+          removeHistoryRecords(normalizedYtHistory.map(y => y.id));
         }
         await refreshHistory?.();
       } else if (platformFilter === 'all') {
@@ -354,6 +472,10 @@ export default function SocialUploadHistorySection({
         if (ytRes.status === 'fulfilled' && ytRes.value?.success) {
           clearedCount += ytRes.value.deletedCount || 0;
         }
+        if (removeHistoryRecords && normalizedYtHistory.length > 0) {
+          removeHistoryRecords(normalizedYtHistory.map(y => y.id));
+        }
+        setHistory([]);
         await refreshHistory?.();
         await fetchHistory();
       } else {
@@ -363,6 +485,7 @@ export default function SocialUploadHistorySection({
         }
         await fetchHistory();
       }
+      setSelectedIds(new Set());
       showToast(
         `Upload history cleared (${clearedCount} records removed). Active scheduled videos were preserved!`,
         'success'
@@ -394,8 +517,25 @@ export default function SocialUploadHistorySection({
           </div>
         </div>
 
-        {/* Refresh & Clear Actions */}
+        {/* Refresh & Actions */}
         <div className="flex items-center space-x-2">
+          {selectedIds.size > 0 && (
+            <button
+              type="button"
+              onClick={handleDeleteSelected}
+              disabled={isDeletingSelected}
+              className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded-xl transition-all flex items-center space-x-1.5 shadow-lg shadow-rose-600/20 active:scale-98 cursor-pointer disabled:opacity-50"
+              title="Permanently delete selected history items"
+            >
+              {isDeletingSelected ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Trash2 className="w-3.5 h-3.5" />
+              )}
+              <span>Delete Selected ({selectedIds.size})</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={handleRefreshAll}
@@ -414,7 +554,7 @@ export default function SocialUploadHistorySection({
               title="Clear completed publishing logs"
             >
               <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-              <span>Clear Upload History</span>
+              <span className="hidden sm:inline">Clear Upload History</span>
             </button>
           )}
         </div>
@@ -534,6 +674,22 @@ export default function SocialUploadHistorySection({
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="border-b border-slate-800 text-[11px] font-semibold text-slate-400 bg-slate-950/50">
+                <th className="py-3 px-3 w-10 text-center">
+                  <button
+                    type="button"
+                    onClick={handleSelectAll}
+                    className="text-slate-400 hover:text-white transition-colors cursor-pointer inline-flex items-center justify-center p-1 rounded hover:bg-slate-800/80"
+                    title={isAllSelected ? "Deselect all" : "Select all"}
+                  >
+                    {isAllSelected ? (
+                      <CheckSquare className="w-4 h-4 text-blue-400" />
+                    ) : isSomeSelected ? (
+                      <MinusSquare className="w-4 h-4 text-blue-400" />
+                    ) : (
+                      <Square className="w-4 h-4" />
+                    )}
+                  </button>
+                </th>
                 <th className="py-3 px-4">Video</th>
                 <th className="py-3 px-4">Platform</th>
                 <th className="py-3 px-4">Scheduled</th>
@@ -549,9 +705,31 @@ export default function SocialUploadHistorySection({
                 const isUploading = item.status === 'uploading';
                 const isFailed = item.status === 'failed' || item.status === 'upload_failed';
                 const isRetrying = retryingId === item.id;
+                const key = `${item.platform}:${item.id}`;
+                const isSelected = selectedIds.has(key);
+                const isDeletingThis = deletingSingleId === item.id;
 
                 return (
-                  <tr key={`${item.platform}_${item.id}`} className="hover:bg-slate-800/30 transition-colors">
+                  <tr
+                    key={`${item.platform}_${item.id}`}
+                    className={`transition-colors ${isSelected ? 'bg-blue-950/20 hover:bg-blue-950/30' : 'hover:bg-slate-800/30'}`}
+                  >
+                    {/* Checkbox Column */}
+                    <td className="py-3 px-3 text-center">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleSelect(item)}
+                        className="text-slate-400 hover:text-white transition-colors cursor-pointer inline-flex items-center justify-center p-1 rounded hover:bg-slate-800/80"
+                        title={isSelected ? "Deselect" : "Select"}
+                      >
+                        {isSelected ? (
+                          <CheckSquare className="w-4 h-4 text-blue-400" />
+                        ) : (
+                          <Square className="w-4 h-4 text-slate-600 hover:text-slate-400" />
+                        )}
+                      </button>
+                    </td>
+
                     {/* Video Name & Subtitle */}
                     <td className="py-3 px-4 max-w-[200px] sm:max-w-[260px]">
                       <div className="font-semibold text-slate-200 truncate" title={item.title}>
@@ -633,9 +811,9 @@ export default function SocialUploadHistorySection({
                       )}
                     </td>
 
-                    {/* Action Column: Open Link + Retry Upload Button for All Platforms */}
+                    {/* Action Column: Open Link + Retry Upload Button + Single Trash Button */}
                     <td className="py-3 px-4 text-right whitespace-nowrap">
-                      <div className="inline-flex items-center justify-end space-x-2">
+                      <div className="inline-flex items-center justify-end space-x-1.5">
                         {item.post_url && (
                           <a
                             href={item.post_url}
@@ -668,6 +846,16 @@ export default function SocialUploadHistorySection({
                         >
                           <RotateCcw className={`w-3 h-3 ${isRetrying ? 'animate-spin text-blue-400' : isFailed ? 'text-amber-400' : 'text-slate-400'}`} />
                           <span>{isRetrying ? 'Retrying...' : 'Retry'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteSingle(item)}
+                          disabled={isDeletingThis || isUploading}
+                          className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer disabled:opacity-40"
+                          title="Permanently delete from history"
+                        >
+                          <Trash2 className={`w-3.5 h-3.5 ${isDeletingThis ? 'animate-spin text-rose-400' : ''}`} />
                         </button>
                       </div>
                     </td>

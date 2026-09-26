@@ -5,8 +5,24 @@
  */
 
 // Stable In-Memory Audio Decode Cache for Batch Queue Performance
+// Capped at 1 entry: for a single-video workflow there is only ONE source video.
+// Allowing 3 entries caused 3×46 MB = 138 MB of heap permanently occupied and
+// a peak spike to 184 MB when a new entry evicts the oldest (before GC collects it).
 const AUDIO_DECODE_CACHE = new Map();
-const MAX_AUDIO_CACHE_ENTRIES = 3;
+const MAX_AUDIO_CACHE_ENTRIES = 1;
+
+// ── Singleton AudioContext ────────────────────────────────────────────────────
+// Chrome allows a maximum of 6–12 AudioContext instances. Creating a new one per
+// export means after ~6 clips Chrome silently fails or degrades audio decode speed.
+// A singleton context is created once, suspended between exports to release the
+// audio hardware thread, and resumed only during active decode work.
+let _sharedAudioCtx = null;
+function getSharedAudioCtx(sampleRate = 48000) {
+  if (!_sharedAudioCtx || _sharedAudioCtx.state === 'closed') {
+    _sharedAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate });
+  }
+  return _sharedAudioCtx;
+}
 
 function getAudioCacheKey(audioSource) {
   if (!audioSource) return null;
@@ -109,7 +125,12 @@ export async function mixAudioTracksOffline({
     bgMusicVolume = 30
   } = audioSettings;
 
-  const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate });
+  // Reuse the singleton context — never create a new AudioContext per export.
+  const audioCtx = getSharedAudioCtx(sampleRate);
+  // Resume if suspended (browser auto-suspends idle contexts after ~30s)
+  if (audioCtx.state === 'suspended') {
+    try { await audioCtx.resume(); } catch (_) {}
+  }
 
   try {
     // 1. Decode Source Video Audio
@@ -130,8 +151,9 @@ export async function mixAudioTracksOffline({
       musicBuffer = await fetchAndDecodeAudio(bgMusicFile || bgMusicUrl, audioCtx);
     }
 
-    // If no audio sources present, return silent AudioBuffer
-    const offlineCtx = new OfflineAudioContext(2, totalSamples, sampleRate);
+    // Manual Float32 mixing below — no OfflineAudioContext needed.
+    // (An OfflineAudioContext was previously created here but never rendered;
+    //  it wasted 46 MB of audio buffer allocation per export and was removed.)
 
     // Channel accumulation buffers
     const outputLeft = new Float32Array(totalSamples);
@@ -266,8 +288,13 @@ export async function mixAudioTracksOffline({
     console.warn('Offline audio mixing fallback warning:', err);
     return null;
   } finally {
+    // Do NOT close the singleton context — suspend it instead so Chrome
+    // releases the audio hardware thread without destroying the context object.
+    // Closing would force recreation on the next export (expensive, limited quota).
     try {
-      audioCtx.close();
-    } catch (e) {}
+      if (audioCtx.state === 'running') {
+        audioCtx.suspend().catch(() => {});
+      }
+    } catch (_) {}
   }
 }

@@ -215,13 +215,14 @@ export async function getUploadJob(db, userId, id) {
 /**
  * Automatically clean up stale and expired records to prevent database overflow.
  * Runs in background without requiring user prompt.
+ * PERMANENT (HARD) DELETION: all deleted records are removed permanently from D1.
  */
 export async function runAutoCleanup(db) {
   const now = Date.now();
   const results = {};
 
   try {
-    // 1. Delete expired authentication sessions
+    // 1. Delete expired authentication sessions permanently
     const sessionRes = await db
       .prepare('DELETE FROM sessions WHERE expires_at < ?')
       .bind(now)
@@ -232,12 +233,12 @@ export async function runAutoCleanup(db) {
   }
 
   try {
-    // 2. Delete completed/failed/cancelled uploads older than 30 days (keep pending & scheduled)
+    // 2. Delete completed/failed/cancelled YouTube uploads older than 30 days
     const uploadsRes = await db
       .prepare(`
         DELETE FROM upload_jobs
         WHERE created_at < datetime('now', '-30 days')
-          AND status IN ('uploaded', 'published', 'failed', 'cancelled')
+          AND status IN ('uploaded', 'published', 'completed', 'failed', 'cancelled')
       `)
       .run();
     results.oldUploads = uploadsRes?.meta?.changes ?? 0;
@@ -246,7 +247,35 @@ export async function runAutoCleanup(db) {
   }
 
   try {
-    // 3. Delete stale anonymous guest users (no email, not seen in 7 days)
+    // 3. Delete completed/failed/cancelled Facebook uploads older than 30 days
+    const fbRes = await db
+      .prepare(`
+        DELETE FROM facebook_upload_jobs
+        WHERE created_at < datetime('now', '-30 days')
+          AND status IN ('published', 'failed', 'cancelled')
+      `)
+      .run();
+    results.oldFacebookUploads = fbRes?.meta?.changes ?? 0;
+  } catch (err) {
+    results.oldFacebookUploadsError = err.message;
+  }
+
+  try {
+    // 4. Delete completed/failed/cancelled Instagram uploads older than 30 days
+    const igRes = await db
+      .prepare(`
+        DELETE FROM instagram_upload_jobs
+        WHERE created_at < datetime('now', '-30 days')
+          AND status IN ('published', 'failed', 'cancelled')
+      `)
+      .run();
+    results.oldInstagramUploads = igRes?.meta?.changes ?? 0;
+  } catch (err) {
+    results.oldInstagramUploadsError = err.message;
+  }
+
+  try {
+    // 5. Delete stale anonymous guest users (no email, not seen in 7 days)
     const staleGuestsRes = await db
       .prepare(`
         DELETE FROM users
@@ -259,6 +288,69 @@ export async function runAutoCleanup(db) {
     results.staleGuestsError = err.message;
   }
 
+  results.timestamp = new Date().toISOString();
+  return results;
+}
+
+/**
+ * On-demand permanent cleanup of unneeded/expired data across all tables:
+ * - Expired sessions
+ * - Old or terminal logs
+ * - Stale records
+ */
+export async function cleanupUnusedData(db, userId = null) {
+  const now = Date.now();
+  const results = {};
+
+  // 1. Expired sessions
+  try {
+    const sessionSql = userId
+      ? 'DELETE FROM sessions WHERE user_id = ? AND expires_at < ?'
+      : 'DELETE FROM sessions WHERE expires_at < ?';
+    const sessionParams = userId ? [userId, now] : [now];
+    const sRes = await db.prepare(sessionSql).bind(...sessionParams).run();
+    results.expiredSessions = sRes?.meta?.changes ?? 0;
+  } catch (err) {
+    results.expiredSessions = 0;
+  }
+
+  // 2. Terminal upload jobs older than 7 days
+  try {
+    const ytSql = userId
+      ? `DELETE FROM upload_jobs WHERE user_id = ? AND status IN ('uploaded', 'published', 'completed', 'failed', 'cancelled') AND created_at < datetime('now', '-7 days')`
+      : `DELETE FROM upload_jobs WHERE status IN ('uploaded', 'published', 'completed', 'failed', 'cancelled') AND created_at < datetime('now', '-7 days')`;
+    const ytParams = userId ? [userId] : [];
+    const ytRes = await db.prepare(ytSql).bind(...ytParams).run();
+    results.oldYouTube = ytRes?.meta?.changes ?? 0;
+  } catch (err) {
+    results.oldYouTube = 0;
+  }
+
+  // 3. Terminal Facebook jobs older than 7 days
+  try {
+    const fbSql = userId
+      ? `DELETE FROM facebook_upload_jobs WHERE user_id = ? AND status IN ('published', 'failed', 'cancelled') AND created_at < datetime('now', '-7 days')`
+      : `DELETE FROM facebook_upload_jobs WHERE status IN ('published', 'failed', 'cancelled') AND created_at < datetime('now', '-7 days')`;
+    const fbParams = userId ? [userId] : [];
+    const fbRes = await db.prepare(fbSql).bind(...fbParams).run();
+    results.oldFacebook = fbRes?.meta?.changes ?? 0;
+  } catch (err) {
+    results.oldFacebook = 0;
+  }
+
+  // 4. Terminal Instagram jobs older than 7 days
+  try {
+    const igSql = userId
+      ? `DELETE FROM instagram_upload_jobs WHERE user_id = ? AND status IN ('published', 'failed', 'cancelled') AND created_at < datetime('now', '-7 days')`
+      : `DELETE FROM instagram_upload_jobs WHERE status IN ('published', 'failed', 'cancelled') AND created_at < datetime('now', '-7 days')`;
+    const igParams = userId ? [userId] : [];
+    const igRes = await db.prepare(igSql).bind(...igParams).run();
+    results.oldInstagram = igRes?.meta?.changes ?? 0;
+  } catch (err) {
+    results.oldInstagram = 0;
+  }
+
+  results.totalCleaned = (results.expiredSessions || 0) + (results.oldYouTube || 0) + (results.oldFacebook || 0) + (results.oldInstagram || 0);
   results.timestamp = new Date().toISOString();
   return results;
 }
@@ -562,10 +654,10 @@ export async function createFacebookUploadJob(db, data) {
     .prepare(`
       INSERT INTO facebook_upload_jobs
         (id, user_id, facebook_account_id, page_id, content_type, title, caption,
-         description, hashtags, scheduled_at, status, b2_file_id, b2_file_name,
+         description, hashtags, is_ai_generated, scheduled_at, status, b2_file_id, b2_file_name,
          facebook_video_id, facebook_post_url, error_message, created_at, updated_at)
       VALUES
-        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
     `)
     .bind(
       id,
@@ -577,6 +669,7 @@ export async function createFacebookUploadJob(db, data) {
       data.caption || null,
       data.description || null,
       hashtagsJson,
+      data.is_ai_generated ? 1 : 0,
       data.scheduled_at || null,
       data.status || 'pending',
       data.b2_file_id || null,
@@ -601,7 +694,7 @@ export async function updateFacebookUploadJob(db, jobId, updates) {
   for (const [key, value] of Object.entries(updates)) {
     if (allowed.includes(key)) {
       setClauses.push(`${key} = ?`);
-      bindings.push(value);
+      bindings.push(value === undefined ? null : value);
     }
   }
 
@@ -662,7 +755,50 @@ export async function getDueFacebookJobs(db, limit = 10) {
   return res?.results || [];
 }
 
+/**
+ * Query in-progress Facebook upload jobs that are currently processing on Meta.
+ */
+export async function getProcessingFacebookJobs(db, limit = 10) {
+  const res = await db.prepare(`
+    SELECT j.*, a.page_access_token, a.available_pages
+    FROM facebook_upload_jobs j
+    JOIN facebook_accounts a ON j.facebook_account_id = a.id
+    WHERE j.status = 'processing'
+      AND j.facebook_video_id IS NOT NULL
+    ORDER BY j.created_at ASC
+    LIMIT ?
+  `).bind(limit).all();
+
+  return res?.results || [];
+}
+
+/**
+ * Query Facebook upload jobs that have been stuck in 'uploading' status for longer than minutesThreshold.
+ * These require auto-reconciliation against Meta Graph API or safe recovery.
+ */
+export async function getStuckUploadingFacebookJobs(db, minutesThreshold = 3, userId = null) {
+  const timeModifier = `-${Math.max(1, minutesThreshold)} minutes`;
+  let sql = `
+    SELECT j.*, a.page_access_token, a.available_pages
+    FROM facebook_upload_jobs j
+    LEFT JOIN facebook_accounts a ON j.facebook_account_id = a.id
+    WHERE j.status = 'uploading'
+      AND (datetime(COALESCE(j.updated_at, j.created_at)) <= datetime('now', '${timeModifier}')
+           OR (j.scheduled_at IS NOT NULL AND datetime(j.scheduled_at) <= datetime('now', '${timeModifier}'))
+      )
+  `;
+  const params = [];
+  if (userId) {
+    sql += ' AND j.user_id = ?';
+    params.push(userId);
+  }
+  sql += ' ORDER BY j.updated_at ASC LIMIT 20';
+  const res = await db.prepare(sql).bind(...params).all();
+  return res?.results || [];
+}
+
 // ─── Instagram Account Helpers ────────────────────────────────────────────────
+
 
 export async function getInstagramAccount(db, userId) {
   if (!userId) return null;
@@ -784,10 +920,10 @@ export async function createInstagramUploadJob(db, data) {
     .prepare(`
       INSERT INTO instagram_upload_jobs
         (id, user_id, instagram_account_id, ig_user_id, content_type, title, caption,
-         description, hashtags, scheduled_at, status, b2_file_id, b2_file_name,
+         description, hashtags, is_ai_generated, scheduled_at, status, b2_file_id, b2_file_name,
          instagram_container_id, instagram_media_id, instagram_post_url, error_message, created_at, updated_at)
       VALUES
-        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
     `)
     .bind(
       id,
@@ -799,6 +935,7 @@ export async function createInstagramUploadJob(db, data) {
       data.caption || null,
       data.description || null,
       hashtagsJson,
+      data.is_ai_generated ? 1 : 0,
       data.scheduled_at || null,
       data.status || 'pending',
       data.b2_file_id || null,
@@ -824,7 +961,7 @@ export async function updateInstagramUploadJob(db, jobId, updates) {
   for (const [key, value] of Object.entries(updates)) {
     if (allowed.includes(key)) {
       setClauses.push(`${key} = ?`);
-      bindings.push(value);
+      bindings.push(value === undefined ? null : value);
     }
   }
 
@@ -903,6 +1040,30 @@ export async function getProcessingInstagramJobs(db, limit = 10) {
 }
 
 /**
+ * Query Instagram upload jobs that have been stuck in 'uploading' status for longer than minutesThreshold.
+ */
+export async function getStuckUploadingInstagramJobs(db, minutesThreshold = 3, userId = null) {
+  const timeModifier = `-${Math.max(1, minutesThreshold)} minutes`;
+  let sql = `
+    SELECT j.*, a.access_token, a.user_access_token, a.available_accounts
+    FROM instagram_upload_jobs j
+    LEFT JOIN instagram_accounts a ON j.instagram_account_id = a.id
+    WHERE j.status = 'uploading'
+      AND (datetime(COALESCE(j.updated_at, j.created_at)) <= datetime('now', '${timeModifier}')
+           OR (j.scheduled_at IS NOT NULL AND datetime(j.scheduled_at) <= datetime('now', '${timeModifier}'))
+      )
+  `;
+  const params = [];
+  if (userId) {
+    sql += ' AND j.user_id = ?';
+    params.push(userId);
+  }
+  sql += ' ORDER BY j.updated_at ASC LIMIT 20';
+  const res = await db.prepare(sql).bind(...params).all();
+  return res?.results || [];
+}
+
+/**
  * Check whether a Backblaze B2 temporary file is still needed by ANY pending/scheduled/processing jobs across platforms.
  * Prevents premature deletion when one platform finishes before another.
  */
@@ -913,9 +1074,14 @@ export async function isB2FileNeededByOtherJobs(db, b2FileName, excludeJobId = n
       SELECT COUNT(*) as count FROM facebook_upload_jobs 
       WHERE b2_file_name = ? AND id != ? AND (
         status IN ('pending', 'scheduled', 'uploading', 'processing')
-        OR (status = 'failed' AND datetime(updated_at) > datetime('now', '-24 hours'))
+        OR (status = 'failed' AND datetime(updated_at) > datetime('now', '-24 hours')
+            AND NOT EXISTS (
+              SELECT 1 FROM facebook_upload_jobs 
+              WHERE b2_file_name = ? AND status = 'published'
+            )
+        )
       )
-    `).bind(b2FileName, excludeJobId || '').first();
+    `).bind(b2FileName, excludeJobId || '', b2FileName).first();
 
     if (fb && fb.count > 0) return true;
 
@@ -923,9 +1089,14 @@ export async function isB2FileNeededByOtherJobs(db, b2FileName, excludeJobId = n
       SELECT COUNT(*) as count FROM instagram_upload_jobs 
       WHERE b2_file_name = ? AND id != ? AND (
         status IN ('pending', 'scheduled', 'uploading', 'processing')
-        OR (status = 'failed' AND datetime(updated_at) > datetime('now', '-24 hours'))
+        OR (status = 'failed' AND datetime(updated_at) > datetime('now', '-24 hours')
+            AND NOT EXISTS (
+              SELECT 1 FROM instagram_upload_jobs 
+              WHERE b2_file_name = ? AND status = 'published'
+            )
+        )
       )
-    `).bind(b2FileName, excludeJobId || '').first();
+    `).bind(b2FileName, excludeJobId || '', b2FileName).first();
 
     if (ig && ig.count > 0) return true;
   } catch (err) {
@@ -1036,27 +1207,22 @@ export async function cancelScheduledSocialJob(db, userId, platform, jobId) {
 
   const table = platform === 'facebook' ? 'facebook_upload_jobs' : 'instagram_upload_jobs';
   
-  // 1. Verify job exists, belongs to user, and is cancellable
+  // 1. Verify job exists and belongs to user
   const existing = await db.prepare(`SELECT * FROM ${table} WHERE id = ? AND user_id = ?`).bind(jobId, userId).first();
   if (!existing) {
     return { success: false, error: 'Job not found or does not belong to you' };
   }
 
-  if (!['scheduled', 'pending'].includes(existing.status)) {
-    return { success: false, error: `Job cannot be cancelled in status: ${existing.status}` };
-  }
-
-  // 2. Atomically update status to 'cancelled'
+  // 2. Permanently delete from database (zero soft deletes)
   const res = await db.prepare(`
-    UPDATE ${table}
-    SET status = 'cancelled', updated_at = datetime('now')
-    WHERE id = ? AND user_id = ? AND status IN ('scheduled', 'pending')
+    DELETE FROM ${table}
+    WHERE id = ? AND user_id = ?
   `).bind(jobId, userId).run();
 
   const success = (res?.meta?.changes ?? 0) > 0;
   return {
     success,
-    job: { ...existing, status: 'cancelled' },
+    job: { ...existing, status: 'deleted' },
     b2_file_name: existing.b2_file_name,
     b2_file_id: existing.b2_file_id
   };
@@ -1124,16 +1290,25 @@ export async function rescheduleScheduledSocialJob(db, userId, platform, jobId, 
 }
 
 /**
- * Safely clear completed/failed/cancelled upload history for Facebook and/or Instagram.
- * STRICT SAFETY RULE:
- * NEVER deletes 'scheduled', 'pending', 'uploading', or 'processing' jobs.
- * Only deletes records WHERE status IN ('published', 'failed', 'cancelled').
+ * Permanently delete completed/failed/cancelled upload history for YouTube, Facebook, and/or Instagram.
+ * STRICT PERMANENT (HARD) DELETION:
+ * Completely removes matching records via DELETE FROM.
+ * Strictly protects all active 'scheduled', 'pending', and 'uploading' jobs.
  */
 export async function clearCompletedSocialHistory(db, userId, platform = 'all') {
   if (!userId) return { success: false, error: 'User ID is required' };
 
+  let ytDeleted = 0;
   let fbDeleted = 0;
   let igDeleted = 0;
+
+  if (platform === 'all' || platform === 'youtube') {
+    const res = await db.prepare(`
+      DELETE FROM upload_jobs
+      WHERE user_id = ? AND status IN ('uploaded', 'published', 'completed', 'failed', 'cancelled')
+    `).bind(userId).run();
+    ytDeleted = res?.meta?.changes ?? 0;
+  }
 
   if (platform === 'all' || platform === 'facebook') {
     const res = await db.prepare(`
@@ -1154,9 +1329,109 @@ export async function clearCompletedSocialHistory(db, userId, platform = 'all') 
   return {
     success: true,
     platform,
-    deletedCount: fbDeleted + igDeleted,
+    deletedCount: ytDeleted + fbDeleted + igDeleted,
+    youtubeDeleted: ytDeleted,
     facebookDeleted: fbDeleted,
     instagramDeleted: igDeleted
+  };
+}
+
+/**
+ * Permanently delete selected upload history records across YouTube, Facebook, and Instagram.
+ * Strict Permanent (Hard) Deletion: rows are completely removed from D1/SQLite.
+ * @param {object} db
+ * @param {string} userId
+ * @param {Array<{ id: string, platform: 'youtube'|'facebook'|'instagram' }>} items
+ */
+export async function deleteSocialHistoryItems(db, userId, items = []) {
+  if (!userId) return { success: false, error: 'User ID is required' };
+  if (!Array.isArray(items) || items.length === 0) {
+    return { success: true, deletedCount: 0, deletedIds: [] };
+  }
+
+  let totalDeleted = 0;
+  const deletedIds = [];
+
+  for (const item of items) {
+    if (!item?.id) continue;
+    const platform = (item.platform || '').toLowerCase();
+
+    if (platform === 'youtube') {
+      const res = await db.prepare(
+        'DELETE FROM upload_jobs WHERE user_id = ? AND id = ?'
+      ).bind(userId, item.id).run();
+      const count = res?.meta?.changes ?? 0;
+      totalDeleted += count;
+      if (count > 0) deletedIds.push(item.id);
+    } else if (platform === 'facebook') {
+      const res = await db.prepare(
+        'DELETE FROM facebook_upload_jobs WHERE user_id = ? AND id = ?'
+      ).bind(userId, item.id).run();
+      const count = res?.meta?.changes ?? 0;
+      totalDeleted += count;
+      if (count > 0) deletedIds.push(item.id);
+    } else if (platform === 'instagram') {
+      const res = await db.prepare(
+        'DELETE FROM instagram_upload_jobs WHERE user_id = ? AND id = ?'
+      ).bind(userId, item.id).run();
+      const count = res?.meta?.changes ?? 0;
+      totalDeleted += count;
+      if (count > 0) deletedIds.push(item.id);
+    }
+  }
+
+  return {
+    success: true,
+    deletedCount: totalDeleted,
+    deletedIds
+  };
+}
+
+/**
+ * Permanently delete selected scheduled publishing jobs across Facebook and Instagram.
+ * Strict Permanent (Hard) Deletion: completely removed from database.
+ * Also returns candidate B2 files to check if Backblaze B2 cleanup is needed.
+ * @param {object} db
+ * @param {string} userId
+ * @param {Array<{ id: string, platform: 'facebook'|'instagram' }>} items
+ */
+export async function deleteScheduledSocialJobs(db, userId, items = []) {
+  if (!userId) return { success: false, error: 'User ID is required' };
+  if (!Array.isArray(items) || items.length === 0) {
+    return { success: true, deletedCount: 0, deletedIds: [], candidateB2Files: [] };
+  }
+
+  let totalDeleted = 0;
+  const deletedIds = [];
+  const candidateB2Files = [];
+
+  for (const item of items) {
+    if (!item?.id) continue;
+    const platform = (item.platform || '').toLowerCase();
+    const table = platform === 'facebook' ? 'facebook_upload_jobs' : 'instagram_upload_jobs';
+
+    const job = await db.prepare(
+      `SELECT * FROM ${table} WHERE user_id = ? AND id = ?`
+    ).bind(userId, item.id).first();
+
+    if (job) {
+      if (job.b2_file_name) {
+        candidateB2Files.push(job.b2_file_name);
+      }
+      const res = await db.prepare(
+        `DELETE FROM ${table} WHERE user_id = ? AND id = ?`
+      ).bind(userId, item.id).run();
+      const count = res?.meta?.changes ?? 0;
+      totalDeleted += count;
+      if (count > 0) deletedIds.push(item.id);
+    }
+  }
+
+  return {
+    success: true,
+    deletedCount: totalDeleted,
+    deletedIds,
+    candidateB2Files
   };
 }
 
@@ -1200,38 +1475,62 @@ export async function getUserStorageStats(db, userId) {
 export async function clearUserDataByScope(db, userId, scope) {
   if (!userId) return { success: false, error: 'User ID is required' };
 
+  let deletedCount = 0;
+
   switch (scope) {
-    case 'templates':
-      await db.prepare('DELETE FROM templates WHERE user_id = ?').bind(userId).run();
+    case 'templates': {
+      const res = await db.prepare('DELETE FROM templates WHERE user_id = ?').bind(userId).run();
+      deletedCount = res?.meta?.changes ?? 0;
       break;
-    case 'youtube':
-      await db.prepare('DELETE FROM youtube_accounts WHERE user_id = ?').bind(userId).run();
-      await db.prepare('DELETE FROM upload_jobs WHERE user_id = ?').bind(userId).run();
+    }
+    case 'youtube': {
+      const r1 = await db.prepare('DELETE FROM youtube_accounts WHERE user_id = ?').bind(userId).run();
+      const r2 = await db.prepare('DELETE FROM upload_jobs WHERE user_id = ?').bind(userId).run();
+      deletedCount = (r1?.meta?.changes ?? 0) + (r2?.meta?.changes ?? 0);
       break;
-    case 'facebook':
-      await db.prepare('DELETE FROM facebook_accounts WHERE user_id = ?').bind(userId).run();
-      await db.prepare('DELETE FROM facebook_upload_jobs WHERE user_id = ?').bind(userId).run();
+    }
+    case 'facebook': {
+      const r1 = await db.prepare('DELETE FROM facebook_accounts WHERE user_id = ?').bind(userId).run();
+      const r2 = await db.prepare('DELETE FROM facebook_upload_jobs WHERE user_id = ?').bind(userId).run();
+      deletedCount = (r1?.meta?.changes ?? 0) + (r2?.meta?.changes ?? 0);
       break;
-    case 'instagram':
-      await db.prepare('DELETE FROM instagram_accounts WHERE user_id = ?').bind(userId).run();
-      await db.prepare('DELETE FROM instagram_upload_jobs WHERE user_id = ?').bind(userId).run();
+    }
+    case 'instagram': {
+      const r1 = await db.prepare('DELETE FROM instagram_accounts WHERE user_id = ?').bind(userId).run();
+      const r2 = await db.prepare('DELETE FROM instagram_upload_jobs WHERE user_id = ?').bind(userId).run();
+      deletedCount = (r1?.meta?.changes ?? 0) + (r2?.meta?.changes ?? 0);
       break;
-    case 'youtube_history':
-      await db.prepare('DELETE FROM upload_jobs WHERE user_id = ?').bind(userId).run();
+    }
+    case 'youtube_history': {
+      const res = await db.prepare(`
+        DELETE FROM upload_jobs
+        WHERE user_id = ? AND status IN ('uploaded', 'published', 'completed', 'failed', 'cancelled')
+      `).bind(userId).run();
+      deletedCount = res?.meta?.changes ?? 0;
       break;
-    case 'facebook_history':
-      await db.prepare("DELETE FROM facebook_upload_jobs WHERE user_id = ? AND status IN ('published', 'failed', 'cancelled')").bind(userId).run();
+    }
+    case 'facebook_history': {
+      const res = await db.prepare("DELETE FROM facebook_upload_jobs WHERE user_id = ? AND status IN ('published', 'failed', 'cancelled')").bind(userId).run();
+      deletedCount = res?.meta?.changes ?? 0;
       break;
-    case 'instagram_history':
-      await db.prepare("DELETE FROM instagram_upload_jobs WHERE user_id = ? AND status IN ('published', 'failed', 'cancelled')").bind(userId).run();
+    }
+    case 'instagram_history': {
+      const res = await db.prepare("DELETE FROM instagram_upload_jobs WHERE user_id = ? AND status IN ('published', 'failed', 'cancelled')").bind(userId).run();
+      deletedCount = res?.meta?.changes ?? 0;
       break;
+    }
     case 'history':
     case 'jobs':
-    case 'all_history':
-      await db.prepare("DELETE FROM upload_jobs WHERE user_id = ? AND status IN ('completed', 'failed', 'cancelled')").bind(userId).run();
-      await db.prepare("DELETE FROM facebook_upload_jobs WHERE user_id = ? AND status IN ('published', 'failed', 'cancelled')").bind(userId).run();
-      await db.prepare("DELETE FROM instagram_upload_jobs WHERE user_id = ? AND status IN ('published', 'failed', 'cancelled')").bind(userId).run();
+    case 'all_history': {
+      const r1 = await db.prepare(`
+        DELETE FROM upload_jobs
+        WHERE user_id = ? AND status IN ('uploaded', 'published', 'completed', 'failed', 'cancelled')
+      `).bind(userId).run();
+      const r2 = await db.prepare("DELETE FROM facebook_upload_jobs WHERE user_id = ? AND status IN ('published', 'failed', 'cancelled')").bind(userId).run();
+      const r3 = await db.prepare("DELETE FROM instagram_upload_jobs WHERE user_id = ? AND status IN ('published', 'failed', 'cancelled')").bind(userId).run();
+      deletedCount = (r1?.meta?.changes ?? 0) + (r2?.meta?.changes ?? 0) + (r3?.meta?.changes ?? 0);
       break;
+    }
     case 'all':
       await wipeAllUserData(db, userId);
       break;
@@ -1239,7 +1538,7 @@ export async function clearUserDataByScope(db, userId, scope) {
       throw new Error(`Unknown clearance scope: ${scope}`);
   }
 
-  return { success: true, scope };
+  return { success: true, scope, deletedCount };
 }
 
 export async function wipeAllUserData(db, userId) {

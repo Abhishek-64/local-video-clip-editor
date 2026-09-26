@@ -1,5 +1,5 @@
 /**
- * useFacebook — React Hook for Meta Graph API v21.0 & Facebook Page/Reels Upload
+ * useFacebook — React Hook for Meta Graph API v26.0 & Facebook Page/Reels Upload
  *
  * Manages:
  * - Facebook Page OAuth & Active Page Selection
@@ -29,6 +29,7 @@ const DEFAULT_FB_SETTINGS = {
   fb_start_part: 1,
   fb_zero_pad: true,
   fb_content_type: 'reel', // 'reel' | 'video'
+  fb_is_ai_generated: false,
   fb_caption_template: '{movie} - Part {part}\n\n#Reels #Shorts\n\n{hashtags}',
   fb_title_template: '{movie} - Part {part} | #Reels',
   fb_tags: ['reels', 'facebookreels', 'viral', 'clips', 'shorts'],
@@ -274,12 +275,28 @@ export function useFacebook({ isAuthenticated = false } = {}) {
       caption = '',
       title = '',
       hashtags = [],
+      isAiGenerated = false,
       scheduledAt = null,
       fileName = 'clip.mp4',
       pageId = null
     } = opts;
 
-    if ((!videoBlob || !(videoBlob instanceof Blob)) && (!opts.b2FileId || !opts.b2FileName)) {
+    const isBlobLike = (b) => Boolean(b && (
+      b instanceof Blob ||
+      (typeof b === 'object' && typeof b.slice === 'function' && typeof b.size === 'number')
+    ));
+
+    // If videoBlob was not directly passed, attempt recovery from outputUrl if provided
+    if (!isBlobLike(videoBlob) && (opts.outputUrl || opts.url)) {
+      try {
+        const fetchRes = await fetch(opts.outputUrl || opts.url);
+        videoBlob = await fetchRes.blob();
+      } catch (recoveryErr) {
+        console.warn('[useFacebook] Could not recover blob from outputUrl:', recoveryErr);
+      }
+    }
+
+    if (!isBlobLike(videoBlob) && (!opts.b2FileId || !opts.b2FileName)) {
       throw new Error('No valid video blob or B2 asset available to publish.');
     }
 
@@ -298,10 +315,13 @@ export function useFacebook({ isAuthenticated = false } = {}) {
     let b2FileId = opts.b2FileId || cachedUpload?.b2FileId;
     let b2FileName = opts.b2FileName || cachedUpload?.b2FileName;
 
-    try {
+    const executeUploadAndPublish = async (forceFreshUpload = false) => {
+      let b2FileId = (!forceFreshUpload ? opts.b2FileId : null) || (!forceFreshUpload ? cachedUpload?.b2FileId : null);
+      let b2FileName = (!forceFreshUpload ? opts.b2FileName : null) || (!forceFreshUpload ? cachedUpload?.b2FileName : null);
+
       if (!b2FileName) {
         // Check if another platform (e.g. Instagram) is actively uploading this clip right now
-        const inFlight = sharedUploadCache.getInFlightUpload(videoBlob, cacheKey);
+        const inFlight = !forceFreshUpload ? sharedUploadCache.getInFlightUpload(videoBlob, cacheKey) : null;
         if (inFlight) {
           setPublishStage('b2_upload');
           setPublishProgress(50);
@@ -360,12 +380,51 @@ export function useFacebook({ isAuthenticated = false } = {}) {
         caption,
         title,
         hashtags,
+        isAiGenerated,
         scheduledAt,
-        pageId: pageId || fbAccount.page_id
+        pageId: pageId || fbAccount.page_id,
+        retainB2: Boolean(opts.retainB2)
       });
 
       if (!publishResult || !publishResult.success) {
         throw new Error(publishResult?.error || 'Facebook publishing failed.');
+      }
+
+      return publishResult;
+    };
+
+    try {
+      let publishResult;
+      try {
+        publishResult = await executeUploadAndPublish(false);
+      } catch (firstErr) {
+        const isStaleB2 = /B2_FILE_NOT_FOUND|2207076|not found in temporary storage|does not exist in temporary/i.test(firstErr.message || '') ||
+          firstErr?.status === 404 ||
+          firstErr?.code === 'B2_FILE_NOT_FOUND';
+
+        if (!isBlobLike(videoBlob) && (opts.outputUrl || opts.url)) {
+          try {
+            const fetchRes = await fetch(opts.outputUrl || opts.url);
+            videoBlob = await fetchRes.blob();
+          } catch {}
+        }
+
+        if (isStaleB2 && isBlobLike(videoBlob)) {
+          console.warn(`[Facebook] Stale or missing B2 file detected (${firstErr.message}). Invalidate cache and auto-retry fresh upload...`);
+          sharedUploadCache.removeCachedUpload(videoBlob, cacheKey);
+          if (b2FileName) sharedUploadCache.invalidateByFileName(b2FileName);
+          cachedUpload = null;
+          setPublishStage('b2_upload');
+          setPublishProgress(0);
+          publishResult = await executeUploadAndPublish(true);
+        } else {
+          throw firstErr;
+        }
+      }
+
+      // Clean up cache once published unless caller requested retention for another platform
+      if (videoBlob && !opts.retainCache) {
+        sharedUploadCache.removeCachedUpload(videoBlob, cacheKey);
       }
 
       setPublishStage('done');
@@ -378,6 +437,9 @@ export function useFacebook({ isAuthenticated = false } = {}) {
 
       return publishResult;
     } catch (err) {
+      if (videoBlob) {
+        sharedUploadCache.removeCachedUpload(videoBlob, cacheKey);
+      }
       console.error('Facebook publish pipeline error:', err);
       setPublishStage('error');
       setPublishError(err.message);

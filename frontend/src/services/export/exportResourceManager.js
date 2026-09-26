@@ -63,17 +63,23 @@ export class GeneratedClipResourceManager {
     // Unless explicitly lazy, create video URL if blob provided
     if (!finalVideoUrl && !lazyVideoUrl && blob instanceof Blob) {
       finalVideoUrl = URL.createObjectURL(blob);
+      // Null out the raw blob reference immediately after URL creation.
+      // The Object URL is all that's needed for playback and download;
+      // keeping `blob` alive pins ~200 MB of heap per 2-min video.
+      blob = null;
     }
 
     if (!finalThumbUrl && thumbnailBlob instanceof Blob) {
       finalThumbUrl = URL.createObjectURL(thumbnailBlob);
+      // Same for thumbnail blob (~40 KB each, but clean release is correct practice)
+      thumbnailBlob = null;
     }
 
     const record = {
       clipId,
-      blob: blob || existing?.blob,
+      blob: null,         // Blob is nulled after URL creation — raw data no longer needed
       videoUrl: finalVideoUrl,
-      thumbnailBlob: thumbnailBlob || existing?.thumbnailBlob,
+      thumbnailBlob: null, // Same for thumbnail blob
       thumbnailUrl: finalThumbUrl,
       createdAt: existing?.createdAt || Date.now(),
       refCount: 1

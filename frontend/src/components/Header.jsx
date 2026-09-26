@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   ShieldCheck, Film, Sparkles, User, LogOut, Youtube, ChevronDown,
   CheckCircle2, Database, LayoutTemplate, Bookmark, Share2, Instagram,
-  Menu, X, Image as ImageIcon, Camera
+  Menu, X, Image as ImageIcon, Camera, StopCircle
 } from 'lucide-react';
 
 export default function Header({
@@ -24,8 +24,12 @@ export default function Header({
   activeTab = 'split-cut',
   onNavigateTab,
   studioMode = 'video',
-  onStudioModeChange
+  onStudioModeChange,
+  isGenerating = false,
+  isProcessing = false,
+  onStopGenerating
 }) {
+  const isCurrentlyGenerating = Boolean(isGenerating || isProcessing);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
   const dropdownRef = useRef(null);
@@ -83,8 +87,27 @@ export default function Header({
             </div>
           </div>
 
-          {/* Desktop Right Actions (Hidden on mobile where drawer holds secondary items) */}
+          {/* Desktop Right Actions & Stop Generating Button */}
           <div className="flex items-center space-x-1.5 sm:space-x-2.5 shrink-0">
+            {/* Common Stop Generating Video Clip Button (Available across entire header) */}
+            {isCurrentlyGenerating && (
+              <button
+                type="button"
+                id="header-stop-generating-btn"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onStopGenerating && onStopGenerating();
+                }}
+                className="flex items-center space-x-1.5 px-3 py-1.5 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 active:scale-95 text-white text-xs font-bold rounded-xl shadow-lg shadow-rose-600/30 border border-rose-400/40 transition-all cursor-pointer touch-manipulation animate-pulse shrink-0"
+                title="Immediately stop/cancel running video clip generation"
+              >
+                <StopCircle className="w-4 h-4 text-white animate-spin shrink-0" />
+                <span className="hidden xs:inline">Stop Generating</span>
+                <span className="xs:hidden">Stop</span>
+              </button>
+            )}
+
             {/* Studio Mode Switcher */}
             {onStudioModeChange && (
               <div className="flex items-center p-0.5 bg-slate-950/80 border border-slate-800 rounded-xl shadow-inner">
@@ -352,6 +375,21 @@ export default function Header({
 
               {/* Drawer Navigation List */}
               <div className="space-y-1.5">
+                {isCurrentlyGenerating && (
+                  <button
+                    onClick={() => {
+                      setIsMobileDrawerOpen(false);
+                      onStopGenerating && onStopGenerating();
+                    }}
+                    className="w-full flex items-center justify-between px-3.5 py-3 text-xs font-bold text-white bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 rounded-xl border border-rose-400 shadow-md shadow-rose-600/20 transition-all cursor-pointer touch-manipulation animate-pulse text-left"
+                  >
+                    <div className="flex items-center space-x-2.5">
+                      <StopCircle className="w-4 h-4 text-white animate-spin shrink-0" />
+                      <span>Stop Generating Video Clip</span>
+                    </div>
+                    <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full uppercase tracking-wider font-semibold">Active</span>
+                  </button>
+                )}
                 {hasVideo && (
                   <button
                     onClick={() => {

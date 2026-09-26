@@ -49,6 +49,7 @@ export default function EditorTabs({
   onExportSelectedMerge,
   onGenerateBatchKept,
   onExportSinglePart,
+  isProcessing = false,
   movieName,
   completedClips = [],
   // YouTube props
@@ -128,6 +129,7 @@ export default function EditorTabs({
   isLoadingHistory = false,
   onRetryUpload,
   refreshHistory,
+  removeHistoryRecords,
   onOpenPreview,
   onPreviewClip,
   // Mobile sheet props
@@ -406,6 +408,10 @@ export default function EditorTabs({
             onUpdateYtSettings={updateYtSettings}
             onUpdateFbSettings={updateFbSettings}
             onUpdateIgSettings={updateIgSettings}
+            customParts={customParts}
+            onGenerateBatchKept={onGenerateBatchKept}
+            onExportSelectedMerge={onExportSelectedMerge}
+            isProcessing={isProcessing}
           />
         )}
 
@@ -583,6 +589,7 @@ export default function EditorTabs({
                 isLoadingHistory={isLoadingHistory}
                 onRetryUpload={onRetryUpload}
                 refreshHistory={refreshHistory}
+                removeHistoryRecords={removeHistoryRecords}
                 completedClips={completedClips}
                 publishToFacebookPipeline={publishToFacebookPipeline}
                 publishToInstagramPipeline={publishToInstagramPipeline}

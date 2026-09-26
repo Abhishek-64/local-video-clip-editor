@@ -4,7 +4,10 @@ async function run() {
   const loginRes = await fetch(BASE_URL + '/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: 'abhiwithpooja0768@gmail.com', password: 'Admin@123' })
+    body: JSON.stringify({
+      email: process.env.APP_EMAIL || 'abhiwithpooja0768@gmail.com',
+      password: process.env.APP_PASSWORD
+    })
   });
   const { token } = await loginRes.json();
   const headers = { 'Authorization': 'Bearer ' + token };

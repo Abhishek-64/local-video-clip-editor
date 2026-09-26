@@ -106,6 +106,29 @@ async function apiFetch(path, options = {}) {
   return res.json();
 }
 
+/**
+ * Helper to retry transient API calls with exponential backoff.
+ */
+async function fetchWithRetry(fn, { retries = 3, delay = 1000, backoff = 2, name = 'operation' } = {}) {
+  let lastErr;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      const isTransient = /522|524|520|521|503|502|504|429|timeout|timed out|network|failed to fetch/i.test(err.message || '');
+      if (attempt < retries && isTransient) {
+        const waitTime = delay * Math.pow(backoff, attempt - 1);
+        console.warn(`[${name}] Attempt ${attempt}/${retries} failed (${err.message}). Retrying in ${waitTime}ms...`);
+        await new Promise(r => setTimeout(r, waitTime));
+      } else {
+        throw err;
+      }
+    }
+  }
+  throw lastErr;
+}
+
 // ─── Authentication ──────────────────────────────────────────────────────────
 
 /**
@@ -222,6 +245,13 @@ export async function getSocialScheduledJobs() {
 }
 
 /**
+ * SECTION 1: Reconcile in-progress/stuck upload jobs against Meta Graph API.
+ */
+export async function reconcileSocialJobs() {
+  return apiFetch('/api/social/reconcile', { method: 'POST' });
+}
+
+/**
  * SECTION 2: Get completed publishing history (published, failed, cancelled) with filters.
  */
 export async function getSocialUploadHistory({ platform = 'all', status = 'all', limit = 100 } = {}) {
@@ -245,13 +275,23 @@ export async function getSocialPreviewUrl({ platform, jobId, fileName }) {
 }
 
 /**
- * SECTION 1: Cancel an active scheduled publishing job.
+ * SECTION 1: Cancel and permanently delete an active scheduled publishing job.
  */
 export async function cancelSocialScheduledJob(platform, jobId) {
-  return apiFetch('/api/social/cancel', {
-    method: 'POST',
-    body: JSON.stringify({ platform, jobId })
-  });
+  try {
+    return await apiFetch(`/api/social/scheduled/${platform}/${jobId}`, {
+      method: 'DELETE'
+    });
+  } catch {
+    return apiFetch('/api/social/cancel', {
+      method: 'POST',
+      body: JSON.stringify({ platform, jobId })
+    });
+  }
+}
+
+export async function deleteSingleSocialScheduledJob(platform, jobId) {
+  return cancelSocialScheduledJob(platform, jobId);
 }
 
 /**
@@ -281,6 +321,41 @@ export async function clearSocialUploadHistory(platform = 'all') {
   return apiFetch('/api/social/history/clear', {
     method: 'POST',
     body: JSON.stringify({ platform })
+  });
+}
+
+/**
+ * Permanently delete selected upload history items.
+ * @param {Array<{ platform: string, id: string }> | { items: Array<{ platform: string, id: string }> }} itemsOrParams
+ */
+export async function deleteSocialHistoryItems(itemsOrParams) {
+  const items = Array.isArray(itemsOrParams) ? itemsOrParams : (itemsOrParams?.items || []);
+  return apiFetch('/api/social/history/delete-selected', {
+    method: 'POST',
+    body: JSON.stringify({ items })
+  });
+}
+
+/**
+ * Permanently delete a single upload history item.
+ * @param {string} platform
+ * @param {string} id
+ */
+export async function deleteSingleSocialHistoryItem(platform, id) {
+  return apiFetch(`/api/social/history/${platform}/${id}`, {
+    method: 'DELETE'
+  });
+}
+
+/**
+ * Permanently delete selected scheduled publishing jobs.
+ * @param {Array<{ platform: string, id: string }> | { items: Array<{ platform: string, id: string }> }} itemsOrParams
+ */
+export async function deleteSelectedScheduledJobs(itemsOrParams) {
+  const items = Array.isArray(itemsOrParams) ? itemsOrParams : (itemsOrParams?.items || []);
+  return apiFetch('/api/social/scheduled/delete-selected', {
+    method: 'POST',
+    body: JSON.stringify({ items })
   });
 }
 
@@ -582,12 +657,13 @@ export async function disconnectFacebookAccount() {
 }
 
 /**
- * Get presigned Backblaze B2 upload target.
+ * Get presigned Backblaze B2 upload target for Facebook with retry resilience.
  */
 export async function getB2UploadTarget() {
-  return apiFetch('/api/facebook/b2/upload-url', {
-    method: 'POST'
-  });
+  return fetchWithRetry(
+    () => apiFetch('/api/facebook/b2/upload-url', { method: 'POST' }),
+    { retries: 3, delay: 1000, name: 'Facebook B2 Upload Target' }
+  );
 }
 
 /**
@@ -622,7 +698,14 @@ export function uploadToB2(uploadUrl, authorizationToken, blob, fileName, onProg
           resolve({ fileName, success: true });
         }
       } else {
-        reject(new Error(`B2 upload failed: HTTP ${xhr.status} ${xhr.statusText} — ${xhr.responseText}`));
+        let errSnippet = (xhr.responseText || '').trim();
+        if (errSnippet.includes('<html') || errSnippet.includes('<!DOCTYPE') || errSnippet.includes('<title>')) {
+          const titleMatch = errSnippet.match(/<title[^>]*>([^<]+)<\/title>/i);
+          errSnippet = titleMatch ? titleMatch[1].trim() : `Cloudflare error (HTTP ${xhr.status})`;
+        } else if (errSnippet.length > 200) {
+          errSnippet = errSnippet.slice(0, 200);
+        }
+        reject(new Error(`B2 upload failed: HTTP ${xhr.status} ${xhr.statusText}${errSnippet ? ` — ${errSnippet}` : ''}`));
       }
     };
 
@@ -716,12 +799,13 @@ export async function disconnectInstagramAccount() {
 }
 
 /**
- * Get presigned Backblaze B2 upload target for Instagram.
+ * Get presigned Backblaze B2 upload target for Instagram with retry resilience.
  */
 export async function getInstagramB2UploadTarget() {
-  return apiFetch('/api/instagram/b2/upload-url', {
-    method: 'POST'
-  });
+  return fetchWithRetry(
+    () => apiFetch('/api/instagram/b2/upload-url', { method: 'POST' }),
+    { retries: 3, delay: 1000, name: 'Instagram B2 Upload Target' }
+  );
 }
 
 /**
@@ -772,6 +856,27 @@ export async function deleteB2File({ fileId, fileName }) {
  */
 export async function deleteAllB2Files() {
   return apiFetch('/api/storage/b2/delete-all', {
+    method: 'POST'
+  });
+}
+
+/**
+ * Permanently delete selected B2 files.
+ * @param {Array<{ fileId: string, fileName: string }> | { files: Array<{ fileId: string, fileName: string }> }} filesOrParams
+ */
+export async function deleteBatchB2Files(filesOrParams) {
+  const files = Array.isArray(filesOrParams) ? filesOrParams : (filesOrParams?.files || []);
+  return apiFetch('/api/storage/b2/delete-batch', {
+    method: 'POST',
+    body: JSON.stringify({ files })
+  });
+}
+
+/**
+ * Trigger on-demand permanent database cleanup across all tables.
+ */
+export async function triggerPermanentCleanup() {
+  return apiFetch('/api/storage/cleanup', {
     method: 'POST'
   });
 }

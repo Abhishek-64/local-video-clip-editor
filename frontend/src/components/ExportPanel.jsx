@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   Settings,
   Cpu,
@@ -11,11 +11,17 @@ import {
   Video,
   Activity,
   Volume2,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Layers,
+  Film,
+  ArrowRight,
+  Clock,
+  RefreshCw
 } from 'lucide-react';
 import { detectCapabilities } from '../services/capabilityDetector';
 import { sanitizeFilename } from '../utils/filename';
 import { cleanVideoFilename } from '../utils/titleCleaner';
+import { formatTime } from '../utils/time';
 
 export default function ExportPanel({
   exportSettings = {},
@@ -32,9 +38,52 @@ export default function ExportPanel({
   igSettings = {},
   onUpdateYtSettings,
   onUpdateFbSettings,
-  onUpdateIgSettings
+  onUpdateIgSettings,
+  customParts = [],
+  onGenerateBatchKept,
+  onExportSelectedMerge,
+  isProcessing = false
 }) {
   const [capabilities, setCapabilities] = useState(null);
+
+  const keptParts = useMemo(() => {
+    return (customParts || []).filter(p => !p.isDeleted);
+  }, [customParts]);
+
+  const [exportMode, setExportMode] = useState('all'); // 'all' | 'range'
+  const [rangeFrom, setRangeFrom] = useState(1);
+  const [rangeTo, setRangeTo] = useState(keptParts.length || 1);
+
+  const minPartNum = keptParts.length > 0 ? (keptParts[0].partNumber || 1) : 1;
+  const maxPartNum = keptParts.length > 0 ? (keptParts[keptParts.length - 1].partNumber || keptParts.length) : 1;
+
+  useEffect(() => {
+    if (keptParts.length > 0) {
+      setRangeTo(prev => (prev === 1 || prev > maxPartNum ? maxPartNum : prev));
+      setRangeFrom(prev => Math.max(minPartNum, Math.min(prev, maxPartNum)));
+    }
+  }, [keptParts.length, maxPartNum, minPartNum]);
+
+  const selectedRangeParts = useMemo(() => {
+    if (keptParts.length === 0) return [];
+    if (exportMode === 'all') return keptParts;
+    const f = Math.max(1, parseInt(rangeFrom) || 1);
+    const t = Math.max(f, parseInt(rangeTo) || f);
+    return keptParts.filter(p => {
+      const pNum = p.partNumber || 1;
+      return pNum >= f && pNum <= t;
+    });
+  }, [exportMode, rangeFrom, rangeTo, keptParts]);
+
+  const selectedRangeDuration = useMemo(() => {
+    return selectedRangeParts.reduce((acc, p) => acc + Math.max(0, (p.endTime || 0) - (p.startTime || 0)), 0);
+  }, [selectedRangeParts]);
+
+  const applyPresetRange = (from, to) => {
+    setExportMode('range');
+    setRangeFrom(Math.max(minPartNum, from));
+    setRangeTo(Math.min(maxPartNum, to));
+  };
 
   useEffect(() => {
     detectCapabilities().then(setCapabilities).catch(() => {});
@@ -219,6 +268,191 @@ export default function ExportPanel({
               <span className="text-[10px] text-slate-500 block">Lossless multi-track &amp; sample rate</span>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* ── EXPORT RANGE & PART SELECTION CARD ── */}
+      <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4 shadow-lg">
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-800">
+          <div className="flex items-center space-x-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-xl bg-orange-500/20 border border-orange-500/40 flex items-center justify-center text-orange-400 shrink-0">
+              <Layers className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <h4 className="text-xs sm:text-sm font-bold text-white">Export Parts Range</h4>
+                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-orange-500/10 border border-orange-500/30 text-orange-300">
+                  {keptParts.length} Active {keptParts.length === 1 ? 'Part' : 'Parts'}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400">Choose all parts or select a specific range (e.g. Part 4 to 15) to export.</p>
+            </div>
+          </div>
+
+          {/* Mode Switcher */}
+          <div className="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-800 shrink-0">
+            <button
+              type="button"
+              onClick={() => setExportMode('all')}
+              className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors cursor-pointer touch-manipulation ${
+                exportMode === 'all'
+                  ? 'bg-orange-500 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              All Parts ({keptParts.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setExportMode('range')}
+              className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors cursor-pointer touch-manipulation ${
+                exportMode === 'range'
+                  ? 'bg-orange-500 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              Select Range
+            </button>
+          </div>
+        </div>
+
+        {/* Range Controls when 'range' mode is active */}
+        {exportMode === 'range' ? (
+          <div className="space-y-3 bg-slate-900/60 p-3 sm:p-3.5 rounded-xl border border-slate-800">
+            <div className="flex flex-wrap items-center justify-between gap-2.5">
+              <div className="flex items-center space-x-2 text-xs text-slate-200">
+                <span className="font-semibold text-slate-300">From Part:</span>
+                <input
+                  type="number"
+                  min={minPartNum}
+                  max={maxPartNum}
+                  value={rangeFrom}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value) || minPartNum;
+                    setRangeFrom(Math.max(minPartNum, Math.min(maxPartNum, val)));
+                  }}
+                  className="w-16 bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-center font-mono font-bold text-white text-xs focus:border-orange-500 focus:outline-none"
+                />
+                <ArrowRight className="w-3.5 h-3.5 text-slate-500" />
+                <span className="font-semibold text-slate-300">To Part:</span>
+                <input
+                  type="number"
+                  min={rangeFrom}
+                  max={maxPartNum}
+                  value={rangeTo}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value) || rangeFrom;
+                    setRangeTo(Math.max(rangeFrom, Math.min(maxPartNum, val)));
+                  }}
+                  className="w-16 bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-center font-mono font-bold text-white text-xs focus:border-orange-500 focus:outline-none"
+                />
+                <span className="text-[11px] text-slate-500 font-mono">
+                  (of {maxPartNum})
+                </span>
+              </div>
+
+              {/* Quick Presets */}
+              <div className="flex items-center space-x-1">
+                <span className="text-[10px] text-slate-500 mr-0.5">Quick:</span>
+                {maxPartNum >= 5 && (
+                  <button
+                    type="button"
+                    onClick={() => applyPresetRange(1, 5)}
+                    className="px-2 py-0.5 text-[10px] bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded font-mono transition-colors cursor-pointer"
+                  >
+                    1–5
+                  </button>
+                )}
+                {maxPartNum >= 10 && (
+                  <button
+                    type="button"
+                    onClick={() => applyPresetRange(6, 10)}
+                    className="px-2 py-0.5 text-[10px] bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded font-mono transition-colors cursor-pointer"
+                  >
+                    6–10
+                  </button>
+                )}
+                {maxPartNum >= 15 && (
+                  <button
+                    type="button"
+                    onClick={() => applyPresetRange(4, 15)}
+                    className="px-2 py-0.5 text-[10px] bg-orange-500/10 hover:bg-orange-500/20 text-orange-300 border border-orange-500/30 rounded font-mono font-bold transition-colors cursor-pointer"
+                  >
+                    4–15
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => applyPresetRange(1, maxPartNum)}
+                  className="px-2 py-0.5 text-[10px] bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 rounded font-mono transition-colors cursor-pointer"
+                >
+                  All
+                </button>
+              </div>
+            </div>
+
+            {/* Summary Banner */}
+            <div className="flex flex-wrap items-center justify-between text-xs px-3 py-2 bg-slate-950/70 border border-slate-800/80 rounded-lg">
+              <span className="text-slate-300 font-medium">
+                Exporting <strong className="text-orange-400 font-mono font-bold">{selectedRangeParts.length}</strong> clips (Part {rangeFrom} through Part {rangeTo})
+              </span>
+              <span className="text-emerald-400 font-mono font-semibold flex items-center space-x-1">
+                <Clock className="w-3 h-3 text-emerald-400" />
+                <span>Est. Duration: {formatTime(selectedRangeDuration, true)}</span>
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center justify-between text-xs px-3.5 py-2.5 bg-slate-900/60 border border-slate-800 rounded-xl">
+            <span className="text-slate-300">
+              Ready to export all <strong className="text-orange-400 font-mono font-bold">{keptParts.length}</strong> active kept parts in the project.
+            </span>
+            <span className="text-emerald-400 font-mono font-semibold">
+              Total Duration: {formatTime(selectedRangeDuration, true)}
+            </span>
+          </div>
+        )}
+
+        {/* Action Trigger Buttons */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+          <button
+            type="button"
+            onClick={() => onGenerateBatchKept && onGenerateBatchKept(selectedRangeParts)}
+            disabled={isProcessing || selectedRangeParts.length === 0}
+            className="w-full min-h-[44px] py-2.5 px-4 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 active:scale-98 disabled:opacity-50 text-white font-bold text-xs sm:text-sm rounded-xl shadow-lg shadow-orange-500/20 flex items-center justify-center space-x-2 transition-all cursor-pointer touch-manipulation"
+          >
+            {isProcessing ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                <span>Processing Queue...</span>
+              </>
+            ) : (
+              <>
+                <Zap className="w-4 h-4 fill-current" />
+                <span>
+                  {exportMode === 'range'
+                    ? `Export Range: ${selectedRangeParts.length} Clips (P${rangeFrom}–P${rangeTo})`
+                    : `Export All ${selectedRangeParts.length} Clips`}
+                </span>
+              </>
+            )}
+          </button>
+
+          {onExportSelectedMerge && (
+            <button
+              type="button"
+              onClick={() => onExportSelectedMerge(selectedRangeParts)}
+              disabled={isProcessing || selectedRangeParts.length === 0}
+              className="w-full min-h-[44px] py-2.5 px-4 bg-slate-900 hover:bg-slate-800 border border-slate-700 active:scale-98 disabled:opacity-50 text-emerald-400 font-bold text-xs sm:text-sm rounded-xl flex items-center justify-center space-x-2 transition-all cursor-pointer touch-manipulation"
+            >
+              <Film className="w-4 h-4" />
+              <span>
+                {exportMode === 'range'
+                  ? `Merge Range (${selectedRangeParts.length} Parts) into 1 Video`
+                  : `Merge All into 1 Video`}
+              </span>
+            </button>
+          )}
         </div>
       </div>
 

@@ -213,19 +213,26 @@ async function getVideoDimensions(sourceFile) {
     const v = document.createElement('video');
     v.preload = 'metadata';
     v.muted = true;
-    v.onloadedmetadata = () => {
-      const w = v.videoWidth || 1920;
-      const h = v.videoHeight || 1080;
+    const finish = (w, h) => {
+      // Immediately release the media decode pipeline — without this Chrome keeps
+      // ~50–100 MB of decode buffers alive until the GC eventually collects `v`.
+      try {
+        v.removeAttribute('src');
+        v.load();
+      } catch (_) {}
       URL.revokeObjectURL(tempUrl);
       resolve({ width: w, height: h });
     };
+    v.onloadedmetadata = () => {
+      finish(v.videoWidth || 1920, v.videoHeight || 1080);
+    };
     v.onerror = () => {
-      URL.revokeObjectURL(tempUrl);
-      resolve({ width: 1920, height: 1080 });
+      finish(1920, 1080);
     };
     v.src = tempUrl;
   });
 }
+
 
 /**
  * PATH A: Ultra-Fast WebCodecs Pipeline (Worker Preferred -> Main Thread Sequential Fallback)

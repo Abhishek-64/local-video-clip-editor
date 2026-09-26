@@ -178,6 +178,12 @@ const GeneratedClipCard = memo(function GeneratedClipCard({
             {ytChip}
             {fbChip}
             {igChip}
+            {!ytChip && clip.scheduledAt && (
+              <span className="inline-flex items-center space-x-1 text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30 px-1.5 py-0.5 rounded-full font-semibold">
+                <Calendar className="w-2.5 h-2.5 text-purple-400" />
+                <span>{formatScheduledDateTime(clip.scheduledAt)}</span>
+              </span>
+            )}
           </div>
         </div>
 
@@ -540,9 +546,9 @@ function GeneratedClips({
         {visibleClips.map((clip) => {
           const isSelected = selectedClipIds.has(clip.id);
           const uploadState = uploadJobs[clip.id];
-          const canUploadYt = isConnected && onUploadClip && (!uploadState || uploadState.status === 'upload_cancelled' || uploadState.status === 'upload_failed') && clip.blob;
-          const canPublishFb = isFbConnected && onPublishFbClip && clip.blob;
-          const canPublishIg = isIgConnected && onPublishIgClip && clip.blob;
+          const canUploadYt = isConnected && onUploadClip && (!uploadState || uploadState.status === 'upload_cancelled' || uploadState.status === 'upload_failed') && (clip.blob || clip.outputUrl);
+          const canPublishFb = isFbConnected && onPublishFbClip && (clip.blob || clip.outputUrl);
+          const canPublishIg = isIgConnected && onPublishIgClip && (clip.blob || clip.outputUrl);
           const isFbPublishing = isPublishingFb && fbPublishingClipId === clip.id;
           const isIgPublishing = isPublishingIg && igPublishingClipId === clip.id;
 

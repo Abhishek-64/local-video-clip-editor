@@ -242,8 +242,11 @@ export function useProcessingQueue({ onClipCompleted } = {}) {
         progress: 100,
         outputUrl: result.url,
         thumbnailUrl: result.thumbnailUrl,
-        thumbnailBlob: result.thumbnailBlob,
-        blob: result.blob,
+        // Null out raw blob data — the Object URL (outputUrl) is all that's needed
+        // for playback and download. Keeping the raw blob in React state pins ~200 MB
+        // of heap per 2-min clip and is the single largest source of generation lag.
+        blob: null,
+        thumbnailBlob: null,
         format: result.format,
         size: result.size,
         duration: result.duration
@@ -264,10 +267,14 @@ export function useProcessingQueue({ onClipCompleted } = {}) {
       // Add to completedClips
       setCompletedClips((prev) => [...prev, completedJob]);
 
-      // Trigger completion callback if supplied
+      // Trigger completion callback if supplied (pass result.blob so scheduling/uploading has access)
       if (onClipCompletedRef.current) {
         try {
-          onClipCompletedRef.current(completedJob);
+          onClipCompletedRef.current({
+            ...completedJob,
+            blob: result.blob || null,
+            thumbnailBlob: result.thumbnailBlob || null
+          });
         } catch (callbackErr) {
           console.error('[useProcessingQueue] onClipCompleted error:', callbackErr);
         }
@@ -466,6 +473,59 @@ export function useProcessingQueue({ onClipCompleted } = {}) {
     []
   );
 
+  /**
+   * Stop/halt all active video clip generation jobs immediately
+   */
+  const stopGenerating = useCallback(() => {
+    abortControllersRef.current.forEach((c) => {
+      try {
+        c.abort();
+      } catch (e) {}
+    });
+    abortControllersRef.current.clear();
+    activeWorkersRef.current = 0;
+
+    queueRef.current = queueRef.current.map((j) =>
+      j.status === 'processing' || j.status === 'waiting'
+        ? { ...j, status: 'cancelled', error: 'Stopped by user' }
+        : j
+    );
+    setQueue([...queueRef.current]);
+    setIsProcessing(false);
+    releaseWakeLock();
+  }, []);
+
+  /**
+   * Permanently remove multiple selected jobs from the queue and cleanup memory
+   * @param {string[]} jobIds
+   */
+  const deleteSelectedJobs = useCallback((jobIds = []) => {
+    if (!Array.isArray(jobIds) || jobIds.length === 0) return;
+    const targetSet = new Set(jobIds);
+
+    jobIds.forEach((id) => {
+      const controller = abortControllersRef.current.get(id);
+      if (controller) {
+        try { controller.abort(); } catch (e) {}
+        abortControllersRef.current.delete(id);
+      }
+      clipResourceManager.revokeClip(id);
+    });
+
+    completedClipsRef.current = completedClipsRef.current.filter((c) => !targetSet.has(c.id));
+    setCompletedClips([...completedClipsRef.current]);
+
+    queueRef.current = queueRef.current.filter((j) => !targetSet.has(j.id));
+    setQueue([...queueRef.current]);
+
+    const remainingActive = queueRef.current.some((j) => j.status === 'processing' || j.status === 'waiting');
+    if (!remainingActive) {
+      activeWorkersRef.current = 0;
+      setIsProcessing(false);
+      releaseWakeLock();
+    }
+  }, []);
+
   return {
     queue,
     setQueue,
@@ -477,8 +537,10 @@ export function useProcessingQueue({ onClipCompleted } = {}) {
     addJobs,
     setAndStartQueue,
     cancelJob,
+    stopGenerating,
     clearQueue,
     removeClip,
+    deleteSelectedJobs,
     downloadClip,
     downloadAllZip
   };

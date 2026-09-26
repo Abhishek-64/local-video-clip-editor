@@ -55,8 +55,8 @@ async function runAllLiveTests() {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      email: 'abhiwithpooja0768@gmail.com',
-      password: 'Admin@123'
+      email: process.env.APP_EMAIL || 'abhiwithpooja0768@gmail.com',
+      password: process.env.APP_PASSWORD
     })
   });
   const loginData = await loginRes.json();

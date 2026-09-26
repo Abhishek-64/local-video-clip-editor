@@ -23,7 +23,8 @@ import {
   ChevronRight,
   Eye,
   SlidersHorizontal,
-  X
+  X,
+  Trash2
 } from 'lucide-react';
 import { toDateTimeLocalString } from '../utils/scheduler';
 
@@ -89,6 +90,7 @@ export default function PhotoEditor({
   onCaptureVideoFrame = null,
   onPublishPhoto = null,
   onSetYouTubeThumbnail = null,
+  onClearPhoto = null,
   isFbConnected = false,
   isIgConnected = false,
   isYtConnected = false,
@@ -168,11 +170,9 @@ export default function PhotoEditor({
   });
   const [loadedLogo, setLoadedLogo] = useState(null);
 
-  // Update initial image if changed from outside (e.g. new frame capture)
+  // Update initial image if changed from outside (e.g. new frame capture or cleared)
   useEffect(() => {
-    if (initialImage) {
-      setImageSrc(initialImage);
-    }
+    setImageSrc(initialImage || null);
   }, [initialImage]);
 
   // Load Main Image
@@ -206,10 +206,29 @@ export default function PhotoEditor({
       const reader = new FileReader();
       reader.onload = (ev) => {
         setImageSrc(ev.target.result);
+        setPanX(0);
+        setPanY(0);
+        setZoom(1);
         showToast('Image loaded successfully', 'success');
       };
       reader.readAsDataURL(file);
     }
+  };
+
+  // Handle clear/delete uploaded image
+  const handleClearImage = () => {
+    setImageSrc(null);
+    setLoadedImage(null);
+    setPanX(0);
+    setPanY(0);
+    setZoom(1);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+    if (onClearPhoto) {
+      onClearPhoto();
+    }
+    showToast('Photo removed from studio', 'info');
   };
 
   // Handle logo file upload
@@ -631,6 +650,19 @@ export default function PhotoEditor({
               <Upload className="w-4 h-4 text-slate-300" />
               <span>Upload Image</span>
             </button>
+
+            {/* Delete / Clear Loaded Image Button */}
+            {imageSrc && (
+              <button
+                type="button"
+                onClick={handleClearImage}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 rounded-xl text-xs font-semibold border border-red-500/30 transition-colors shadow-sm"
+                title="Delete/remove current image from Photo Studio"
+              >
+                <Trash2 className="w-4 h-4 text-red-400" />
+                <span>Delete Photo</span>
+              </button>
+            )}
           </div>
         </div>
 

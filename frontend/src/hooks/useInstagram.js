@@ -29,6 +29,7 @@ const DEFAULT_IG_SETTINGS = {
   ig_start_part: 1,
   ig_zero_pad: true,
   ig_content_type: 'reel', // 'reel' | 'video'
+  ig_is_ai_generated: false,
   ig_share_to_feed: true,
   ig_caption_template: '{movie} - Part {part}\n\n#Reels #InstagramReels #Viral\n\n{hashtags}',
   ig_title_template: '{movie} - Part {part} | #Reels',
@@ -275,12 +276,28 @@ export function useInstagram({ isAuthenticated = false } = {}) {
       title = '',
       hashtags = [],
       shareToFeed = true,
+      isAiGenerated = false,
       scheduledAt = null,
       fileName = 'clip.mp4',
       igUserId = null
     } = opts;
 
-    if ((!videoBlob || !(videoBlob instanceof Blob)) && (!opts.b2FileId || !opts.b2FileName)) {
+    const isBlobLike = (b) => Boolean(b && (
+      b instanceof Blob ||
+      (typeof b === 'object' && typeof b.slice === 'function' && typeof b.size === 'number')
+    ));
+
+    // If videoBlob was not directly passed, attempt recovery from outputUrl if provided
+    if (!isBlobLike(videoBlob) && (opts.outputUrl || opts.url)) {
+      try {
+        const fetchRes = await fetch(opts.outputUrl || opts.url);
+        videoBlob = await fetchRes.blob();
+      } catch (recoveryErr) {
+        console.warn('[useInstagram] Could not recover blob from outputUrl:', recoveryErr);
+      }
+    }
+
+    if (!isBlobLike(videoBlob) && (!opts.b2FileId || !opts.b2FileName)) {
       throw new Error('No valid video blob or B2 asset available to publish.');
     }
 
@@ -299,10 +316,13 @@ export function useInstagram({ isAuthenticated = false } = {}) {
     let b2FileId = opts.b2FileId || cachedUpload?.b2FileId;
     let b2FileName = opts.b2FileName || cachedUpload?.b2FileName;
 
-    try {
+    const executeUploadAndPublish = async (forceFreshUpload = false) => {
+      let b2FileId = (!forceFreshUpload ? opts.b2FileId : null) || (!forceFreshUpload ? cachedUpload?.b2FileId : null);
+      let b2FileName = (!forceFreshUpload ? opts.b2FileName : null) || (!forceFreshUpload ? cachedUpload?.b2FileName : null);
+
       if (!b2FileName) {
         // Check if another platform (e.g. Facebook) is actively uploading this clip right now
-        const inFlight = sharedUploadCache.getInFlightUpload(videoBlob, cacheKey);
+        const inFlight = !forceFreshUpload ? sharedUploadCache.getInFlightUpload(videoBlob, cacheKey) : null;
         if (inFlight) {
           setPublishStage('b2_upload');
           setPublishProgress(50);
@@ -362,12 +382,51 @@ export function useInstagram({ isAuthenticated = false } = {}) {
         title,
         hashtags,
         shareToFeed,
+        isAiGenerated,
         scheduledAt,
-        igUserId: igUserId || igAccount.ig_user_id
+        igUserId: igUserId || igAccount.ig_user_id,
+        retainB2: Boolean(opts.retainB2)
       });
 
       if (!publishResult || !publishResult.success) {
         throw new Error(publishResult?.error || 'Instagram publishing failed.');
+      }
+
+      return publishResult;
+    };
+
+    try {
+      let publishResult;
+      try {
+        publishResult = await executeUploadAndPublish(false);
+      } catch (firstErr) {
+        const isStaleB2 = /B2_FILE_NOT_FOUND|2207076|not found in temporary storage|does not exist in temporary/i.test(firstErr.message || '') ||
+          firstErr?.status === 404 ||
+          firstErr?.code === 'B2_FILE_NOT_FOUND';
+
+        if (!isBlobLike(videoBlob) && (opts.outputUrl || opts.url)) {
+          try {
+            const fetchRes = await fetch(opts.outputUrl || opts.url);
+            videoBlob = await fetchRes.blob();
+          } catch {}
+        }
+
+        if (isStaleB2 && isBlobLike(videoBlob)) {
+          console.warn(`[Instagram] Stale or missing B2 file detected (${firstErr.message}). Invalidate cache and auto-retry fresh upload...`);
+          sharedUploadCache.removeCachedUpload(videoBlob, cacheKey);
+          if (b2FileName) sharedUploadCache.invalidateByFileName(b2FileName);
+          cachedUpload = null;
+          setPublishStage('b2_upload');
+          setPublishProgress(0);
+          publishResult = await executeUploadAndPublish(true);
+        } else {
+          throw firstErr;
+        }
+      }
+
+      // Clean up cache once published unless caller requested retention for another platform
+      if (videoBlob && !opts.retainCache) {
+        sharedUploadCache.removeCachedUpload(videoBlob, cacheKey);
       }
 
       setPublishStage('done');
@@ -380,6 +439,9 @@ export function useInstagram({ isAuthenticated = false } = {}) {
 
       return publishResult;
     } catch (err) {
+      if (videoBlob) {
+        sharedUploadCache.removeCachedUpload(videoBlob, cacheKey);
+      }
       console.error('Instagram publish pipeline error:', err);
       setPublishStage('error');
       setPublishError(err.message);

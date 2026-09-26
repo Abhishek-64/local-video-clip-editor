@@ -2,14 +2,17 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Calendar, Clock, Video, Eye, XCircle, RefreshCw, AlertCircle,
   Instagram, Share2, CheckCircle2, Play, ExternalLink, ShieldCheck,
-  Film, X, CalendarClock, ArrowRight, Sparkles, Zap
+  Film, X, CalendarClock, ArrowRight, Sparkles, Zap,
+  CheckSquare, Square, MinusSquare, Trash2, Search
 } from 'lucide-react';
 import {
   getSocialScheduledJobs,
+  reconcileSocialJobs,
   getSocialPreviewUrl,
   cancelSocialScheduledJob,
   rescheduleSocialScheduledJob,
-  publishSocialJobNow
+  publishSocialJobNow,
+  deleteSelectedScheduledJobs
 } from '../services/apiService';
 
 /**
@@ -128,6 +131,77 @@ export default function ScheduledVideosSection({
   const [previewVideoError, setPreviewVideoError] = useState(null);
   const [activePreviewJob, setActivePreviewJob] = useState(null);
 
+  // Search query state for filtering scheduled videos
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Multi-select state for scheduled jobs
+  const [selectedJobKeys, setSelectedJobKeys] = useState(new Set()); // `${job.platform}:${job.id}`
+  const [isDeletingSelected, setIsDeletingSelected] = useState(false);
+
+  // Filter jobs by search query
+  const filteredJobs = useMemo(() => {
+    if (!searchQuery.trim()) return jobs;
+    const q = searchQuery.toLowerCase().trim();
+    return jobs.filter(j => 
+      (j.title && j.title.toLowerCase().includes(q)) ||
+      (j.caption && j.caption.toLowerCase().includes(q)) ||
+      (j.b2_file_name && j.b2_file_name.toLowerCase().includes(q)) ||
+      (j.platform && j.platform.toLowerCase().includes(q))
+    );
+  }, [jobs, searchQuery]);
+
+  const isAllSelected = useMemo(() => {
+    return filteredJobs.length > 0 && filteredJobs.every(j => selectedJobKeys.has(`${j.platform}:${j.id}`));
+  }, [filteredJobs, selectedJobKeys]);
+
+  const isSomeSelected = useMemo(() => {
+    return selectedJobKeys.size > 0 && !isAllSelected;
+  }, [selectedJobKeys, isAllSelected]);
+
+  const handleToggleSelectJob = (job) => {
+    const key = `${job.platform}:${job.id}`;
+    setSelectedJobKeys(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const handleSelectAllJobs = () => {
+    if (isAllSelected) {
+      setSelectedJobKeys(new Set());
+    } else {
+      setSelectedJobKeys(new Set(filteredJobs.map(j => `${j.platform}:${j.id}`)));
+    }
+  };
+
+  const handleDeleteSelectedJobs = async () => {
+    if (selectedJobKeys.size === 0 || isDeletingSelected) return;
+    const confirmMsg = `Cancel & permanently delete ${selectedJobKeys.size} selected scheduled post(s)?`;
+    if (!window.confirm(confirmMsg)) return;
+
+    setIsDeletingSelected(true);
+    try {
+      const items = [];
+      selectedJobKeys.forEach(k => {
+        const [platform, id] = k.split(':');
+        items.push({ platform, id });
+      });
+      const res = await deleteSelectedScheduledJobs(items);
+      if (res && res.success) {
+        showToast(`Permanently deleted ${res.deletedCount ?? items.length} scheduled job(s).`, 'success');
+      }
+      setSelectedJobKeys(new Set());
+      await fetchScheduledJobs();
+    } catch (err) {
+      console.error('Delete selected scheduled error:', err);
+      showToast(`Failed to delete scheduled jobs: ${err.message}`, 'error');
+    } finally {
+      setIsDeletingSelected(false);
+    }
+  };
+
   // Fetch active scheduled jobs
   const fetchScheduledJobs = useCallback(async () => {
     setIsLoading(true);
@@ -145,6 +219,28 @@ export default function ScheduledVideosSection({
     }
   }, []);
 
+  const [isSyncing, setIsSyncing] = useState(false);
+  const handleSyncStatus = useCallback(async () => {
+    setIsSyncing(true);
+    try {
+      const res = await reconcileSocialJobs();
+      if (res && res.success) {
+        const total = (res.facebook?.reconciled || 0) + (res.instagram?.reconciled || 0);
+        if (total > 0) {
+          showToast(`Synced! ${total} post(s) updated to published.`, 'success');
+        } else {
+          showToast('Status check complete. All social posts are in sync.', 'info');
+        }
+      }
+      await fetchScheduledJobs();
+    } catch (err) {
+      console.warn('[ScheduledVideos] Error syncing social status:', err);
+      showToast(`Status check failed: ${err.message}`, 'error');
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [fetchScheduledJobs, showToast]);
+
   useEffect(() => {
     fetchScheduledJobs();
     // Auto-refresh scheduled list every 30 seconds
@@ -156,7 +252,7 @@ export default function ScheduledVideosSection({
   const groupedVideos = useMemo(() => {
     const groups = new Map();
 
-    for (const job of jobs) {
+    for (const job of filteredJobs) {
       const groupKey = job.b2_file_name || job.title || job.id;
       if (!groups.has(groupKey)) {
         groups.set(groupKey, {
@@ -172,7 +268,7 @@ export default function ScheduledVideosSection({
     }
 
     return Array.from(groups.values());
-  }, [jobs]);
+  }, [filteredJobs]);
 
   // Open Reschedule Modal with default/current datetime
   const handleOpenReschedule = (job) => {
@@ -314,18 +410,18 @@ export default function ScheduledVideosSection({
     }
   };
 
-  // Handle Confirm Cancel
+  // Handle Confirm Cancel / Permanent Delete
   const handleConfirmCancel = async () => {
     if (!cancelModalJob) return;
     setIsCancelling(true);
     try {
       const res = await cancelSocialScheduledJob(cancelModalJob.platform, cancelModalJob.id);
       if (res && res.success) {
-        showToast(`Cancelled schedule for ${cancelModalJob.platform === 'instagram' ? 'Instagram' : 'Facebook'}!`, 'success');
+        showToast(`Permanently deleted scheduled post for ${cancelModalJob.platform === 'instagram' ? 'Instagram' : 'Facebook'}!`, 'success');
         setCancelModalJob(null);
         await fetchScheduledJobs();
       } else {
-        throw new Error(res?.error || 'Failed to cancel');
+        throw new Error(res?.error || 'Failed to delete');
       }
     } catch (err) {
       console.error('Cancel schedule error:', err);
@@ -363,35 +459,109 @@ export default function ScheduledVideosSection({
   };
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl mt-2">
-      {/* Header */}
-      <div className="p-4 sm:p-5 border-b border-slate-800/80 bg-gradient-to-r from-slate-900 via-slate-950 to-slate-900 flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <div className="w-9 h-9 rounded-xl bg-orange-500/15 border border-orange-500/30 flex items-center justify-center text-orange-400 shadow-inner">
-            <Calendar className="w-4 h-4" />
-          </div>
-          <div>
-            <div className="flex items-center space-x-2">
-              <h3 className="text-sm font-bold text-white tracking-tight">Scheduled Videos</h3>
-              <span className="px-2 py-0.5 text-[10px] font-bold bg-orange-500/20 border border-orange-500/40 text-orange-300 rounded-full">
-                {jobs.length} waiting
-              </span>
+    <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl mt-2 flex flex-col">
+      {/* Header — Sticky so it stays visible while scrolling through many scheduled items */}
+      <div className="p-3.5 sm:p-4.5 border-b border-slate-800/80 bg-gradient-to-r from-slate-900 via-slate-950 to-slate-900 sticky top-0 z-10 backdrop-blur-md space-y-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-2.5">
+          <div className="flex items-center space-x-2.5 min-w-0">
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-orange-500/15 border border-orange-500/30 flex items-center justify-center text-orange-400 shadow-inner shrink-0">
+              <Calendar className="w-4 h-4" />
             </div>
+            <div className="min-w-0">
+              <div className="flex items-center space-x-2">
+                <h3 className="text-xs sm:text-sm font-bold text-white tracking-tight truncate">Scheduled Videos</h3>
+                <span className="px-2 py-0.5 text-[10px] font-bold bg-orange-500/20 border border-orange-500/40 text-orange-300 rounded-full shrink-0">
+                  {jobs.length} waiting
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Actions & Bulk Delete */}
+          <div className="flex items-center space-x-1.5 sm:space-x-2 shrink-0">
+            {selectedJobKeys.size > 0 && (
+              <button
+                type="button"
+                onClick={handleDeleteSelectedJobs}
+                disabled={isDeletingSelected}
+                className="px-2.5 sm:px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded-xl transition-all flex items-center space-x-1.5 shadow-lg shadow-rose-600/20 active:scale-98 cursor-pointer disabled:opacity-50"
+                title="Cancel and permanently delete selected scheduled posts"
+              >
+                {isDeletingSelected ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Trash2 className="w-3.5 h-3.5" />
+                )}
+                <span>Delete Selected ({selectedJobKeys.size})</span>
+              </button>
+            )}
+
+            {filteredJobs.length > 0 && (
+              <button
+                type="button"
+                onClick={handleSelectAllJobs}
+                className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-semibold flex items-center space-x-1.5 cursor-pointer transition-colors"
+                title={isAllSelected ? "Deselect all" : "Select all scheduled videos"}
+              >
+                {isAllSelected ? (
+                  <CheckSquare className="w-3.5 h-3.5 text-orange-400" />
+                ) : isSomeSelected ? (
+                  <MinusSquare className="w-3.5 h-3.5 text-orange-400" />
+                ) : (
+                  <Square className="w-3.5 h-3.5" />
+                )}
+                <span className="hidden sm:inline">Select All</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={handleSyncStatus}
+              disabled={isSyncing || isLoading}
+              className="px-2 sm:px-2.5 py-1.5 bg-slate-800/90 hover:bg-amber-500/20 text-slate-300 hover:text-amber-300 border border-slate-700/70 hover:border-amber-500/40 rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition-all disabled:opacity-50 cursor-pointer"
+              title="Sync & verify live status directly with Facebook & Instagram"
+            >
+              <Sparkles className={`w-3.5 h-3.5 text-amber-400 ${isSyncing ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">{isSyncing ? 'Syncing...' : 'Sync Status'}</span>
+            </button>
+
+            <button
+              onClick={fetchScheduledJobs}
+              disabled={isLoading}
+              className="p-1.5 sm:p-2 text-slate-400 hover:text-white hover:bg-slate-800/60 rounded-xl transition-all disabled:opacity-50 cursor-pointer"
+              title="Refresh scheduled videos"
+            >
+              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin text-orange-400' : ''}`} />
+            </button>
           </div>
         </div>
 
-        <button
-          onClick={fetchScheduledJobs}
-          disabled={isLoading}
-          className="p-2 text-slate-400 hover:text-white hover:bg-slate-800/60 rounded-xl transition-all disabled:opacity-50 cursor-pointer"
-          title="Refresh scheduled videos"
-        >
-          <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin text-orange-400' : ''}`} />
-        </button>
+        {/* Search Bar when multiple jobs exist */}
+        {jobs.length > 2 && (
+          <div className="relative pt-0.5">
+            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search scheduled videos..."
+              className="w-full pl-8 pr-7 py-1.5 bg-slate-950/70 border border-slate-800 focus:border-orange-500/50 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none transition-colors"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 p-0.5"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Content */}
-      <div className="p-4 sm:p-5 space-y-4">
+      {/* Content — Scrollable container with max-height and custom slim scrollbar */}
+      <div className="p-3 sm:p-4.5 space-y-3.5 max-h-[560px] sm:max-h-[640px] overflow-y-auto custom-scrollbar">
         {error && (
           <div className="p-3 bg-rose-500/10 border border-rose-500/25 rounded-xl flex items-center space-x-2 text-xs text-rose-300">
             <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
@@ -405,6 +575,20 @@ export default function ScheduledVideosSection({
               <Calendar className="w-6 h-6" />
             </div>
             <h4 className="text-sm font-bold text-white">No Active Scheduled Videos</h4>
+            <p className="text-xs text-slate-500">Scheduled videos for Facebook and Instagram will appear here.</p>
+          </div>
+        ) : filteredJobs.length === 0 && searchQuery ? (
+          <div className="p-8 text-center space-y-2.5 bg-slate-950/40 rounded-2xl border border-slate-800/80">
+            <Search className="w-8 h-8 text-slate-600 mx-auto" />
+            <h4 className="text-sm font-bold text-white">No Matching Videos</h4>
+            <p className="text-xs text-slate-400">No scheduled posts matched "{searchQuery}"</p>
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 rounded-lg transition-colors cursor-pointer"
+            >
+              Clear Search
+            </button>
           </div>
         ) : (
           <div className="flex flex-col gap-3.5">
@@ -412,10 +596,10 @@ export default function ScheduledVideosSection({
               return (
                 <div
                   key={group.key}
-                  className="bg-slate-950/80 border border-slate-800/90 hover:border-slate-700/80 rounded-2xl p-4 sm:p-4.5 flex flex-col justify-between space-y-3.5 transition-all shadow-md group"
+                  className="bg-slate-950/80 border border-slate-800/90 hover:border-slate-700/80 rounded-2xl p-3.5 sm:p-4 flex flex-col justify-between space-y-3 transition-all shadow-md group"
                 >
                   {/* Video Header & Source */}
-                  <div className="space-y-2">
+                  <div className="space-y-1.5">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center space-x-2">
@@ -427,7 +611,7 @@ export default function ScheduledVideosSection({
                           </h4>
                         </div>
                         {group.caption && (
-                          <p className="text-[11px] text-slate-400 line-clamp-1 mt-1 pl-9 font-sans">
+                          <p className="text-[11px] text-slate-400 line-clamp-1 mt-1 pl-9 font-sans" title={group.caption}>
                             {group.caption}
                           </p>
                         )}
@@ -435,23 +619,51 @@ export default function ScheduledVideosSection({
                     </div>
                   </div>
 
-                  {/* Platforms List (Independent Lifecycles with Dedicated Time Row) */}
-                  <div className="space-y-2.5 border-t border-slate-800/70 pt-3">
+                  {/* Platforms List (Independent Lifecycles with Responsive 3-Row Structure) */}
+                  <div className="space-y-2.5 border-t border-slate-800/70 pt-2.5">
                     {group.platforms.map((job) => {
                       const isIg = job.platform === 'instagram';
                       const relative = getRelativeTime(job.scheduled_at);
                       const isPublishingThis = Boolean(publishingNowJobIds[job.id]);
+                      const jobKey = `${job.platform}:${job.id}`;
+                      const isSelected = selectedJobKeys.has(jobKey);
+
+                      // Check if job is stuck in uploading/processing (> 4 mins since update or schedule)
+                      const isStuck = (job.status === 'uploading' || job.status === 'processing') && (() => {
+                        const refTime = job.updated_at ? new Date(job.updated_at).getTime() : (job.scheduled_at ? new Date(job.scheduled_at).getTime() : 0);
+                        return refTime > 0 && (Date.now() - refTime > 4 * 60 * 1000);
+                      })();
+
+                      // Action is blocked during live publishing or active initial upload, but NEVER when stuck
+                      const isActionBlocked = isPublishingThis || ((job.status === 'uploading' || job.status === 'processing') && !isStuck);
 
                       return (
                         <div
                           key={job.id}
-                          className="bg-slate-900/80 border border-slate-800/90 rounded-xl p-3 space-y-2.5 hover:border-slate-700/80 transition-all"
+                          className={`border rounded-xl p-3 space-y-2.5 transition-all ${
+                            isSelected
+                              ? 'bg-orange-950/20 border-orange-500/50 shadow-sm'
+                              : 'bg-slate-900/80 border-slate-800/90 hover:border-slate-700/80'
+                          }`}
                         >
-                          {/* Top: Platform Icon + Name + Content Type + Status Badge + Publish Now + Reschedule + Cancel */}
+                          {/* Row 1: Checkbox + Platform Icon + Name & Content Type (Left) | Status Badge + Delete Button (Right) */}
                           <div className="flex items-center justify-between gap-2">
-                            <div className="flex items-center space-x-2.5 min-w-0">
+                            <div className="flex items-center space-x-2 min-w-0">
+                              <button
+                                type="button"
+                                onClick={() => handleToggleSelectJob(job)}
+                                className="text-slate-400 hover:text-white transition-colors cursor-pointer p-0.5 shrink-0"
+                                title={isSelected ? "Deselect" : "Select"}
+                              >
+                                {isSelected ? (
+                                  <CheckSquare className="w-4 h-4 text-orange-400" />
+                                ) : (
+                                  <Square className="w-4 h-4 text-slate-600 hover:text-slate-400" />
+                                )}
+                              </button>
+
                               <div
-                                className={`w-7 h-7 rounded-lg flex items-center justify-center text-white shrink-0 shadow-sm ${
+                                className={`w-6 h-6 sm:w-7 sm:h-7 rounded-lg flex items-center justify-center text-white shrink-0 shadow-sm ${
                                   isIg
                                     ? 'bg-gradient-to-tr from-pink-500 via-rose-500 to-amber-500'
                                     : 'bg-gradient-to-tr from-blue-600 to-indigo-600'
@@ -460,65 +672,59 @@ export default function ScheduledVideosSection({
                                 {isIg ? <Instagram className="w-3.5 h-3.5" /> : <Share2 className="w-3.5 h-3.5" />}
                               </div>
 
-                              <div className="min-w-0">
-                                <span className="text-xs font-bold text-white block truncate">
+                              <div className="flex items-center space-x-1.5 min-w-0">
+                                <span className="text-xs font-bold text-white truncate">
                                   {isIg ? 'Instagram' : 'Facebook'}
                                 </span>
-                                <span className="text-[10px] text-slate-400 font-mono block -mt-0.5">
-                                  {job.content_type === 'video' ? 'Video Post' : 'Reel'}
+                                <span className="text-[10px] text-slate-400 font-mono bg-slate-800/90 px-1.5 py-0.5 rounded border border-slate-700/60 shrink-0">
+                                  {job.content_type === 'video' ? 'Video' : 'Reel'}
                                 </span>
                               </div>
                             </div>
 
-                            <div className="flex items-center space-x-1.5 sm:space-x-2 shrink-0">
-                              <span className={`px-2.5 py-0.5 text-[10px] font-bold rounded-full border shadow-sm ${
-                                isPublishingThis || job.status === 'uploading' || job.status === 'processing'
-                                ? 'bg-blue-500/20 text-blue-300 border-blue-500/40 animate-pulse'
-                                : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                            {/* Right: Status Badge + Delete Button */}
+                            <div className="flex items-center space-x-1.5 shrink-0">
+                              <span className={`px-2 py-0.5 text-[10px] font-bold rounded-full border shadow-sm ${
+                                isStuck
+                                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                                  : (isPublishingThis || job.status === 'uploading' || job.status === 'processing'
+                                    ? 'bg-blue-500/20 text-blue-300 border-blue-500/40 animate-pulse'
+                                    : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30')
                               }`}>
-                                {isPublishingThis ? 'Publishing...' : (job.status === 'uploading' ? (job.progress != null ? `Uploading ${job.progress}%` : 'Uploading...') : (job.status === 'processing' ? 'Processing...' : 'Scheduled'))}
+                                {isPublishingThis ? 'Publishing...' : (job.status === 'uploading' ? (isStuck ? 'Stuck / Syncing...' : (job.progress != null ? `Uploading ${job.progress}%` : 'Uploading...')) : (job.status === 'processing' ? (isStuck ? 'Processing (Delayed)' : 'Processing...') : 'Scheduled'))}
                               </span>
 
-                              {/* Publish Now Button */}
-                              <button
-                                type="button"
-                                onClick={() => handlePublishNow(job)}
-                                disabled={isPublishingThis || job.status === 'uploading' || job.status === 'processing'}
-                                className="px-2.5 py-1 text-[11px] font-semibold text-emerald-300 hover:text-white bg-emerald-500/15 hover:bg-emerald-500/30 border border-emerald-500/40 rounded-lg transition-all flex items-center space-x-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-sm active:scale-95"
-                                title={`Publish ${isIg ? 'Instagram' : 'Facebook'} post immediately`}
-                              >
-                                <Zap className={`w-3.5 h-3.5 text-emerald-400 ${isPublishingThis ? 'animate-spin' : ''}`} />
-                                <span className="hidden sm:inline">Publish Now</span>
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => handleOpenReschedule(job)}
-                                disabled={isPublishingThis || job.status === 'uploading' || job.status === 'processing'}
-                                className="px-2 py-1 text-[11px] font-semibold text-slate-300 hover:text-white bg-slate-800/90 hover:bg-orange-500/20 hover:border-orange-500/40 border border-slate-700/70 rounded-lg transition-all flex items-center space-x-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-sm active:scale-95"
-                                title={`Reschedule ${isIg ? 'Instagram' : 'Facebook'} post date and time`}
-                              >
-                                <CalendarClock className="w-3.5 h-3.5 text-orange-400" />
-                                <span className="hidden sm:inline">Reschedule</span>
-                              </button>
+                              {isStuck && (
+                                <button
+                                  type="button"
+                                  onClick={handleSyncStatus}
+                                  disabled={isSyncing}
+                                  className="p-1 text-amber-400 hover:text-amber-300 hover:bg-amber-500/15 border border-amber-500/30 rounded-lg transition-colors cursor-pointer"
+                                  title="Check if video is already published on Meta account"
+                                >
+                                  <Sparkles className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                                </button>
+                              )}
 
                               <button
                                 type="button"
                                 onClick={() => setCancelModalJob(job)}
                                 disabled={isPublishingThis}
-                                className="p-1 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
-                                title={`Cancel ${isIg ? 'Instagram' : 'Facebook'} Schedule`}
+                                className="p-1 text-slate-400 hover:text-rose-400 hover:bg-rose-500/15 border border-transparent hover:border-rose-500/30 rounded-lg transition-colors cursor-pointer"
+                                title={`Permanently delete ${isIg ? 'Instagram' : 'Facebook'} Schedule`}
                               >
-                                <XCircle className="w-4 h-4" />
+                                <Trash2 className="w-3.5 h-3.5 text-rose-400" />
                               </button>
                             </div>
                           </div>
 
-                          {/* Bottom: Dedicated Time & Countdown Strip (Click to Reschedule) */}
+                          {/* Row 2: Dedicated Time & Countdown Strip (Click to Reschedule) */}
                           <div
-                            onClick={() => (job.status !== 'uploading' && job.status !== 'processing' && !isPublishingThis) && handleOpenReschedule(job)}
-                            className="bg-slate-950/80 border border-slate-800/80 hover:border-orange-500/40 rounded-lg px-2.5 py-1.5 flex items-center justify-between gap-2 transition-all cursor-pointer group/time"
-                            title="Click to reschedule publishing time"
+                            onClick={() => !isActionBlocked && handleOpenReschedule(job)}
+                            className={`bg-slate-950/80 border border-slate-800/80 rounded-lg px-2.5 py-1.5 flex items-center justify-between gap-2 transition-all ${
+                              isActionBlocked ? 'opacity-60 cursor-not-allowed' : 'hover:border-orange-500/40 cursor-pointer group/time'
+                            }`}
+                            title={isActionBlocked ? undefined : "Click to reschedule publishing time"}
                           >
                             <div className="flex items-center space-x-1.5 text-slate-300 min-w-0">
                               <Clock className="w-3.5 h-3.5 text-orange-400 shrink-0 group-hover/time:text-orange-300 transition-colors" />
@@ -536,35 +742,41 @@ export default function ScheduledVideosSection({
                               </span>
                             )}
                           </div>
+
+                          {/* Row 3: Action Buttons — 2-Column Responsive Grid, Never Overlaps */}
+                          <div className="grid grid-cols-2 gap-2 pt-0.5">
+                            <button
+                              type="button"
+                              onClick={() => handlePublishNow(job)}
+                              disabled={isActionBlocked}
+                              className="w-full py-1.5 px-2 text-[11px] font-semibold text-emerald-300 hover:text-white bg-emerald-500/15 hover:bg-emerald-500/30 border border-emerald-500/40 rounded-lg transition-all flex items-center justify-center space-x-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-sm active:scale-95"
+                              title={`Publish ${isIg ? 'Instagram' : 'Facebook'} post immediately`}
+                            >
+                              <Zap className={`w-3.5 h-3.5 text-emerald-400 ${isPublishingThis ? 'animate-spin' : ''}`} />
+                              <span className="truncate">{isPublishingThis ? 'Publishing...' : 'Publish Now'}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleOpenReschedule(job)}
+                              disabled={isActionBlocked}
+                              className="w-full py-1.5 px-2 text-[11px] font-semibold text-slate-300 hover:text-white bg-slate-800/90 hover:bg-orange-500/20 hover:border-orange-500/40 border border-slate-700/70 rounded-lg transition-all flex items-center justify-center space-x-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-sm active:scale-95"
+                              title={`Reschedule ${isIg ? 'Instagram' : 'Facebook'} post date and time`}
+                            >
+                              <CalendarClock className="w-3.5 h-3.5 text-orange-400" />
+                              <span className="truncate">Reschedule</span>
+                            </button>
+                          </div>
                         </div>
                       );
                     })}
                   </div>
 
-                  {/* Card Actions: Publish Now + Reschedule + Preview */}
-                  <div className="pt-2 flex items-center justify-end space-x-2 border-t border-slate-800/60">
-                    {group.platforms.length === 1 && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => handlePublishNow(group.platforms[0])}
-                          disabled={Boolean(publishingNowJobIds[group.platforms[0].id]) || group.platforms[0].status === 'uploading' || group.platforms[0].status === 'processing'}
-                          className="px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 active:scale-98 text-emerald-300 hover:text-white font-medium text-xs rounded-xl shadow-sm border border-emerald-500/40 flex items-center space-x-1.5 transition-all cursor-pointer disabled:opacity-40"
-                        >
-                          <Zap className="w-3.5 h-3.5 text-emerald-400" />
-                          <span>{publishingNowJobIds[group.platforms[0].id] ? 'Publishing...' : 'Publish Now'}</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleOpenReschedule(group.platforms[0])}
-                          disabled={group.platforms[0].status === 'uploading' || group.platforms[0].status === 'processing'}
-                          className="px-3 py-1.5 bg-slate-800/90 hover:bg-slate-700 active:scale-98 text-slate-200 hover:text-white font-medium text-xs rounded-xl shadow-sm border border-slate-700 flex items-center space-x-1.5 transition-all cursor-pointer disabled:opacity-40"
-                        >
-                          <CalendarClock className="w-3.5 h-3.5 text-orange-400" />
-                          <span>Reschedule</span>
-                        </button>
-                      </>
-                    )}
+                  {/* Card Footer: Preview Video */}
+                  <div className="pt-2 flex items-center justify-between border-t border-slate-800/60">
+                    <span className="text-[11px] text-slate-500 font-mono truncate max-w-[200px]" title={group.b2_file_name}>
+                      {group.b2_file_name || 'Cloud Bridge Asset'}
+                    </span>
                     <button
                       type="button"
                       onClick={() => handlePreview(group.platforms[0])}
@@ -862,23 +1074,24 @@ export default function ScheduledVideosSection({
       )}
 
       {/* Cancel Confirmation Modal */}
+      {/* Cancel / Delete Confirmation Modal */}
       {cancelModalJob && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-5 space-y-4 shadow-2xl">
             <div className="w-10 h-10 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-400 flex items-center justify-center mx-auto">
-              <XCircle className="w-5 h-5" />
+              <Trash2 className="w-5 h-5" />
             </div>
 
             <div className="text-center space-y-1.5">
               <h4 className="text-sm font-bold text-white">
-                Cancel {cancelModalJob.platform === 'instagram' ? 'Instagram' : 'Facebook'} Schedule?
+                Permanently Delete {cancelModalJob.platform === 'instagram' ? 'Instagram' : 'Facebook'} Post?
               </h4>
               <p className="text-xs text-slate-400 leading-relaxed">
-                This will cancel the scheduled publishing job for{' '}
+                This will permanently delete the scheduled publishing job for{' '}
                 <strong className="text-white">
                   {cancelModalJob.platform === 'instagram' ? 'Instagram Reels' : 'Facebook Reels'}
-                </strong>.
-                {` Other platform schedules will remain active.`}
+                </strong>{' '}
+                from the database.
               </p>
             </div>
 
@@ -889,15 +1102,22 @@ export default function ScheduledVideosSection({
                 disabled={isCancelling}
                 className="flex-1 py-2 text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-xl transition-colors cursor-pointer"
               >
-                Keep Schedule
+                Keep Post
               </button>
               <button
                 type="button"
                 onClick={handleConfirmCancel}
                 disabled={isCancelling}
-                className="flex-1 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 active:scale-98 rounded-xl shadow-lg shadow-rose-600/20 transition-all cursor-pointer flex items-center justify-center space-x-1"
+                className="flex-1 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 active:scale-98 rounded-xl shadow-lg shadow-rose-600/20 transition-all cursor-pointer flex items-center justify-center space-x-1.5"
               >
-                {isCancelling ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <span>Cancel Schedule</span>}
+                {isCancelling ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete Permanently</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

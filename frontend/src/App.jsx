@@ -24,6 +24,7 @@ import { useInstagram } from './hooks/useInstagram';
 import { useAuth } from './hooks/useAuth';
 import { useTemplates } from './hooks/useTemplates';
 import sharedUploadCache from './services/sharedUploadCache';
+import { terminateWorkerPool } from './services/export/exportWorkerBridge';
 import {
   getB2UploadTarget,
   uploadToB2,
@@ -156,7 +157,19 @@ export default function App() {
     }, 4000);
   }, []);
 
-  // Editing Settings State
+  // ── Persistent Worker Pool Teardown ───────────────────────────────────────
+  // The pooled worker must be explicitly terminated on page unload.
+  // Between exports the worker stays alive (that's the whole point of pooling).
+  useEffect(() => {
+    const handleUnload = () => terminateWorkerPool();
+    window.addEventListener('beforeunload', handleUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleUnload);
+      terminateWorkerPool();
+    };
+  }, []);
+
+  // ── Editing Settings State ───────────────────────────────────────
   const [cropSettings, setCropSettings] = useState({
     mode: 'original',
     fillMode: 'fit',
@@ -283,7 +296,10 @@ export default function App() {
     cancelJob,
     clearQueue,
     downloadClip,
-    downloadAllZip
+    downloadAllZip,
+    stopGenerating,
+    deleteSelectedJobs,
+    removeClip
   } = useProcessingQueue({
     onClipCompleted: (job) => {
       handleClipCompletedRef.current?.(job);
@@ -337,7 +353,8 @@ export default function App() {
     uploadClip,
     cancelUpload,
     retryUpload,
-    refreshHistory
+    refreshHistory,
+    removeHistoryRecords
   } = useUploadQueue({
     completedClips,
     isConnected,
@@ -346,7 +363,7 @@ export default function App() {
     movieName: ytSettings?.yt_name || textSettings.movieName
   });
 
-  // ── Facebook Hook (Meta Graph API v21.0 & B2 Storage) ─────────────────────────
+  // ── Facebook Hook (Meta Graph API v26.0 & B2 Storage) ─────────────────────────
   const {
     fbAccount,
     availablePages: fbAvailablePages,
@@ -455,8 +472,17 @@ export default function App() {
   const [fbPublishedMap, setFbPublishedMap] = useState({});
   const [fbPublishingClipId, setFbPublishingClipId] = useState(null);
 
-  const handlePublishFbClip = useCallback(async (clip) => {
-    if (!clip || !clip.blob) {
+  const handlePublishFbClip = useCallback(async (clip, extraOptions = {}) => {
+    let clipBlob = clip?.blob;
+    if (!clipBlob && clip?.outputUrl) {
+      try {
+        const res = await fetch(clip.outputUrl);
+        clipBlob = await res.blob();
+      } catch (e) {
+        console.warn('Could not recover blob from outputUrl:', e);
+      }
+    }
+    if (!clip || !clipBlob) {
       showToast('Clip video data not ready for publishing.', 'error');
       return;
     }
@@ -483,12 +509,14 @@ export default function App() {
           })
         : `${movie} - Part ${partNum}\n\n#Reels #Shorts`;
 
-      const res = await publishToFacebookPipeline(clip.blob, {
+      const res = await publishToFacebookPipeline(clipBlob, {
         fileName: `${movie.replace(/[\\/:*?"<>|]/g, '_')}_Part_${partNum}.mp4`,
         title,
         caption,
         hashtags: fbSettings?.fb_tags || [],
-        contentType: fbSettings?.fb_content_type || 'reel'
+        contentType: fbSettings?.fb_content_type || 'reel',
+        isAiGenerated: Boolean(fbSettings?.fb_is_ai_generated),
+        ...extraOptions
       });
       const publishedUrl = res?.postUrl || res?.permalink_url || (res?.videoId ? `https://www.facebook.com/reel/${res.videoId}` : null);
       if (publishedUrl) {
@@ -516,8 +544,17 @@ export default function App() {
   const [igPublishedMap, setIgPublishedMap] = useState({});
   const [igPublishingClipId, setIgPublishingClipId] = useState(null);
 
-  const handlePublishIgClip = useCallback(async (clip) => {
-    if (!clip || !clip.blob) {
+  const handlePublishIgClip = useCallback(async (clip, extraOptions = {}) => {
+    let clipBlob = clip?.blob;
+    if (!clipBlob && clip?.outputUrl) {
+      try {
+        const res = await fetch(clip.outputUrl);
+        clipBlob = await res.blob();
+      } catch (e) {
+        console.warn('Could not recover blob from outputUrl:', e);
+      }
+    }
+    if (!clip || !clipBlob) {
       showToast('Clip video data not ready for publishing.', 'error');
       return;
     }
@@ -536,13 +573,15 @@ export default function App() {
           })
         : `${movie} - Part ${partNum}\n\n#Reels #Viral`;
 
-      const res = await publishToInstagramPipeline(clip.blob, {
+      const res = await publishToInstagramPipeline(clipBlob, {
         fileName: `${movie.replace(/[\\/:*?"<>|]/g, '_')}_Part_${partNum}.mp4`,
         title: `${movie} - Part ${partNum}`,
         caption,
         hashtags: igSettings?.ig_tags || [],
         shareToFeed: igSettings?.ig_share_to_feed !== false,
-        contentType: igSettings?.ig_content_type || 'reel'
+        contentType: igSettings?.ig_content_type || 'reel',
+        isAiGenerated: Boolean(igSettings?.ig_is_ai_generated),
+        ...extraOptions
       });
 
       const publishedUrl = res?.postUrl || (res?.media_id ? `https://www.instagram.com/reel/${res.media_id}` : null);
@@ -571,24 +610,32 @@ export default function App() {
   const [isPublishingBoth, setIsPublishingBoth] = useState(false);
 
   const handlePublishBothClip = useCallback(async (clip) => {
-    if (!clip || !clip.blob) {
+    let clipBlob = clip?.blob;
+    if (!clipBlob && clip?.outputUrl) {
+      try {
+        const res = await fetch(clip.outputUrl);
+        clipBlob = await res.blob();
+      } catch (e) {}
+    }
+    if (!clip || !clipBlob) {
       showToast('Clip video data not ready for publishing.', 'error');
       return;
     }
+    const resolvedClip = { ...clip, blob: clipBlob };
     setIsPublishingBoth(true);
     const errors = [];
     try {
       showToast(`Publishing Part ${clip.partNumber || 1} to Facebook & Instagram Reels (Temporary upload cached)...`, 'info');
-      // 1. Publish to Facebook first (uploads to Backblaze B2 and caches descriptor)
+      // 1. Publish to Facebook first (uploads to Backblaze B2 and retains for Instagram)
       try {
-        await handlePublishFbClip(clip);
+        await handlePublishFbClip(resolvedClip, { retainB2: true, retainCache: true });
       } catch (fbErr) {
         console.error('Dual publish FB error:', fbErr);
         errors.push(`Facebook: ${fbErr.message}`);
       }
-      // 2. Publish to Instagram (reuses public B2 URL instantly from cache)
+      // 2. Publish to Instagram (reuses public B2 URL from cache, cleans up afterwards)
       try {
-        await handlePublishIgClip(clip);
+        await handlePublishIgClip(resolvedClip);
       } catch (igErr) {
         console.error('Dual publish IG error:', igErr);
         errors.push(`Instagram: ${igErr.message}`);
@@ -816,10 +863,15 @@ export default function App() {
 
     const baseStartPart = Math.max(1, parseInt(textSettings.startPart) || 1);
     const intervalMinutes = publishConfig?.batchIntervalMinutes || (getIntervalSeconds(scheduleInterval) / 60) || 30;
+    const totalActiveCount = (customParts && customParts.length > 0)
+      ? customParts.filter(p => !p.isDeleted).length
+      : partsToGenerate.length;
 
     const newJobs = partsToGenerate.map((part, idx) => {
-      // Clean sequential part number starting from baseStartPart (e.g. 1 + 0 = Part 1)
-      const partNum = baseStartPart + idx;
+      // Clean part number: preserve original partNumber (e.g. Part 4 in range 4-15), offset by baseStartPart if needed
+      const partNum = (part.partNumber != null)
+        ? (baseStartPart > 1 ? baseStartPart + (part.partNumber - 1) : part.partNumber)
+        : (baseStartPart + idx);
       const effectiveMovie = exportSettings.movieName || textSettings.movieName || ytSettings?.yt_name || igSettings?.ig_name || fbSettings?.fb_name || 'Clip';
       const isCustomTitle = part.title && part.title !== 'Full Video' && !part.title.match(/^Part\s+\d+$/i);
       const customName = isCustomTitle ? `${effectiveMovie} - ${part.title} (Part ${partNum})` : null;
@@ -828,14 +880,16 @@ export default function App() {
         : generateClipFilename({
             movieName: effectiveMovie,
             partNumber: partNum,
-            totalParts: partsToGenerate.length,
+            totalParts: totalActiveCount,
             template: exportSettings.fileTemplate || textSettings.fileTemplate || textSettings.template || '{movie} - Part {part}',
             zeroPad: textSettings.zeroPad,
             extension: exportSettings.format || 'mp4'
           });
 
       const ytStartPart = Math.max(1, parseInt(ytSettings?.yt_start_part) || 1);
-      const ytPartNum = ytStartPart + idx;
+      const ytPartNum = (part.partNumber != null)
+        ? (ytStartPart > 1 ? ytStartPart + (part.partNumber - 1) : part.partNumber)
+        : (ytStartPart + idx);
 
       // Calculate staggered schedule offsets based on configured interval
       const clipOffsetMs = idx * intervalMinutes * 60 * 1000;
@@ -845,14 +899,17 @@ export default function App() {
       let jobIgScheduledAt = null;
 
       if (publishConfig?.mode === 'schedule') {
-        if (publishConfig.platforms?.youtube?.scheduleTime) {
-          jobYtScheduledAt = new Date(new Date(publishConfig.platforms.youtube.scheduleTime).getTime() + clipOffsetMs).toISOString();
+        const ytTarget = publishConfig.platforms?.youtube?.scheduleTime || publishConfig.platforms?.youtube?.scheduledAt;
+        if (ytTarget) {
+          jobYtScheduledAt = new Date(new Date(ytTarget).getTime() + clipOffsetMs).toISOString();
         }
-        if (publishConfig.platforms?.facebook?.scheduleTime) {
-          jobFbScheduledAt = new Date(new Date(publishConfig.platforms.facebook.scheduleTime).getTime() + clipOffsetMs).toISOString();
+        const fbTarget = publishConfig.platforms?.facebook?.scheduleTime || publishConfig.platforms?.facebook?.scheduledAt;
+        if (fbTarget) {
+          jobFbScheduledAt = new Date(new Date(fbTarget).getTime() + clipOffsetMs).toISOString();
         }
-        if (publishConfig.platforms?.instagram?.scheduleTime) {
-          jobIgScheduledAt = new Date(new Date(publishConfig.platforms.instagram.scheduleTime).getTime() + clipOffsetMs).toISOString();
+        const igTarget = publishConfig.platforms?.instagram?.scheduleTime || publishConfig.platforms?.instagram?.scheduledAt;
+        if (igTarget) {
+          jobIgScheduledAt = new Date(new Date(igTarget).getTime() + clipOffsetMs).toISOString();
         }
       } else if (autoSchedule && scheduleStartTime) {
         jobYtScheduledAt = calculateSingleScheduleTime(scheduleStartTime, scheduleInterval || '1hour', idx);
@@ -895,7 +952,7 @@ export default function App() {
         textSettings: {
           ...textSettings,
           currentPart: partNum,
-          totalParts: partsToGenerate.length
+          totalParts: totalActiveCount
         },
         logoSettings,
         effectsSettings,
@@ -1013,21 +1070,26 @@ export default function App() {
     }
     const baseStartPart = Math.max(1, parseInt(textSettings.startPart) || 1);
     const effectiveMovie = exportSettings.movieName || textSettings.movieName || ytSettings?.yt_name || igSettings?.ig_name || fbSettings?.fb_name || 'Clip';
+    const totalActiveCount = (customParts && customParts.length > 0)
+      ? customParts.filter((p) => !p.isDeleted).length
+      : list.length;
     const pendingClips = list.map((part, idx) => {
-      const partNum = baseStartPart + idx;
+      const partNum = (part.partNumber != null)
+        ? (baseStartPart > 1 ? baseStartPart + (part.partNumber - 1) : part.partNumber)
+        : (baseStartPart + idx);
       const isCustomTitle = part.title && part.title !== 'Full Video' && !part.title.match(/^Part\s+\d+$/i);
       const name = isCustomTitle
         ? `${effectiveMovie} - ${part.title} (Part ${partNum})`
         : generateClipFilename({
             movieName: effectiveMovie,
             partNumber: partNum,
-            totalParts: list.length,
+            totalParts: totalActiveCount,
             template: exportSettings.fileTemplate || textSettings.fileTemplate || textSettings.template || '{movie} - Part {part}',
             zeroPad: textSettings.zeroPad,
             extension: exportSettings.format || 'mp4'
           });
       return {
-        id: `pending-${idx + 1}`,
+        id: `pending-${partNum}`,
         partNumber: partNum,
         name,
         duration: Math.max(0, (part.endTime || 0) - (part.startTime || 0))
@@ -1134,12 +1196,22 @@ export default function App() {
   };
 
   // ── Handle YouTube upload callbacks ──────────────────────────────────────────
-  const handleUploadClip = useCallback((clip, overrides = {}) => {
+  const handleUploadClip = useCallback(async (clip, overrides = {}) => {
     if (!isConnected) {
       showToast('Connect YouTube first to upload clips.', 'error');
       return;
     }
-    uploadClip(clip, overrides);
+    let clipToUpload = clip;
+    if (!clipToUpload.blob && clipToUpload.outputUrl) {
+      try {
+        const res = await fetch(clipToUpload.outputUrl);
+        const b = await res.blob();
+        clipToUpload = { ...clipToUpload, blob: b };
+      } catch (e) {
+        console.error('[handleUploadClip] Could not recover blob from outputUrl:', e);
+      }
+    }
+    uploadClip(clipToUpload, overrides);
     if (overrides?.scheduledAt) {
       const formatted = new Date(overrides.scheduledAt).toLocaleString([], {
         month: 'short',
@@ -1153,18 +1225,28 @@ export default function App() {
     }
   }, [isConnected, uploadClip, showToast]);
 
-  const handleRetryUpload = useCallback((clip) => {
-    if (!clip.blob) {
+  const handleRetryUpload = useCallback(async (clip) => {
+    let clipToRetry = clip;
+    if (!clipToRetry.blob && clipToRetry.outputUrl) {
+      try {
+        const res = await fetch(clipToRetry.outputUrl);
+        const b = await res.blob();
+        clipToRetry = { ...clipToRetry, blob: b };
+      } catch (e) {
+        console.error('[handleRetryUpload] Could not recover blob:', e);
+      }
+    }
+    if (!clipToRetry.blob) {
       showToast('Clip blob is no longer available. Please re-export to retry.', 'error');
       return;
     }
-    retryUpload(clip);
+    retryUpload(clipToRetry);
     showToast('Retrying YouTube upload...', 'info');
   }, [retryUpload, showToast]);
 
   // ── Automatic Background Publishing on Render Completion ─────────────────────
   const handleClipCompleted = useCallback(async (completedJob) => {
-    if (!completedJob || !completedJob.blob) return;
+    if (!completedJob) return;
 
     const plan = completedJob.publishPlan;
     if (!plan || plan.mode === 'local_only') {
@@ -1172,6 +1254,24 @@ export default function App() {
       return;
     }
 
+    // Ensure we have a valid video Blob for publishing/scheduling (recover from outputUrl if state blob was nulled)
+    let clipBlob = completedJob.blob;
+    if (!clipBlob && completedJob.outputUrl) {
+      try {
+        const res = await fetch(completedJob.outputUrl);
+        clipBlob = await res.blob();
+      } catch (fetchErr) {
+        console.error('[handleClipCompleted] Failed to fetch blob from outputUrl:', fetchErr);
+      }
+    }
+
+    if (!clipBlob) {
+      console.warn('[handleClipCompleted] No video blob available to schedule or publish for job:', completedJob.id);
+      showToast(`Cannot schedule Part ${completedJob.partNumber || ''}: video blob unavailable.`, 'error');
+      return;
+    }
+
+    const jobWithBlob = { ...completedJob, blob: clipBlob };
     const { youtube, facebook, instagram } = plan;
 
     // 1. YouTube Auto Upload / Schedule
@@ -1202,7 +1302,7 @@ export default function App() {
             })
           : `${ytMovie} - Part ${ytPartNum}\n\n${ytTags.map(t => `#${t}`).join(' ')}`;
 
-        handleUploadClip(completedJob, {
+        handleUploadClip(jobWithBlob, {
           title: ytTitle,
           titleOverride: ytTitle,
           description: ytDesc,
@@ -1218,8 +1318,8 @@ export default function App() {
     }
 
     // Single B2 upload deduplication across Facebook & Instagram for this clip
-    const cacheKey = completedJob.id || (completedJob.blob?.size ? `${completedJob.name}_${completedJob.blob.size}` : completedJob.blob);
-    let cachedUpload = completedJob.blob ? sharedUploadCache.getCachedUpload(completedJob.blob, cacheKey) : null;
+    const cacheKey = jobWithBlob.id || (jobWithBlob.blob?.size ? `${jobWithBlob.name}_${jobWithBlob.blob.size}` : jobWithBlob.blob);
+    let cachedUpload = jobWithBlob.blob ? sharedUploadCache.getCachedUpload(jobWithBlob.blob, cacheKey) : null;
 
     // 2. Facebook Auto Publish / Schedule
     if (facebook?.enabled && isFbConnected) {
@@ -1250,7 +1350,7 @@ export default function App() {
             })
           : `${fbMovie} - Part ${fbPartNum}\n\n${fbTags.map(t => `#${t}`).join(' ')}`;
 
-        const fbRes = await publishToFacebookPipeline(completedJob.blob, {
+        const fbRes = await publishToFacebookPipeline(jobWithBlob.blob, {
           clipId: completedJob.id,
           b2FileId: cachedUpload?.b2FileId,
           b2FileName: cachedUpload?.b2FileName,
@@ -1260,11 +1360,14 @@ export default function App() {
           hashtags: fbTags,
           contentType: fbSettings?.fb_content_type || 'reel',
           pageId: fbAccount?.page_id,
-          scheduledAt: facebook.scheduledAt || null
+          isAiGenerated: Boolean(fbSettings?.fb_is_ai_generated),
+          scheduledAt: facebook.scheduledAt || null,
+          retainB2: Boolean(instagram?.enabled && isIgConnected),
+          retainCache: Boolean(instagram?.enabled && isIgConnected)
         });
 
-        if (!cachedUpload && completedJob.blob) {
-          cachedUpload = sharedUploadCache.getCachedUpload(completedJob.blob, cacheKey);
+        if (!cachedUpload && jobWithBlob.blob) {
+          cachedUpload = sharedUploadCache.getCachedUpload(jobWithBlob.blob, cacheKey);
         }
 
         const fbUrl = fbRes?.postUrl || fbRes?.permalink_url || (fbRes?.videoId ? `https://www.facebook.com/reel/${fbRes.videoId}` : null);
@@ -1304,7 +1407,7 @@ export default function App() {
             })
           : `${igMovie} - Part ${igPartNum}\n\n${igTags.map(t => `#${t}`).join(' ')}`;
 
-        const igRes = await publishToInstagramPipeline(completedJob.blob, {
+        const igRes = await publishToInstagramPipeline(jobWithBlob.blob, {
           clipId: completedJob.id,
           b2FileId: cachedUpload?.b2FileId,
           b2FileName: cachedUpload?.b2FileName,
@@ -1391,6 +1494,7 @@ export default function App() {
               b2FileName: b2Info.fileName || photoFileName,
               title: photoItem.title,
               caption: photoItem.caption,
+              isAiGenerated: Boolean(config.isAiGenerated !== undefined ? config.isAiGenerated : fbSettings?.fb_is_ai_generated),
               scheduledAt: platforms.facebook.scheduledAt || null
             });
             if (platforms.facebook.scheduledAt) {
@@ -1406,22 +1510,31 @@ export default function App() {
         // Instagram Photo Post
         if (platforms.instagram?.enabled && b2Info) {
           try {
+            // Instagram feed strictly requires aspect ratio between 4:5 and 1.91:1.
+            // 9:16 images are published as Stories to prevent Meta feed rejection errors.
+            const isStoryRatio = photoItem.aspectRatio === '9:16';
             await publishToInstagram({
-              contentType: 'image',
+              contentType: isStoryRatio ? 'story' : 'image',
               b2FileId: b2Info.fileId || b2Info.id,
               b2FileName: b2Info.fileName || photoFileName,
               caption: photoItem.caption,
+              isAiGenerated: Boolean(config.isAiGenerated !== undefined ? config.isAiGenerated : igSettings?.ig_is_ai_generated),
               scheduledAt: platforms.instagram.scheduledAt || null
             });
             if (platforms.instagram.scheduledAt) {
-              showToast('Instagram Photo scheduled successfully!', 'success');
+              showToast(`Instagram ${isStoryRatio ? 'Story' : 'Photo'} scheduled successfully!`, 'success');
             } else {
-              showToast('Instagram Photo published to Feed successfully!', 'success');
+              showToast(`Instagram ${isStoryRatio ? 'Story' : 'Photo'} published successfully!`, 'success');
             }
           } catch (igErr) {
             showToast(`Instagram photo error: ${igErr.message}`, 'error');
           }
         }
+
+        // Close publish modal and clear photo asset
+        setPublishModalClips(null);
+        setPublishModalPhoto(null);
+        setPhotoDataUrl(null);
       } catch (err) {
         console.error('[handleUnifiedPublish] Photo error:', err);
         showToast(`Photo publish failed: ${err.message}`, 'error');
@@ -1476,7 +1589,17 @@ export default function App() {
     // Process each clip sequentially with single B2 upload deduplication
     for (let i = 0; i < clips.length; i++) {
       const clip = clips[i];
-      const partNum = clip.partNumber || i + 1;
+      let clipBlob = clip.blob;
+      if (!clipBlob && clip.outputUrl) {
+        try {
+          const res = await fetch(clip.outputUrl);
+          clipBlob = await res.blob();
+        } catch (fetchErr) {
+          console.warn(`[handleUnifiedPublish] Could not recover blob from outputUrl for clip ${clip.id}:`, fetchErr);
+        }
+      }
+      const clipWithBlob = clipBlob ? { ...clip, blob: clipBlob } : clip;
+      const partNum = clipWithBlob.partNumber || i + 1;
       const clipOffsetMs = i * batchIntervalMinutes * 60 * 1000;
 
       // 1. YouTube Upload / Schedule
@@ -1487,7 +1610,7 @@ export default function App() {
           ytScheduledAt = new Date(new Date(ytTargetTime).getTime() + clipOffsetMs).toISOString();
         }
 
-        const ytPartNum = clip.ytPartNumber || partNum;
+        const ytPartNum = clipWithBlob.ytPartNumber || partNum;
         const ytMovie = ytSettings?.yt_name || textSettings?.movieName || 'My Movie';
         const isYtZeroPad = ytSettings?.yt_zero_pad !== false;
         const ytTags = (Array.isArray(ytSettings?.yt_tags) && ytSettings.yt_tags.length > 0)
@@ -1512,7 +1635,7 @@ export default function App() {
             })
           : `${ytMovie} - Part ${ytPartNum}\n\n${ytTags.map(t => `#${t}`).join(' ')}`;
 
-        handleUploadClip(clip, {
+        handleUploadClip(clipWithBlob, {
           title: ytTitle,
           titleOverride: ytTitle,
           description: ytDesc,
@@ -1525,12 +1648,12 @@ export default function App() {
       }
 
       // Check if B2 upload is already cached for FB / IG (deduplicate B2 upload)
-      const cacheKey = clip.id || (clip.blob && clip.blob.size ? `${clip.name}_${clip.blob.size}` : clip.blob);
-      let cachedUpload = clip.blob ? sharedUploadCache.getCachedUpload(clip.blob, cacheKey) : null;
+      const cacheKey = clipWithBlob.id || (clipWithBlob.blob && clipWithBlob.blob.size ? `${clipWithBlob.name}_${clipWithBlob.blob.size}` : clipWithBlob.blob);
+      let cachedUpload = clipWithBlob.blob ? sharedUploadCache.getCachedUpload(clipWithBlob.blob, cacheKey) : null;
 
       // 2. Facebook Publish / Schedule
       if (platforms.facebook?.enabled && isFbConnected) {
-        setFbPublishingClipId(clip.id);
+        setFbPublishingClipId(clipWithBlob.id);
         try {
           let fbScheduledAt = null;
           const fbTargetTime = platforms.facebook.scheduleTime || platforms.facebook.scheduledAt;
@@ -1562,8 +1685,8 @@ export default function App() {
               })
             : `${fbMovie} - Part ${partNum}\n\n${fbTags.map(t => `#${t}`).join(' ')}`;
 
-          const fbRes = await publishToFacebookPipeline(clip.blob, {
-            clipId: clip.id,
+          const fbRes = await publishToFacebookPipeline(clipWithBlob.blob, {
+            clipId: clipWithBlob.id,
             b2FileId: cachedUpload?.b2FileId,
             b2FileName: cachedUpload?.b2FileName,
             fileName: `${fbMovie.replace(/[\\/:*?"<>|]/g, '_')}_Part_${partNum}.mp4`,
@@ -1572,16 +1695,19 @@ export default function App() {
             hashtags: fbTags,
             contentType: fbSettings?.fb_content_type || 'reel',
             pageId: fbAccount?.page_id,
-            scheduledAt: fbScheduledAt
+            isAiGenerated: Boolean(config.isAiGenerated !== undefined ? config.isAiGenerated : fbSettings?.fb_is_ai_generated),
+            scheduledAt: fbScheduledAt,
+            retainB2: Boolean(platforms.instagram?.enabled && isIgConnected),
+            retainCache: Boolean(platforms.instagram?.enabled && isIgConnected)
           });
 
-          if (!cachedUpload && clip.blob) {
-            cachedUpload = sharedUploadCache.getCachedUpload(clip.blob, cacheKey);
+          if (!cachedUpload && clipWithBlob.blob) {
+            cachedUpload = sharedUploadCache.getCachedUpload(clipWithBlob.blob, cacheKey);
           }
 
           const publishedUrl = fbRes?.postUrl || fbRes?.permalink_url || (fbRes?.videoId ? `https://www.facebook.com/reel/${fbRes.videoId}` : null);
           if (publishedUrl) {
-            setFbPublishedMap(prev => ({ ...prev, [clip.id]: publishedUrl }));
+            setFbPublishedMap(prev => ({ ...prev, [clipWithBlob.id]: publishedUrl }));
           }
           if (fbScheduledAt) {
             showToast(`Part ${partNum} scheduled on Facebook for ${new Date(fbScheduledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, 'success');
@@ -1598,7 +1724,7 @@ export default function App() {
 
       // 3. Instagram Publish / Schedule
       if (platforms.instagram?.enabled && isIgConnected) {
-        setIgPublishingClipId(clip.id);
+        setIgPublishingClipId(clipWithBlob.id);
         try {
           let igScheduledAt = null;
           const igTargetTime = platforms.instagram.scheduleTime || platforms.instagram.scheduledAt;
@@ -1621,8 +1747,8 @@ export default function App() {
               })
             : `${igMovie} - Part ${partNum}\n\n${igTags.map(t => `#${t}`).join(' ')}`;
 
-          const igRes = await publishToInstagramPipeline(clip.blob, {
-            clipId: clip.id,
+          const igRes = await publishToInstagramPipeline(clipWithBlob.blob, {
+            clipId: clipWithBlob.id,
             b2FileId: cachedUpload?.b2FileId,
             b2FileName: cachedUpload?.b2FileName,
             fileName: `${igMovie.replace(/[\\/:*?"<>|]/g, '_')}_Part_${partNum}.mp4`,
@@ -1632,12 +1758,13 @@ export default function App() {
             shareToFeed: igSettings?.ig_share_to_feed !== false,
             contentType: igSettings?.ig_content_type || 'reel',
             igUserId: igAccount?.ig_user_id,
+            isAiGenerated: Boolean(config.isAiGenerated !== undefined ? config.isAiGenerated : igSettings?.ig_is_ai_generated),
             scheduledAt: igScheduledAt
           });
 
           const publishedUrl = igRes?.postUrl || (igRes?.media_id ? `https://www.instagram.com/reel/${igRes.media_id}` : null);
           if (publishedUrl) {
-            setIgPublishedMap(prev => ({ ...prev, [clip.id]: publishedUrl }));
+            setIgPublishedMap(prev => ({ ...prev, [clipWithBlob.id]: publishedUrl }));
           }
           if (igScheduledAt) {
             showToast(`Part ${partNum} scheduled on Instagram for ${new Date(igScheduledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, 'success');
@@ -1675,7 +1802,6 @@ export default function App() {
 
   // ── Render EditorTabs instance for either desktop sidebar or mobile slide-up sheet ────────
   const renderEditorTabs = (isSheet = false) => {
-    if (!videoData) return null;
     return (
       <EditorTabs
         isMobileSheet={isSheet}
@@ -1717,6 +1843,7 @@ export default function App() {
       onExportSelectedMerge={handleExportSelectedMerge}
       onGenerateBatchKept={handleGenerateBatchKept}
       onExportSinglePart={handleExportSinglePart}
+      isProcessing={isProcessing}
       movieName={exportSettings.movieName || textSettings.movieName}
       // YouTube props
       ytAccount={ytAccount}
@@ -1740,6 +1867,7 @@ export default function App() {
       isLoadingHistory={isLoadingHistory}
       onRetryUpload={handleRetryUpload}
       refreshHistory={refreshHistory}
+      removeHistoryRecords={removeHistoryRecords}
       // Facebook props
       fbAccount={fbAccount}
       availablePages={fbAvailablePages}
@@ -1854,6 +1982,9 @@ export default function App() {
         onNavigateTab={handleNavigateTab}
         studioMode={studioMode}
         onStudioModeChange={setStudioMode}
+        isGenerating={isProcessing}
+        isProcessing={isProcessing}
+        onStopGenerating={stopGenerating}
       />
 
       {/* Main Application Container */}
@@ -1864,6 +1995,7 @@ export default function App() {
             movieName={exportSettings.movieName || textSettings.movieName}
             videoData={videoData}
             currentVideoTime={currentTime}
+            onClearPhoto={() => setPhotoDataUrl(null)}
             onCaptureVideoFrame={() => {
               if (videoData) {
                 setStudioMode('video');
@@ -1896,55 +2028,52 @@ export default function App() {
             showToast={showToast}
           />
         ) : (
-          <>
-            {/* Step 1: Video Uploader Area */}
-            <section className="space-y-2">
-              <VideoUploader onVideoSelect={handleVideoSelect} currentVideo={videoData} />
-            </section>
-
-            {/* Workspace Grid (When video is loaded) */}
-            {videoData && (
-              <>
-                {/* Desktop 2-Column Workspace Layout & Single Column on Mobile */}
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
-                  {/* Left Column: Player, Timeline & Mobile Quick Tool Strip */}
-                  <div className="lg:col-span-7 space-y-4 sm:space-y-6">
-                    <VideoPreview
-                      videoData={videoData}
-                      currentTime={currentTime}
-                      onTimeUpdate={handleTimeUpdate}
-                      cropSettings={cropSettings}
-                      onCropChange={setCropSettings}
-                      bgSettings={bgSettings}
-                      textSettings={textSettings}
-                      onTextChange={handleTextChange}
-                      logoSettings={logoSettings}
-                      onLogoChange={setLogoSettings}
-                      effectsSettings={effectsSettings}
-                      audioSettings={audioSettings}
-                      customParts={customParts}
-                      skipDeletedCuts={skipDeletedCuts}
-                      onSplitAtPlayhead={handleSplitAtPlayhead}
-                      onToggleCutAtPlayhead={handleToggleCutAtPlayhead}
-                      onCaptureFrame={handleCaptureFrame}
-                      isSuspended={isEditorPreviewSuspended || Boolean(previewClipModal)}
-                    />
-
-                {/* Timeline Range Scrubber & Manual Parts Time Table */}
-                <Timeline
-                  duration={videoData.duration}
-                  startTime={startTime}
-                  endTime={endTime}
+          <div className="space-y-6">
+            {/* Desktop 2-Column Workspace Layout & Single Column on Mobile (Directly Shown UI like Photo Studio) */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
+              {/* Left Column: Player, Uploader & Mobile Quick Tool Strip */}
+              <div className="lg:col-span-7 space-y-4 sm:space-y-6">
+                <VideoPreview
+                  videoData={videoData}
                   currentTime={currentTime}
-                  onStartChange={setStartTime}
-                  onEndChange={setEndTime}
-                  onCurrentTimeChange={handleExplicitSeek}
-                  clipDuration={clipDuration}
-                  onClipDurationChange={setClipDuration}
-                  movieName={textSettings.movieName}
+                  onTimeUpdate={handleTimeUpdate}
+                  cropSettings={cropSettings}
+                  onCropChange={setCropSettings}
+                  bgSettings={bgSettings}
+                  textSettings={textSettings}
+                  onTextChange={handleTextChange}
+                  logoSettings={logoSettings}
+                  onLogoChange={setLogoSettings}
+                  effectsSettings={effectsSettings}
+                  audioSettings={audioSettings}
                   customParts={customParts}
-                  onCustomPartsChange={setCustomParts}
+                  skipDeletedCuts={skipDeletedCuts}
+                  onSplitAtPlayhead={handleSplitAtPlayhead}
+                  onToggleCutAtPlayhead={handleToggleCutAtPlayhead}
+                  onCaptureFrame={handleCaptureFrame}
+                  isSuspended={isEditorPreviewSuspended || Boolean(previewClipModal)}
                 />
+
+                {/* Video Uploader Area: Drag & Drop Dropzone or Compact File Card */}
+                <VideoUploader onVideoSelect={handleVideoSelect} currentVideo={videoData} />
+
+                {/* Timeline Range Scrubber & Manual Parts Time Table (When video is loaded) */}
+                {videoData && (
+                  <Timeline
+                    duration={videoData.duration}
+                    startTime={startTime}
+                    endTime={endTime}
+                    currentTime={currentTime}
+                    onStartChange={setStartTime}
+                    onEndChange={setEndTime}
+                    onCurrentTimeChange={handleExplicitSeek}
+                    clipDuration={clipDuration}
+                    onClipDurationChange={setClipDuration}
+                    movieName={textSettings.movieName}
+                    customParts={customParts}
+                    onCustomPartsChange={setCustomParts}
+                  />
+                )}
 
                 {/* Mobile Quick Tool Launcher (visible on screens < lg) */}
                 <div className="lg:hidden bg-slate-900/90 border border-slate-800/80 rounded-2xl p-2.5 sm:p-3 backdrop-blur-md shadow-xl">
@@ -2019,6 +2148,8 @@ export default function App() {
                 onGenerateQueue={handleGenerateQueue}
                 onCancelJob={cancelJob}
                 onClearQueue={clearQueue}
+                onDeleteSelectedJobs={deleteSelectedJobs}
+                onRemoveClip={removeClip}
                 onPreviewClip={(clip) => setPreviewClipModal(clip)}
                 onDownloadClip={downloadClip}
                 isProcessing={isProcessing}
@@ -2065,26 +2196,22 @@ export default function App() {
                 zipProgress={zipProgress}
               />
             </div>
-          </>
-        )}
-          </>
+          </div>
         )}
       </main>
 
       {/* Mobile Slide-Up Edit Sheet (< lg) */}
-      {videoData && (
-        <MobileEditSheet
-          isOpen={isMobileEditOpen}
-          onClose={() => setIsMobileEditOpen(false)}
-          isFullScreen={isMobileSheetFullScreen}
-          onToggleFullScreen={() => setIsMobileSheetFullScreen(prev => !prev)}
-        >
-          {renderEditorTabs(true)}
-        </MobileEditSheet>
-      )}
+      <MobileEditSheet
+        isOpen={isMobileEditOpen}
+        onClose={() => setIsMobileEditOpen(false)}
+        isFullScreen={isMobileSheetFullScreen}
+        onToggleFullScreen={() => setIsMobileSheetFullScreen(prev => !prev)}
+      >
+        {renderEditorTabs(true)}
+      </MobileEditSheet>
 
       {/* Fixed Mobile Bottom Navigation (< lg) */}
-      {videoData && (
+      {studioMode === 'video' && (
         <MobileBottomNav
           activeNavTab={activeMobileNavTab}
           onSelectNavTab={handleMobileNavSelect}

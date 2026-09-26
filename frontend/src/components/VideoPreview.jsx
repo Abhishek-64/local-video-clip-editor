@@ -14,7 +14,9 @@ import {
   GripVertical,
   Scissors,
   Camera,
-  Image as ImageIcon
+  Image as ImageIcon,
+  UploadCloud,
+  Sparkles
 } from 'lucide-react';
 import { formatTime } from '../utils/time';
 
@@ -1344,9 +1346,73 @@ function VideoPreviewInner({
             </div>
           )
         ) : (
-          <div className="text-center p-8 text-slate-500">
-            <FilmIcon className="w-12 h-12 mx-auto mb-2 opacity-30" />
-            <p className="text-sm">No video selected</p>
+          /* ── DIRECT STUDIO PREVIEW VIEWPORT (Directly visible on load, like Photo Studio) ── */
+          <div
+            ref={phoneViewportRef}
+            className="relative rounded-2xl overflow-hidden shadow-2xl border-2 border-slate-700 bg-slate-900 flex flex-col items-center justify-between select-none p-4"
+            style={{
+              aspectRatio: '9 / 16',
+              height: '360px',
+              maxHeight: '44vh'
+            }}
+          >
+            {/* Background Layer Live Preview */}
+            <div
+              className="absolute inset-0 pointer-events-none z-0"
+              style={{
+                backgroundColor: bgSettings?.color || '#0b0f19',
+                backgroundImage: bgSettings?.imageUrl ? `url(${bgSettings.imageUrl})` : undefined,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+                filter: `blur(${bgSettings?.blur || 0}px) brightness(${(bgSettings?.opacity ?? 65) / 100})`
+              }}
+            />
+
+            {/* Top Text / Title Overlay Live Preview */}
+            <div className="relative z-10 w-full text-center">
+              {textSettings?.enabled && (
+                <div style={getTextOverlayStyle()} className="rounded px-2 py-1 max-w-full">
+                  {getRenderedText()}
+                </div>
+              )}
+            </div>
+
+            {/* Center Studio Mockup / Dropzone Callout */}
+            <div className="relative z-10 flex flex-col items-center justify-center text-center p-3.5 bg-slate-950/75 backdrop-blur-md rounded-2xl border border-slate-700/70 shadow-2xl max-w-[210px] sm:max-w-[240px]">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500/20 to-amber-500/20 border border-orange-500/30 text-orange-400 flex items-center justify-center mb-2 shadow-inner">
+                <UploadCloud className="w-5 h-5 animate-pulse" />
+              </div>
+              <p className="text-xs font-bold text-white mb-0.5">Video Studio Canvas</p>
+              <p className="text-[10px] text-slate-300 mb-2 leading-tight">
+                Preview active styling &amp; templates
+              </p>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[9px] px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-300 font-mono font-semibold border border-orange-500/30">
+                  9:16 Vertical
+                </span>
+                <span className="text-[9px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono border border-slate-700">
+                  Ready
+                </span>
+              </div>
+            </div>
+
+            {/* Bottom / Watermark Logo Overlay Live Preview */}
+            <div className="relative z-10 w-full flex items-center justify-between">
+              {logoSettings?.enabled && (logoSettings?.dataUrl || logoSettings?.url) ? (
+                <div style={getLogoOverlayStyle()}>
+                  <img
+                    src={logoSettings.dataUrl || logoSettings.url}
+                    alt=""
+                    className="w-10 h-auto object-contain pointer-events-none"
+                  />
+                </div>
+              ) : (
+                <div />
+              )}
+              <span className="text-[9px] font-mono text-slate-400 bg-slate-950/80 px-2 py-0.5 rounded-full border border-slate-800 shadow-sm">
+                Studio Mode
+              </span>
+            </div>
           </div>
         )}
       </div>

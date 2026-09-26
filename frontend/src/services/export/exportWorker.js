@@ -93,6 +93,10 @@ async function runExportInWorker(payload) {
   });
   await videoDecoder.initialize();
 
+  // Outer-scope declarations so the finally block can always close them,
+  // even if configure() throws after partial setup.
+  let audioEncoder = null;
+
   // 3. Initialize OffscreenCanvas GPU/2D Renderer
   self.postMessage({ type: 'progress', progress: 10, phase: 'Initializing GPU Pipeline' });
   const renderer = new ExportRenderer({
@@ -281,7 +285,7 @@ async function runExportInWorker(payload) {
     if (mixedAudioData && typeof AudioEncoder !== 'undefined') {
       self.postMessage({ type: 'progress', progress: 92, phase: 'Encoding AAC audio' });
       try {
-        const audioEncoder = new AudioEncoder({
+        audioEncoder = new AudioEncoder({
           output: (chunk, metadata) => {
             const muxT0 = performance.now();
             if (metadata?.decoderConfig?.description) {
@@ -375,6 +379,10 @@ async function runExportInWorker(payload) {
 
     self.postMessage({
       type: 'complete',
+      // Echo back jobId & clipId so the bridge's canonical key matches
+      // the key used by clipResourceManager.registerClip() without guessing.
+      jobId,
+      clipId,
       blob: finalMp4Blob,
       thumbnailBlob: capturedThumbnailBlob,
       duration: clipDurationSec,
@@ -400,11 +408,15 @@ async function runExportInWorker(payload) {
   } finally {
     renderer.destroy();
     videoDecoder.close();
+    // Explicitly null the demuxer to release its sample table and chunk cache
+    // from worker memory before the next job can arrive.
+    demuxer.samples = [];
     if (videoEncoder && videoEncoder.state !== 'closed') {
       try { videoEncoder.close(); } catch (e) {}
     }
     if (audioEncoder && audioEncoder.state !== 'closed') {
       try { audioEncoder.close(); } catch (e) {}
     }
+    audioEncoder = null;
   }
 }

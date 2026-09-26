@@ -82,7 +82,7 @@ export function useUploadQueue({
   // ── Load upload history on mount ─────────────────────────────────────────────
 
   const refreshHistory = useCallback(async () => {
-    if (!apiAvailable || !isConnected) return;
+    if (!apiAvailable) return;
     setIsLoadingHistory(true);
     try {
       const history = await getUploadHistory();
@@ -92,7 +92,7 @@ export function useUploadQueue({
     } finally {
       setIsLoadingHistory(false);
     }
-  }, [apiAvailable, isConnected]);
+  }, [apiAvailable]);
 
   useEffect(() => {
     refreshHistory();
@@ -280,9 +280,18 @@ export function useUploadQueue({
 
   // ── Manual upload trigger (initiated explicitly by user or modal) ──────────────
 
-  const uploadClip = useCallback((clip, overrides = {}) => {
+  const uploadClip = useCallback(async (clip, overrides = {}) => {
     if (!apiAvailable || !isConnected) return;
-    if (!clip.blob) {
+    let clipBlob = clip.blob;
+    if (!clipBlob && clip.outputUrl) {
+      try {
+        const res = await fetch(clip.outputUrl);
+        clipBlob = await res.blob();
+      } catch (err) {
+        console.error('[uploadClip] Failed to recover blob from outputUrl:', err);
+      }
+    }
+    if (!clipBlob) {
       updateLocalJob(clip.id, {
         status: 'upload_failed',
         error: 'Clip blob is no longer available. Please re-export to upload to YouTube.'
@@ -290,7 +299,7 @@ export function useUploadQueue({
       return;
     }
 
-    const enrichedClip = { ...clip, ...overrides };
+    const enrichedClip = { ...clip, blob: clipBlob, ...overrides };
 
     // Don't queue if already uploading or queued
     const current = uploadJobs[clip.id];
@@ -351,6 +360,17 @@ export function useUploadQueue({
     };
   }, []);
 
+  const removeHistoryRecords = useCallback((ids = []) => {
+    if (!Array.isArray(ids) || ids.length === 0) return;
+    const targetSet = new Set(ids);
+    setUploadHistory(prev => prev.filter(r => !targetSet.has(r.id)));
+    setUploadJobs(prev => {
+      const next = { ...prev };
+      ids.forEach(id => delete next[id]);
+      return next;
+    });
+  }, []);
+
   return {
     uploadJobs,      // Map of jobId → upload state
     uploadHistory,   // From D1 (survives refresh)
@@ -358,6 +378,7 @@ export function useUploadQueue({
     uploadClip,
     cancelUpload,
     retryUpload,
-    refreshHistory
+    refreshHistory,
+    removeHistoryRecords
   };
 }

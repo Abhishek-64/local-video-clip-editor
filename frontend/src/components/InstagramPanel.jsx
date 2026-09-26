@@ -711,6 +711,46 @@ export default function InstagramPanel({
           </div>
         </div>
 
+        {/* ── Meta AI Label Disclosure ────────────────────────────────────── */}
+        <div className="p-3.5 bg-slate-900 border border-slate-800 rounded-2xl flex items-center justify-between gap-3 shadow-md">
+          <div className="flex items-start space-x-3 min-w-0">
+            <div className="w-8 h-8 rounded-full bg-pink-500/10 border border-pink-500/20 flex items-center justify-center text-pink-400 shrink-0 mt-0.5">
+              <Sparkles className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <span className="text-xs font-bold text-white block">Add AI label</span>
+              <span className="text-[11px] text-slate-400 block leading-tight mt-0.5">
+                We require you to label certain realistic content that's made with AI.{' '}
+                <a
+                  href="https://www.facebook.com/help/586071470355444"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-pink-400 hover:text-pink-300 underline inline"
+                >
+                  Learn more
+                </a>
+              </span>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            role="switch"
+            aria-checked={igSettings?.ig_is_ai_generated || false}
+            onClick={() => updateIgSettings({ ig_is_ai_generated: !igSettings?.ig_is_ai_generated })}
+            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+              igSettings?.ig_is_ai_generated ? 'bg-pink-600' : 'bg-slate-700'
+            }`}
+          >
+            <span
+              aria-hidden="true"
+              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                igSettings?.ig_is_ai_generated ? 'translate-x-5' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        </div>
+
         {/* ── SECTION 3: CAPTION & TITLE TEMPLATES + DYNAMIC TOKENS + CLONER ── */}
         <div className="p-4 sm:p-5 bg-slate-900 border border-slate-800 rounded-2xl space-y-3 shadow-md">
           <div className="flex flex-wrap items-center justify-between gap-2">

@@ -23,7 +23,9 @@ import {
   Hash,
   Sparkles,
   Clock,
-  AlertCircle
+  AlertCircle,
+  Zap,
+  ArrowRight
 } from 'lucide-react';
 import {
   formatTime,
@@ -108,6 +110,47 @@ export default function SplitCutEditor({
 
   const clearSelection = () => {
     setSelectedMergeIds(new Set());
+  };
+
+  const minPartNum = keptParts.length > 0 ? (keptParts[0].partNumber || 1) : 1;
+  const maxPartNum = keptParts.length > 0 ? (keptParts[keptParts.length - 1].partNumber || keptParts.length) : 1;
+
+  const [rangeFrom, setRangeFrom] = useState(1);
+  const [rangeTo, setRangeTo] = useState(keptParts.length || 1);
+
+  useEffect(() => {
+    if (keptParts.length > 0) {
+      setRangeTo(prev => (prev === 1 || prev > maxPartNum ? maxPartNum : prev));
+      setRangeFrom(prev => Math.max(minPartNum, Math.min(prev, maxPartNum)));
+    }
+  }, [keptParts.length, maxPartNum, minPartNum]);
+
+  const handleSelectRange = (from = rangeFrom, to = rangeTo) => {
+    const f = Math.max(minPartNum, parseInt(from) || minPartNum);
+    const t = Math.max(f, parseInt(to) || f);
+    const inRangeIds = new Set(
+      keptParts
+        .filter(p => {
+          const num = p.partNumber || 1;
+          return num >= f && num <= t;
+        })
+        .map(p => p.id)
+    );
+    setSelectedMergeIds(inRangeIds);
+  };
+
+  const handleExportRangeDirect = (from = rangeFrom, to = rangeTo) => {
+    const f = Math.max(minPartNum, parseInt(from) || minPartNum);
+    const t = Math.max(f, parseInt(to) || f);
+    const matchedParts = keptParts.filter(p => {
+      const num = p.partNumber || 1;
+      return num >= f && num <= t;
+    });
+    if (matchedParts.length === 0) return;
+    setSelectedMergeIds(new Set(matchedParts.map(p => p.id)));
+    if (onGenerateBatchKept) {
+      onGenerateBatchKept(matchedParts);
+    }
   };
 
   // Compute Selected Merge Segments
@@ -536,19 +579,103 @@ export default function SplitCutEditor({
         })}
       </div>
 
-      {/* 3. Streamlined, Compact Part Rows */}
-      <div className="space-y-1.5">
-        <div className="flex flex-wrap items-center justify-between px-1 text-[11px] text-slate-400 gap-1">
-          <span>{partsList.length} Segments ({keptParts.length} active to export, {deletedParts.length} cut)</span>
-          <div className="flex items-center space-x-2 shrink-0">
-            <button onClick={selectAllActive} className="text-slate-400 hover:text-white cursor-pointer touch-manipulation">
-              Select All
-            </button>
-            <span>•</span>
-            <button onClick={clearSelection} className="text-slate-400 hover:text-white cursor-pointer touch-manipulation">
-              Clear
+      {/* 3. Streamlined, Compact Part Rows & Range Selector */}
+      <div className="space-y-2">
+        {/* Quick Range Selection & Export Toolbar */}
+        <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-3 space-y-2.5 shadow-md">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center space-x-2">
+              <SlidersHorizontal className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+              <span className="text-xs font-bold text-white tracking-tight">
+                Select Parts Range to Export / Merge
+              </span>
+            </div>
+            <div className="flex items-center space-x-1.5 text-xs">
+              <button
+                type="button"
+                onClick={selectAllActive}
+                className="px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-white font-medium text-[11px] transition-colors cursor-pointer touch-manipulation"
+              >
+                All ({keptParts.length})
+              </button>
+              <button
+                type="button"
+                onClick={clearSelection}
+                className="px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-400 hover:text-slate-200 text-[11px] transition-colors cursor-pointer touch-manipulation"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800/80">
+            {/* From / To Inputs */}
+            <div className="flex items-center space-x-1.5 text-xs text-slate-300">
+              <span className="font-semibold text-slate-400">From Part:</span>
+              <input
+                type="number"
+                min={minPartNum}
+                max={maxPartNum}
+                value={rangeFrom}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value) || minPartNum;
+                  setRangeFrom(Math.max(minPartNum, Math.min(maxPartNum, val)));
+                }}
+                className="w-14 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-center font-mono font-bold text-white text-xs focus:border-orange-500 focus:outline-none"
+              />
+              <span className="text-slate-500 font-bold">→</span>
+              <span className="font-semibold text-slate-400">To Part:</span>
+              <input
+                type="number"
+                min={rangeFrom}
+                max={maxPartNum}
+                value={rangeTo}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value) || rangeFrom;
+                  setRangeTo(Math.max(rangeFrom, Math.min(maxPartNum, val)));
+                }}
+                className="w-14 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-center font-mono font-bold text-white text-xs focus:border-orange-500 focus:outline-none"
+              />
+              <span className="text-[10px] text-slate-500 font-mono">
+                (of {maxPartNum})
+              </span>
+              <button
+                type="button"
+                onClick={() => handleSelectRange(rangeFrom, rangeTo)}
+                className="px-2.5 py-1 bg-orange-500/20 hover:bg-orange-500/30 text-orange-300 border border-orange-500/40 rounded-lg font-bold text-xs transition-all active:scale-95 cursor-pointer touch-manipulation"
+                title="Select only parts in this range"
+              >
+                Select Range
+              </button>
+            </div>
+
+            {/* Quick Export Range Button */}
+            <button
+              type="button"
+              onClick={() => handleExportRangeDirect(rangeFrom, rangeTo)}
+              className="px-3 py-1 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white font-bold text-xs rounded-lg shadow-sm shadow-orange-500/25 flex items-center space-x-1.5 transition-all active:scale-95 cursor-pointer touch-manipulation ml-auto"
+              title="Directly export this range of parts"
+            >
+              <Zap className="w-3.5 h-3.5 fill-current text-white" />
+              <span>
+                Export Range ({Math.max(1, Math.min(maxPartNum, rangeTo) - Math.max(minPartNum, rangeFrom) + 1)} Clips)
+              </span>
             </button>
           </div>
+
+          {/* Active selection feedback */}
+          <div className="flex flex-wrap items-center justify-between text-[11px] px-2.5 py-1.5 bg-slate-900/60 rounded-lg border border-slate-800">
+            <span className="text-slate-300">
+              Selected: <strong className="text-emerald-400 font-mono">{getSelectedMergeSummary()}</strong>
+            </span>
+            <span className="text-slate-400 font-mono">
+              {selectedMergeParts.length} parts ({formatTime(selectedMergeDuration, true)})
+            </span>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between px-1 text-[11px] text-slate-400 gap-1 pt-1">
+          <span>{partsList.length} Segments ({keptParts.length} active to export, {deletedParts.length} cut)</span>
         </div>
 
         <div className="space-y-1.5 max-h-[380px] overflow-y-auto pr-1 scrollbar-thin">
@@ -757,7 +884,7 @@ export default function SplitCutEditor({
           >
             <Layers className="w-3.5 h-3.5 text-orange-400 shrink-0" />
             <span className="truncate">
-              Export {selectedMergeParts.length} as Separate Clips
+              Export {selectedMergeParts.length} as Separate Clips {selectedMergeParts.length > 0 && selectedMergeParts.length < keptParts.length ? `(${getSelectedMergeSummary()})` : ''}
             </span>
           </button>
         </div>

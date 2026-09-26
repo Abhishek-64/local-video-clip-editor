@@ -75,7 +75,10 @@ import {
   clearCompletedSocialHistory,
   clearUserDataByScope,
   wipeAllUserData,
-  isB2FileNeededByOtherJobs
+  isB2FileNeededByOtherJobs,
+  deleteSocialHistoryItems,
+  deleteScheduledSocialJobs,
+  cleanupUnusedData
 } from './db.js';
 
 import {
@@ -91,12 +94,14 @@ import {
   exchangeFacebookCodeForTokens,
   fetchFacebookPages,
   validateAndGetPageToken,
+  validatePageTokenMatch,
   verifyPagePublishCapability,
   publishFacebookReel,
   publishFacebookPageVideo,
   publishFacebookPhoto,
   publishFacebookPhotoStory,
-  processScheduledFacebookJobs
+  processScheduledFacebookJobs,
+  reconcileStuckFacebookJobs
 } from './facebook.js';
 
 import {
@@ -110,7 +115,8 @@ import {
   publishInstagramStory,
   createInstagramImageContainer,
   createInstagramCarouselContainer,
-  processScheduledInstagramJobs
+  processScheduledInstagramJobs,
+  reconcileStuckInstagramJobs
 } from './instagram.js';
 
 /**
@@ -592,7 +598,7 @@ app.post('/api/youtube/disconnect', withUser, async (c) => {
   return c.json({ success: true });
 });
 
-// ─── Facebook OAuth & Pages (Meta Graph API v21.0) ───────────────────────────
+// ─── Facebook OAuth & Pages (Meta Graph API v26.0) ───────────────────────────
 
 /**
  * GET /api/facebook/connect
@@ -896,6 +902,7 @@ app.get('/api/facebook/account', withUser, async (c) => {
  */
 app.get('/api/facebook/debug-page', withUser, async (c) => {
   const userId = c.get('userId');
+  const videoId = c.req.query('videoId') || null;
   const account = await getFacebookAccount(c.env.DB, userId);
 
   if (!account || !account.page_id) {
@@ -912,7 +919,7 @@ app.get('/api/facebook/debug-page', withUser, async (c) => {
   const secretKey = c.env.ENCRYPTION_KEY || c.env.FACEBOOK_APP_SECRET || '7a279df54155e4f8f70991df0a4e9c9c';
   const decryptedPageToken = await decryptToken(account.page_access_token, secretKey);
 
-  const diag = await verifyPagePublishCapability(c.env, decryptedPageToken, account.page_id);
+  const diag = await verifyPagePublishCapability(c.env, decryptedPageToken, account.page_id, videoId);
 
   return c.json({
     connected: diag.connected,
@@ -920,13 +927,18 @@ app.get('/api/facebook/debug-page', withUser, async (c) => {
     page_name: diag.page_name || account.page_name,
     has_page_access_token: Boolean(decryptedPageToken),
     can_publish: diag.can_publish,
+    tasks: diag.tasks || [],
+    graph_version: diag.graph_version,
     token_expired: diag.token_expired || false,
+    reel: diag.reel || null,
+    reel_error: diag.reelError || null,
     error: diag.error || null
   });
 });
 
 app.get('/api/facebook/debug-account', withUser, async (c) => {
   const userId = c.get('userId');
+  const videoId = c.req.query('videoId') || null;
   const account = await getFacebookAccount(c.env.DB, userId);
 
   if (!account || !account.page_id) {
@@ -943,7 +955,7 @@ app.get('/api/facebook/debug-account', withUser, async (c) => {
   const secretKey = c.env.ENCRYPTION_KEY || c.env.FACEBOOK_APP_SECRET || '7a279df54155e4f8f70991df0a4e9c9c';
   const decryptedPageToken = await decryptToken(account.page_access_token, secretKey);
 
-  const diag = await verifyPagePublishCapability(c.env, decryptedPageToken, account.page_id);
+  const diag = await verifyPagePublishCapability(c.env, decryptedPageToken, account.page_id, videoId);
 
   return c.json({
     connected: diag.connected,
@@ -951,7 +963,11 @@ app.get('/api/facebook/debug-account', withUser, async (c) => {
     page_name: diag.page_name || account.page_name,
     has_page_access_token: Boolean(decryptedPageToken),
     can_publish: diag.can_publish,
+    tasks: diag.tasks || [],
+    graph_version: diag.graph_version,
     token_expired: diag.token_expired || false,
+    reel: diag.reel || null,
+    reel_error: diag.reelError || null,
     error: diag.error || null
   });
 });
@@ -1154,8 +1170,10 @@ app.post('/api/facebook/publish', withUser, async (c) => {
     title = '',
     description = '',
     hashtags = [],
+    isAiGenerated = false,
     scheduledAt = null,
-    pageId = null
+    pageId = null,
+    retainB2 = false
   } = body;
 
   if (!b2FileId || !b2FileName) {
@@ -1178,13 +1196,24 @@ app.post('/api/facebook/publish', withUser, async (c) => {
       const match = pages.find(p => p.page_id === pageId);
       if (match && match.page_access_token) {
         encryptedPageToken = match.page_access_token;
+      } else {
+        return c.json({ error: `Selected Facebook Page ID (${pageId}) is not in your connected pages list.` }, 400);
       }
-    } catch {}
+    } catch {
+      return c.json({ error: `Could not parse managed pages for Page ID (${pageId}).` }, 400);
+    }
   }
 
   const activePageToken = await decryptToken(encryptedPageToken, secretKey);
   if (!activePageToken) {
     return c.json({ error: 'Facebook Page Access Token could not be decrypted. Please reconnect your Page.' }, 400);
+  }
+
+  // Pre-publish validation: verify Page token subject ID strictly matches activePageId
+  try {
+    await validatePageTokenMatch(c.env, activePageToken, activePageId);
+  } catch (valErr) {
+    return c.json({ error: valErr.message }, 403);
   }
 
   const normalizedScheduledAt = normalizeToUtcIso(scheduledAt);
@@ -1200,6 +1229,7 @@ app.post('/api/facebook/publish', withUser, async (c) => {
     caption,
     description,
     hashtags,
+    is_ai_generated: isAiGenerated ? 1 : 0,
     scheduled_at: normalizedScheduledAt,
     status: isFutureSchedule ? 'scheduled' : 'processing',
     b2_file_id: b2FileId,
@@ -1224,6 +1254,27 @@ app.post('/api/facebook/publish', withUser, async (c) => {
     // 1. Generate authorized download link from B2
     const b2DownloadUrl = await b2GetDownloadUrl(c.env, b2FileName, 3600);
 
+    // Pre-flight check: verify file exists in B2 before initiating Meta ingestion
+    try {
+      const headCheck = await fetch(b2DownloadUrl, { method: 'HEAD' });
+      if (headCheck.status === 404) {
+        console.warn(`[FB Publish] B2 file not found (404): ${b2FileName}`);
+        await updateFacebookUploadJob(c.env.DB, job.id, {
+          status: 'failed',
+          error_message: `B2_FILE_NOT_FOUND: The media file "${b2FileName}" was not found in temporary storage (it was already published or cleaned up).`
+        });
+        return c.json({
+          success: false,
+          error: `B2_FILE_NOT_FOUND: The media file "${b2FileName}" is no longer in temporary storage. Please re-upload the clip.`,
+          code: 'B2_FILE_NOT_FOUND',
+          b2FileName,
+          jobId: job.id
+        }, 404);
+      }
+    } catch (headErr) {
+      console.warn('[FB Publish] Pre-flight HEAD check warning:', headErr.message);
+    }
+
     // Format full caption including hashtags
     const hashtagsStr = Array.isArray(hashtags) && hashtags.length > 0
       ? hashtags.map(t => `#${t.replace(/^#+/, '')}`).join(' ')
@@ -1246,6 +1297,7 @@ app.post('/api/facebook/publish', withUser, async (c) => {
         b2DownloadUrl,
         caption: fullCaption,
         title,
+        isAiGenerated,
         scheduledAt: null // Immediate publish
       });
     } else {
@@ -1258,22 +1310,44 @@ app.post('/api/facebook/publish', withUser, async (c) => {
     }
 
     const postId = publishResult.postId || publishResult.videoId || publishResult.photoId || publishResult.storyId;
-    console.log(`[FB Ingest] Media published successfully (${postId}). Retaining B2 file ${b2FileName} for dependent platforms.`);
+    const isPublished = publishResult.status === 'published';
+    const postUrl = isPublished ? (publishResult.postUrl || null) : null;
+    console.log(`[FB Ingest] Media upload processed (${postId}) - status=${publishResult.status} postUrl=${postUrl}`);
 
     // 3. Update job in D1
     const updatedJob = await updateFacebookUploadJob(c.env.DB, job.id, {
       status: publishResult.status || 'published',
-      facebook_video_id: publishResult.videoId,
-      facebook_post_url: publishResult.postUrl,
-      published_at: new Date().toISOString()
+      facebook_video_id: publishResult.videoId || publishResult.photoId || publishResult.postId || null,
+      facebook_post_url: postUrl,
+      published_at: isPublished ? new Date().toISOString() : null
     });
+
+    // 4. Clean up temporary B2 file only if published and no other pending/scheduled jobs need it (and not retained for multi-platform publish)
+    if (b2FileName && isPublished && !retainB2) {
+      const needed = await isB2FileNeededByOtherJobs(c.env.DB, b2FileName, job.id);
+      if (!needed && b2FileId) {
+        try {
+          await b2DeleteFile(c.env, b2FileId, b2FileName);
+          console.log(`[FB Ingest] Cleaned up temporary B2 file: ${b2FileName}`);
+        } catch (delErr) {
+          console.warn('[FB Ingest] B2 cleanup warning:', delErr.message);
+        }
+      } else {
+        console.log(`[FB Ingest] Retaining B2 file ${b2FileName} for dependent platforms.`);
+      }
+    } else if (retainB2) {
+      console.log(`[FB Ingest] Retaining B2 file ${b2FileName} as requested for multi-platform publishing.`);
+    } else if (b2FileName && !isPublished) {
+      console.log(`[FB Ingest] Retaining B2 file ${b2FileName} while Facebook Reel processing is in-progress.`);
+    }
 
     return c.json({
       success: true,
+      videoId: publishResult.videoId,
       video_id: publishResult.videoId,
       page_id: activePageId,
       status: publishResult.status,
-      postUrl: publishResult.postUrl
+      postUrl: postUrl
     });
   } catch (err) {
     console.error('Facebook publish error:', err);
@@ -1899,8 +1973,10 @@ app.post('/api/instagram/publish', withUser, async (c) => {
     description = '',
     hashtags = [],
     shareToFeed = true,
+    isAiGenerated = false,
     scheduledAt = null,
-    igUserId = null
+    igUserId = null,
+    retainB2 = false
   } = body;
 
   if (!b2FileId || !b2FileName) {
@@ -1945,6 +2021,7 @@ app.post('/api/instagram/publish', withUser, async (c) => {
     caption,
     description,
     hashtags,
+    is_ai_generated: isAiGenerated ? 1 : 0,
     scheduled_at: normalizedScheduledAt,
     status: isFutureSchedule ? 'scheduled' : 'processing',
     b2_file_id: b2FileId,
@@ -1970,6 +2047,27 @@ app.post('/api/instagram/publish', withUser, async (c) => {
     // 1. Generate authorized download link from B2
     const b2DownloadUrl = await b2GetDownloadUrl(c.env, b2FileName, 3600);
 
+    // Pre-flight check: verify file exists in B2 before initiating Meta ingestion
+    try {
+      const headCheck = await fetch(b2DownloadUrl, { method: 'HEAD' });
+      if (headCheck.status === 404) {
+        console.warn(`[IG Publish] B2 file not found (404): ${b2FileName}`);
+        await updateInstagramUploadJob(c.env.DB, job.id, {
+          status: 'failed',
+          error_message: `B2_FILE_NOT_FOUND: The media file "${b2FileName}" was not found in temporary storage (it was already published or cleaned up).`
+        });
+        return c.json({
+          success: false,
+          error: `B2_FILE_NOT_FOUND: The media file "${b2FileName}" is no longer in temporary storage. Please re-upload the clip.`,
+          code: 'B2_FILE_NOT_FOUND',
+          b2FileName,
+          jobId: job.id
+        }, 404);
+      }
+    } catch (headErr) {
+      console.warn('[IG Publish] Pre-flight HEAD check warning:', headErr.message);
+    }
+
     // Format full caption including hashtags
     const hashtagsStr = Array.isArray(hashtags) && hashtags.length > 0
       ? hashtags.map(t => `#${t.replace(/^#+/, '')}`).join(' ')
@@ -1982,6 +2080,7 @@ app.post('/api/instagram/publish', withUser, async (c) => {
       publishResult = await publishInstagramPhoto(c.env, activeToken, activeIgUserId, {
         b2DownloadUrl,
         caption: fullCaption,
+        isAiGenerated,
         scheduledAt: null
       });
     } else if (contentType === 'story') {
@@ -1993,6 +2092,7 @@ app.post('/api/instagram/publish', withUser, async (c) => {
         b2DownloadUrl,
         caption: fullCaption,
         shareToFeed,
+        isAiGenerated,
         scheduledAt: null // Immediate publish
       });
     }
@@ -2007,6 +2107,23 @@ app.post('/api/instagram/publish', withUser, async (c) => {
       instagram_post_url: publishResult.postUrl,
       published_at: new Date().toISOString()
     });
+
+    // 5. Clean up temporary B2 file if no other pending/scheduled jobs need it (and not retained for multi-platform publish)
+    if (b2FileName && !retainB2) {
+      const needed = await isB2FileNeededByOtherJobs(c.env.DB, b2FileName, job.id);
+      if (!needed && b2FileId) {
+        try {
+          await b2DeleteFile(c.env, b2FileId, b2FileName);
+          console.log(`[IG Ingest] Cleaned up temporary B2 file: ${b2FileName}`);
+        } catch (delErr) {
+          console.warn('[IG Ingest] B2 cleanup warning:', delErr.message);
+        }
+      } else {
+        console.log(`[IG Ingest] Retaining B2 file ${b2FileName} for dependent platforms.`);
+      }
+    } else if (retainB2) {
+      console.log(`[IG Ingest] Retaining B2 file ${b2FileName} as requested for multi-platform publishing.`);
+    }
 
     return c.json({
       success: true,
@@ -2104,7 +2221,7 @@ app.post('/api/history/clear', withUser, async (c) => {
   else targetScope = 'history';
 
   const result = await clearUserDataByScope(c.env.DB, userId, targetScope);
-  return c.json({ success: true, platform, targetScope, result });
+  return c.json({ success: true, platform, targetScope, result, deletedCount: result?.deletedCount || 0 });
 });
 
 // ─── Social Publishing Sections (Scheduled Videos & Upload History) ──────────
@@ -2112,12 +2229,39 @@ app.post('/api/history/clear', withUser, async (c) => {
 /**
  * GET /api/social/scheduled
  * Section 1: Returns only active scheduled publishing jobs (scheduled, pending, uploading, processing).
+ * Automatically reconciles any stuck jobs against Meta Graph API before returning.
  * Never returns completed (published, failed, cancelled) jobs.
  */
 app.get('/api/social/scheduled', withUser, async (c) => {
   const userId = c.get('userId');
+  try {
+    await Promise.all([
+      reconcileStuckFacebookJobs(c.env, userId),
+      reconcileStuckInstagramJobs(c.env, userId)
+    ]);
+  } catch (recErr) {
+    console.warn('[API] Auto-reconcile on /api/social/scheduled warning:', recErr.message);
+  }
+
   const jobs = await getScheduledSocialJobs(c.env.DB, userId);
   return c.json({ success: true, scheduled: jobs });
+});
+
+/**
+ * POST /api/social/reconcile
+ * Explicitly triggers Meta status reconciliation for all stuck/in-progress jobs.
+ */
+app.post('/api/social/reconcile', withUser, async (c) => {
+  const userId = c.get('userId');
+  const [fbResult, igResult] = await Promise.all([
+    reconcileStuckFacebookJobs(c.env, userId),
+    reconcileStuckInstagramJobs(c.env, userId)
+  ]);
+  return c.json({
+    success: true,
+    facebook: fbResult,
+    instagram: igResult
+  });
 });
 
 /**
@@ -2274,9 +2418,17 @@ app.post('/api/social/cancel', withUser, async (c) => {
   if (cancelRes.b2_file_name) {
     try {
       const needed = await isB2FileNeededByOtherJobs(c.env.DB, cancelRes.b2_file_name, jobId);
-      if (!needed && cancelRes.b2_file_id) {
-        await b2DeleteFile(c.env, cancelRes.b2_file_id, cancelRes.b2_file_name);
-        console.log(`[Cancel Schedule] Cleaned up unused B2 file: ${cancelRes.b2_file_name}`);
+      if (!needed) {
+        let fileId = cancelRes.b2_file_id;
+        if (!fileId) {
+          const b2Files = await b2ListFileNames(c.env, 100);
+          const target = b2Files.find(f => f.fileName === cancelRes.b2_file_name);
+          fileId = target?.fileId;
+        }
+        if (fileId) {
+          await b2DeleteFile(c.env, fileId, cancelRes.b2_file_name);
+          console.log(`[Cancel Schedule] Cleaned up unused B2 file: ${cancelRes.b2_file_name}`);
+        }
       }
     } catch (b2Err) {
       console.warn('[Cancel Schedule] B2 cleanup warning:', b2Err.message);
@@ -2284,6 +2436,81 @@ app.post('/api/social/cancel', withUser, async (c) => {
   }
 
   return c.json({ success: true, message: 'Schedule cancelled successfully', job: cancelRes.job });
+});
+
+/**
+ * POST /api/social/scheduled/delete-selected
+ * Permanently delete selected scheduled publishing jobs across Facebook and Instagram.
+ * If candidate B2 files are no longer needed by any active job, safely delete them from B2.
+ */
+app.post('/api/social/scheduled/delete-selected', withUser, async (c) => {
+  const userId = c.get('userId');
+  let body = {};
+  try {
+    body = await c.req.json();
+  } catch {}
+
+  const items = Array.isArray(body.items) ? body.items : [];
+  if (items.length === 0) {
+    return c.json({ success: true, deletedCount: 0, deletedIds: [] });
+  }
+
+  const result = await deleteScheduledSocialJobs(c.env.DB, userId, items);
+
+  // Check candidate B2 files for cleanup
+  if (Array.isArray(result.candidateB2Files)) {
+    for (const fileName of result.candidateB2Files) {
+      try {
+        const needed = await isB2FileNeededByOtherJobs(c.env.DB, fileName);
+        if (!needed) {
+          const b2Files = await b2ListFileNames(c.env, 100);
+          const target = b2Files.find(f => f.fileName === fileName);
+          if (target?.fileId) {
+            await b2DeleteFile(c.env, target.fileId, fileName);
+            console.log(`[Batch Delete Scheduled] Cleaned unused B2 file: ${fileName}`);
+          }
+        }
+      } catch (e) {
+        console.warn(`[Batch Delete Scheduled] B2 file cleanup check failed: ${e.message}`);
+      }
+    }
+  }
+
+  return c.json(result);
+});
+
+/**
+ * DELETE /api/social/scheduled/:platform/:id
+ * Permanently delete a single scheduled publishing job.
+ */
+app.delete('/api/social/scheduled/:platform/:id', withUser, async (c) => {
+  const userId = c.get('userId');
+  const platform = c.req.param('platform');
+  const jobId = c.req.param('id');
+  const cancelRes = await cancelScheduledSocialJob(c.env.DB, userId, platform, jobId);
+  if (!cancelRes.success) {
+    return c.json({ error: cancelRes.error || 'Failed to delete scheduled job' }, 400);
+  }
+  if (cancelRes.b2_file_name) {
+    try {
+      const needed = await isB2FileNeededByOtherJobs(c.env.DB, cancelRes.b2_file_name, jobId);
+      if (!needed) {
+        let fileId = cancelRes.b2_file_id;
+        if (!fileId) {
+          const b2Files = await b2ListFileNames(c.env, 100);
+          const target = b2Files.find(f => f.fileName === cancelRes.b2_file_name);
+          fileId = target?.fileId;
+        }
+        if (fileId) {
+          await b2DeleteFile(c.env, fileId, cancelRes.b2_file_name);
+          console.log(`[Delete Schedule] Cleaned up unused B2 file: ${cancelRes.b2_file_name}`);
+        }
+      }
+    } catch (b2Err) {
+      console.warn('[Delete Schedule] B2 cleanup warning:', b2Err.message);
+    }
+  }
+  return c.json({ success: true, message: 'Scheduled post permanently deleted', job: cancelRes.job });
 });
 
 /**
@@ -2412,13 +2639,26 @@ app.post('/api/social/publish-now', withUser, async (c) => {
         publishResult = await publishFacebookReel(c.env, activePageToken, job.page_id || account.page_id, {
           b2DownloadUrl,
           caption: fullCaption,
-          title: job.title || ''
+          title: job.title || '',
+          isAiGenerated: Boolean(job.is_ai_generated),
+          onStepUpdate: async ({ step, videoId }) => {
+            if (step === 'start') {
+              await updateFacebookUploadJob(c.env.DB, job.id, {
+                facebook_video_id: videoId
+              });
+            } else if (step === 'finish') {
+              await updateFacebookUploadJob(c.env.DB, job.id, {
+                status: 'processing',
+                facebook_video_id: videoId
+              });
+            }
+          }
         });
       }
 
       await updateFacebookUploadJob(c.env.DB, job.id, {
         status: 'published',
-        facebook_video_id: publishResult.videoId,
+        facebook_video_id: publishResult.videoId || publishResult.photoId || publishResult.postId || null,
         facebook_post_url: publishResult.postUrl,
         published_at: new Date().toISOString()
       });
@@ -2490,11 +2730,21 @@ app.post('/api/social/publish-now', withUser, async (c) => {
         : '';
       const fullCaption = `${job.caption ? job.caption.trim() : ''}${hashtagsStr ? (job.caption ? '\n\n' : '') + hashtagsStr : ''}`;
 
-      const publishResult = await publishInstagramReel(c.env, activeToken, job.ig_user_id || account.ig_user_id, {
-        b2DownloadUrl,
-        caption: fullCaption,
-        shareToFeed: true
-      });
+      let publishResult;
+      if (job.content_type === 'image' || job.content_type === 'photo') {
+        publishResult = await publishInstagramPhoto(c.env, activeToken, job.ig_user_id || account.ig_user_id, {
+          b2DownloadUrl,
+          caption: fullCaption,
+          isAiGenerated: Boolean(job.is_ai_generated)
+        });
+      } else {
+        publishResult = await publishInstagramReel(c.env, activeToken, job.ig_user_id || account.ig_user_id, {
+          b2DownloadUrl,
+          caption: fullCaption,
+          shareToFeed: true,
+          isAiGenerated: Boolean(job.is_ai_generated)
+        });
+      }
 
       await updateInstagramUploadJob(c.env.DB, job.id, {
         status: 'published',
@@ -2552,6 +2802,40 @@ app.post('/api/social/history/clear', withUser, async (c) => {
   const platform = body.platform || 'all';
   const result = await clearCompletedSocialHistory(c.env.DB, userId, platform);
   return c.json({ success: true, ...result });
+});
+
+/**
+ * POST /api/social/history/delete-selected
+ * Permanently delete selected upload history records across YouTube, Facebook, and Instagram.
+ * Expects { items: [{ platform, id }] }
+ */
+app.post('/api/social/history/delete-selected', withUser, async (c) => {
+  const userId = c.get('userId');
+  let body = {};
+  try {
+    body = await c.req.json();
+  } catch {}
+
+  const items = Array.isArray(body.items) ? body.items : [];
+  if (items.length === 0) {
+    return c.json({ success: true, deletedCount: 0, deletedIds: [] });
+  }
+
+  const result = await deleteSocialHistoryItems(c.env.DB, userId, items);
+  return c.json(result);
+});
+
+/**
+ * DELETE /api/social/history/:platform/:id
+ * Permanently delete a single upload history record.
+ */
+app.delete('/api/social/history/:platform/:id', withUser, async (c) => {
+  const userId = c.get('userId');
+  const platform = c.req.param('platform');
+  const id = c.req.param('id');
+
+  const result = await deleteSocialHistoryItems(c.env.DB, userId, [{ platform, id }]);
+  return c.json(result);
 });
 
 /**
@@ -2969,6 +3253,44 @@ app.post('/api/storage/b2/delete-all', withUser, async (c) => {
   } catch (err) {
     return c.json({ error: err.message }, 500);
   }
+});
+
+/**
+ * POST /api/storage/b2/delete-batch
+ * Delete multiple selected files from Backblaze B2 bucket.
+ */
+app.post('/api/storage/b2/delete-batch', withUser, async (c) => {
+  let body = {};
+  try {
+    body = await c.req.json();
+  } catch {}
+
+  const files = Array.isArray(body.files) ? body.files : [];
+  if (files.length === 0) {
+    return c.json({ success: true, deletedCount: 0 });
+  }
+
+  const deletePromises = files.map(f => {
+    if (f.fileId && f.fileName) {
+      return b2DeleteFile(c.env, f.fileId, f.fileName);
+    }
+    return Promise.resolve();
+  });
+  await Promise.allSettled(deletePromises);
+  return c.json({ success: true, deletedCount: files.length });
+});
+
+/**
+ * POST /api/storage/cleanup
+ * On-demand permanent database cleanup across all tables for user & system:
+ * - Expired sessions
+ * - Stale terminal upload logs
+ * - Unneeded data
+ */
+app.post('/api/storage/cleanup', withUser, async (c) => {
+  const userId = c.get('userId');
+  const report = await cleanupUnusedData(c.env.DB, userId);
+  return c.json({ success: true, report });
 });
 
 /**

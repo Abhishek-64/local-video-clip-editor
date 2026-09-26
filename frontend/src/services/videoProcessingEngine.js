@@ -138,11 +138,19 @@ function wrapAndFitText(ctx, rawText, maxAllowedWidth, initialFontSize, font, mi
     lineHeight: Math.round(currentFontSize * 1.28)
   };
 
-  if (TEXT_LAYOUT_CACHE.size > 150) {
-    const oldestKey = TEXT_LAYOUT_CACHE.keys().next().value;
-    TEXT_LAYOUT_CACHE.delete(oldestKey);
+  // Proper LRU eviction: cap at 50 entries, evict oldest 25 in one batch.
+  // The previous single-entry eviction at 150 caused the cache to balloon
+  // to 150 string-array entries across multiple exports.
+  if (TEXT_LAYOUT_CACHE.size >= 50) {
+    const keys = TEXT_LAYOUT_CACHE.keys();
+    for (let i = 0; i < 25; i++) {
+      const { value: oldKey, done } = keys.next();
+      if (done) break;
+      TEXT_LAYOUT_CACHE.delete(oldKey);
+    }
   }
   TEXT_LAYOUT_CACHE.set(cacheKey, result);
+
 
   return result;
 }

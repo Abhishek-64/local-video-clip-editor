@@ -53,49 +53,123 @@ export function calculateCropDimensions({
   const canvasWidth = targetDims.width;
   const canvasHeight = targetDims.height;
 
-  let sx = 0;
-  let sy = 0;
+  const placement = resolveVideoPlacement({
+    sourceWidth,
+    sourceHeight,
+    stageWidth: canvasWidth,
+    stageHeight: canvasHeight,
+    mode,
+    fillMode,
+    zoom,
+    x: manualX,
+    y: manualY,
+    customWidth,
+    customHeight,
+    faceCenter
+  });
+
+  return {
+    sx: placement.sourceX,
+    sy: placement.sourceY,
+    sWidth: placement.sourceWidth,
+    sHeight: placement.sourceHeight,
+    dx: placement.destinationX,
+    dy: placement.destinationY,
+    dWidth: placement.destinationWidth,
+    dHeight: placement.destinationHeight,
+    canvasWidth,
+    canvasHeight,
+    targetAspect,
+    letterbox: placement.letterbox,
+    letterboxPct: placement.letterboxPct
+  };
+}
+
+/**
+ * Resolves deterministic source and destination rectangles for video placement,
+ * shared between Preview and Export pipelines.
+ *
+ * @param {Object} params
+ * @param {number} params.sourceWidth - Video natural width (e.g. 1920)
+ * @param {number} params.sourceHeight - Video natural height (e.g. 1080)
+ * @param {number} params.stageWidth - Target stage or canvas width (e.g. 1080 or preview px)
+ * @param {number} params.stageHeight - Target stage or canvas height (e.g. 1920 or preview px)
+ * @param {string} [params.mode='9:16'] - 'original' | '9:16' | '16:9' | '1:1' | '4:5' | '21:9' | 'custom'
+ * @param {string} [params.fillMode='fit'] - 'fit' | 'fill'
+ * @param {number} [params.zoom=1] - Zoom factor (0.5 to 3.0)
+ * @param {number} [params.x=0] - Horizontal pan offset (-200 to 200)
+ * @param {number} [params.y=0] - Vertical pan offset (-200 to 200)
+ * @param {number} [params.customWidth=100] - Custom crop width in %
+ * @param {number} [params.customHeight=100] - Custom crop height in %
+ * @param {Object|null} [params.faceCenter=null]
+ * @returns {Object} {
+ *   sourceX, sourceY, sourceWidth, sourceHeight,
+ *   destinationX, destinationY, destinationWidth, destinationHeight,
+ *   letterbox: { top, bottom, left, right },
+ *   letterboxPct: { topPct, bottomPct, leftPct, rightPct }
+ * }
+ */
+export function resolveVideoPlacement({
+  sourceWidth = 1920,
+  sourceHeight = 1080,
+  stageWidth = 1080,
+  stageHeight = 1920,
+  mode = '9:16',
+  fillMode = 'fit',
+  zoom = 1,
+  x = 0,
+  y = 0,
+  customWidth = 100,
+  customHeight = 100,
+  faceCenter = null
+}) {
+  const srcAspect = sourceWidth / sourceHeight;
+  const stageAspect = stageWidth / stageHeight;
+
+  let sourceX = 0;
+  let sourceY = 0;
   let sWidth = sourceWidth;
   let sHeight = sourceHeight;
 
-  let dx = 0;
-  let dy = 0;
-  let dWidth = canvasWidth;
-  let dHeight = canvasHeight;
+  let destinationX = 0;
+  let destinationY = 0;
+  let destinationWidth = stageWidth;
+  let destinationHeight = stageHeight;
+
+  let letterbox = { top: 0, bottom: 0, left: 0, right: 0 };
+  let letterboxPct = { topPct: 0, bottomPct: 0, leftPct: 0, rightPct: 0 };
 
   if (mode === 'original') {
     sWidth = sourceWidth;
     sHeight = sourceHeight;
-    sx = 0;
-    sy = 0;
-    dx = 0;
-    dy = 0;
-    dWidth = canvasWidth;
-    dHeight = canvasHeight;
+    sourceX = 0;
+    sourceY = 0;
+    destinationX = 0;
+    destinationY = 0;
+    destinationWidth = stageWidth;
+    destinationHeight = stageHeight;
   } else if (mode === 'custom') {
-    // ── MANUAL CUSTOM FREEFORM CROP ──
     const clampedZoom = Math.max(0.5, Math.min(3.0, zoom || 1));
     sWidth = Math.max(50, ((customWidth || 100) / 100) * sourceWidth / clampedZoom);
     sHeight = Math.max(50, ((customHeight || 100) / 100) * sourceHeight / clampedZoom);
 
-    let centerX = sourceWidth / 2 + (manualX / 200) * (sourceWidth * 0.45);
-    let centerY = sourceHeight / 2 + (manualY / 200) * (sourceHeight * 0.45);
+    let centerX = sourceWidth / 2 + (x / 200) * (sourceWidth * 0.45);
+    let centerY = sourceHeight / 2 + (y / 200) * (sourceHeight * 0.45);
 
-    sx = Math.max(0, Math.min(sourceWidth - sWidth, centerX - sWidth / 2));
-    sy = Math.max(0, Math.min(sourceHeight - sHeight, centerY - sHeight / 2));
+    sourceX = Math.max(0, Math.min(sourceWidth - sWidth, centerX - sWidth / 2));
+    sourceY = Math.max(0, Math.min(sourceHeight - sHeight, centerY - sHeight / 2));
 
-    dx = 0;
-    dy = 0;
-    dWidth = canvasWidth;
-    dHeight = canvasHeight;
+    destinationX = 0;
+    destinationY = 0;
+    destinationWidth = stageWidth;
+    destinationHeight = stageHeight;
   } else if (fillMode === 'fill') {
-    // ── FILL / COVER MODE: Zoom-to-fill the entire target frame (no black bars) ──
-    if (srcAspect > targetAspect) {
+    if (srcAspect > stageAspect) {
       sHeight = sourceHeight;
-      sWidth = sHeight * targetAspect;
+      sWidth = sHeight * stageAspect;
     } else {
       sWidth = sourceWidth;
-      sHeight = sourceWidth / targetAspect;
+      sHeight = sourceWidth / stageAspect;
     }
 
     const clampedZoom = Math.max(0.5, Math.min(3.0, zoom || 1));
@@ -110,63 +184,84 @@ export function calculateCropDimensions({
       centerY = faceCenter.y * sourceHeight;
     }
 
-    const offsetX = (manualX / 200) * (sourceWidth * 0.45);
-    const offsetY = (manualY / 200) * (sourceHeight * 0.45);
+    const offsetX = (x / 200) * (sourceWidth * 0.45);
+    const offsetY = (y / 200) * (sourceHeight * 0.45);
 
     centerX += offsetX;
     centerY += offsetY;
 
-    sx = centerX - sWidth / 2;
-    sy = centerY - sHeight / 2;
+    sourceX = centerX - sWidth / 2;
+    sourceY = centerY - sHeight / 2;
 
     if (sWidth <= sourceWidth) {
-      sx = Math.max(0, Math.min(sourceWidth - sWidth, sx));
+      sourceX = Math.max(0, Math.min(sourceWidth - sWidth, sourceX));
     } else {
-      sx = (sourceWidth - sWidth) / 2;
+      sourceX = (sourceWidth - sWidth) / 2;
     }
 
     if (sHeight <= sourceHeight) {
-      sy = Math.max(0, Math.min(sourceHeight - sHeight, sy));
+      sourceY = Math.max(0, Math.min(sourceHeight - sHeight, sourceY));
     } else {
-      sy = (sourceHeight - sHeight) / 2;
+      sourceY = (sourceHeight - sHeight) / 2;
     }
 
-    dx = 0;
-    dy = 0;
-    dWidth = canvasWidth;
-    dHeight = canvasHeight;
+    destinationX = 0;
+    destinationY = 0;
+    destinationWidth = stageWidth;
+    destinationHeight = stageHeight;
   } else {
-    // ── FIT / LETTERBOX MODE: Preserve whole source video inside target canvas ──
+    // FIT mode (letterbox or pillarbox)
     sWidth = sourceWidth;
     sHeight = sourceHeight;
-    sx = 0;
-    sy = 0;
+    sourceX = 0;
+    sourceY = 0;
 
-    if (srcAspect > targetAspect) {
-      dWidth = canvasWidth;
-      dHeight = Math.round(canvasWidth / srcAspect);
-      dx = 0;
-      dy = Math.round((canvasHeight - dHeight) / 2);
+    if (srcAspect > stageAspect) {
+      // Wider than stage -> letterbox top & bottom
+      destinationWidth = stageWidth;
+      destinationHeight = Math.round(stageWidth / srcAspect);
+      destinationX = 0;
+      destinationY = Math.round((stageHeight - destinationHeight) / 2);
+
+      const topSlot = destinationY;
+      const bottomSlot = Math.max(0, stageHeight - (destinationY + destinationHeight));
+      letterbox = { top: topSlot, bottom: bottomSlot, left: 0, right: 0 };
+      letterboxPct = {
+        topPct: (topSlot / stageHeight) * 100,
+        bottomPct: (bottomSlot / stageHeight) * 100,
+        leftPct: 0,
+        rightPct: 0
+      };
     } else {
-      dHeight = canvasHeight;
-      dWidth = Math.round(canvasHeight * srcAspect);
-      dy = 0;
-      dx = Math.round((canvasWidth - dWidth) / 2);
+      // Taller than stage -> pillarbox left & right
+      destinationHeight = stageHeight;
+      destinationWidth = Math.round(stageHeight * srcAspect);
+      destinationY = 0;
+      destinationX = Math.round((stageWidth - destinationWidth) / 2);
+
+      const leftSlot = destinationX;
+      const rightSlot = Math.max(0, stageWidth - (destinationX + destinationWidth));
+      letterbox = { top: 0, bottom: 0, left: leftSlot, right: rightSlot };
+      letterboxPct = {
+        topPct: 0,
+        bottomPct: 0,
+        leftPct: (leftSlot / stageWidth) * 100,
+        rightPct: (rightSlot / stageWidth) * 100
+      };
     }
   }
 
   return {
-    sx,
-    sy,
-    sWidth,
-    sHeight,
-    dx,
-    dy,
-    dWidth,
-    dHeight,
-    canvasWidth,
-    canvasHeight,
-    targetAspect
+    sourceX,
+    sourceY,
+    sourceWidth: sWidth,
+    sourceHeight: sHeight,
+    destinationX,
+    destinationY,
+    destinationWidth,
+    destinationHeight,
+    letterbox,
+    letterboxPct
   };
 }
 

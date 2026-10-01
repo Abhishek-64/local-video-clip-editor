@@ -18,6 +18,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { formatTime } from '../utils/time';
+import { resolveVideoPlacement } from '../utils/crop';
 
 function VideoPreviewInner({
   videoData,
@@ -106,35 +107,33 @@ function VideoPreviewInner({
   const hasTopReel = Boolean(topReel?.url);
   const hasBottomReel = Boolean(bottomReel?.url);
 
-  // Compute letterbox slot percentage for 9:16 (or current mode)
+  // Compute letterbox slot percentage using shared resolveVideoPlacement
   const slotMetrics = useMemo(() => {
     const vW = videoRef.current?.videoWidth || videoData?.width || 1920;
     const vH = videoRef.current?.videoHeight || videoData?.height || 1080;
-    const videoAspect = (vW && vH) ? (vW / vH) : (16 / 9);
+    let targetW = 1080;
+    let targetH = 1920;
+    if (cropSettings?.mode === '1:1') { targetW = 1080; targetH = 1080; }
+    else if (cropSettings?.mode === '4:5') { targetW = 1080; targetH = 1350; }
+    else if (cropSettings?.mode === '16:9') { targetW = 1920; targetH = 1080; }
+    else if (cropSettings?.mode === '21:9') { targetW = 2560; targetH = 1080; }
 
-    let targetAspect = 9 / 16;
-    if (cropSettings?.mode === '1:1') targetAspect = 1;
-    else if (cropSettings?.mode === '4:5') targetAspect = 4 / 5;
-    else if (cropSettings?.mode === '16:9') targetAspect = 16 / 9;
-    else if (cropSettings?.mode === '21:9') targetAspect = 2560 / 1080;
+    const placement = resolveVideoPlacement({
+      sourceWidth: vW,
+      sourceHeight: vH,
+      stageWidth: targetW,
+      stageHeight: targetH,
+      mode: cropSettings?.mode || '9:16',
+      fillMode: cropSettings?.fillMode || 'fit'
+    });
 
-    // If video is wider than target aspect, letterbox on top & bottom
-    if (videoAspect > targetAspect) {
-      const videoHeightRatio = targetAspect / videoAspect;
-      const videoHeightPct = videoHeightRatio * 100;
-      const slotHeightPct = Math.max(0, (100 - videoHeightPct) / 2);
-      return {
-        hasSlots: true,
-        slotHeightPct,
-        videoHeightPct
-      };
-    }
+    const hasSlots = placement.letterbox.top > 0;
     return {
-      hasSlots: false,
-      slotHeightPct: 0,
-      videoHeightPct: 100
+      hasSlots,
+      slotHeightPct: placement.letterboxPct.topPct,
+      videoHeightPct: Math.max(0, 100 - (placement.letterboxPct.topPct * 2))
     };
-  }, [videoData?.width, videoData?.height, cropSettings?.mode]);
+  }, [videoData?.width, videoData?.height, cropSettings?.mode, cropSettings?.fillMode]);
 
   const bgType = bgSettings?.type || 'blur-video';
   const bgBlur = bgSettings?.blur ?? 20;
@@ -210,22 +209,26 @@ function VideoPreviewInner({
             const cW = bgCanvas.width;
             const cH = bgCanvas.height;
             if (vW > 0 && vH > 0 && cW > 0 && cH > 0) {
-              const vAspect = vW / vH;
-              const cAspect = cW / cH;
-
-              let sx = 0, sy = 0, sWidth = vW, sHeight = vH;
-              if (vAspect > cAspect) {
-                // Video is wider than canvas -> crop left/right to cover
-                sWidth = vH * cAspect;
-                sx = (vW - sWidth) / 2;
-              } else {
-                // Video is taller than canvas -> crop top/bottom to cover
-                sHeight = vW / cAspect;
-                sy = (vH - sHeight) / 2;
-              }
+              const bgPlacement = resolveVideoPlacement({
+                sourceWidth: vW,
+                sourceHeight: vH,
+                stageWidth: cW,
+                stageHeight: cH,
+                fillMode: 'fill'
+              });
               bgCtx.imageSmoothingEnabled = true;
               bgCtx.imageSmoothingQuality = 'medium';
-              bgCtx.drawImage(v, sx, sy, sWidth, sHeight, 0, 0, cW, cH);
+              bgCtx.drawImage(
+                v,
+                bgPlacement.sourceX,
+                bgPlacement.sourceY,
+                bgPlacement.sourceWidth,
+                bgPlacement.sourceHeight,
+                0,
+                0,
+                cW,
+                cH
+              );
             }
           }
         }

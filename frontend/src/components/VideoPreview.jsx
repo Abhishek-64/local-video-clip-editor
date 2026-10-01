@@ -201,9 +201,32 @@ function VideoPreviewInner({
         // Throttle: only blit if ≥67ms have elapsed since last blit (~15fps)
         if (nowMs - lastBlitMs >= BLIT_INTERVAL_MS || nowMs === 0) {
           lastBlitMs = nowMs;
-          const bgCtx = bgCanvasRef.current.getContext('2d', { alpha: false, willReadFrequently: false });
+          const bgCanvas = bgCanvasRef.current;
+          const bgCtx = bgCanvas.getContext('2d', { alpha: false, willReadFrequently: false });
           if (bgCtx) {
-            bgCtx.drawImage(videoRef.current, 0, 0, bgCanvasRef.current.width, bgCanvasRef.current.height);
+            const v = videoRef.current;
+            const vW = v.videoWidth;
+            const vH = v.videoHeight;
+            const cW = bgCanvas.width;
+            const cH = bgCanvas.height;
+            if (vW > 0 && vH > 0 && cW > 0 && cH > 0) {
+              const vAspect = vW / vH;
+              const cAspect = cW / cH;
+
+              let sx = 0, sy = 0, sWidth = vW, sHeight = vH;
+              if (vAspect > cAspect) {
+                // Video is wider than canvas -> crop left/right to cover
+                sWidth = vH * cAspect;
+                sx = (vW - sWidth) / 2;
+              } else {
+                // Video is taller than canvas -> crop top/bottom to cover
+                sHeight = vW / cAspect;
+                sy = (vH - sHeight) / 2;
+              }
+              bgCtx.imageSmoothingEnabled = true;
+              bgCtx.imageSmoothingQuality = 'medium';
+              bgCtx.drawImage(v, sx, sy, sWidth, sHeight, 0, 0, cW, cH);
+            }
           }
         }
       }
@@ -1123,28 +1146,23 @@ function VideoPreviewInner({
                   : cropSettings?.mode === '21:9'
                   ? '2560 / 1080'
                   : '9 / 16',
-                height: '360px',
-                maxHeight: '44vh'
+                height: 'min(540px, 68vh)',
+                maxHeight: '70vh'
               }}
             >
-              {/* ── BACKGROUND LAYER (Hardware Fast Canvas Blit) ── */}
-              {/* Wrapped in isolation:isolate so CSS blur is GPU-composited separately
-                  and never bleeds into the sharp video layer above it */}
+              {/* ── BACKGROUND LAYER (Clean Blur / Picture / Solid Backdrop) ── */}
               {!isFillMode && (
-                <div
-                  className="absolute inset-0 pointer-events-none z-0"
-                  style={{ isolation: 'isolate', contain: 'strict' }}
-                >
+                <div className="absolute inset-0 pointer-events-none z-0">
                   {bgType === 'blur-video' ? (
                     <canvas
                       ref={bgCanvasRef}
-                      width={180}
-                      height={320}
+                      width={360}
+                      height={640}
                       className="absolute inset-0 w-full h-full object-cover pointer-events-none"
                       style={{
                         filter: `blur(${bgBlur}px) brightness(${bgOpacity})`,
-                        transformOrigin: 'center',
-                        willChange: 'contents'
+                        transform: 'scale(1.10)',
+                        transformOrigin: 'center'
                       }}
                     />
                   ) : bgType === 'image' && bgSettings?.imageUrl ? (
@@ -1154,7 +1172,7 @@ function VideoPreviewInner({
                       className="absolute inset-0 w-full h-full object-cover"
                       style={{
                         filter: `blur(${bgBlur}px) brightness(${bgOpacity})`,
-                        transform: 'scale(1.1)',
+                        transform: 'scale(1.10)',
                         transformOrigin: 'center'
                       }}
                     />
@@ -1167,27 +1185,19 @@ function VideoPreviewInner({
                 </div>
               )}
 
-              {/* ── MAIN VIDEO LAYER — isolation:isolate ensures it composes above the blur layer cleanly ── */}
-              <div
-                className="relative w-full h-full flex items-center justify-center z-10 pointer-events-none"
-                style={{ isolation: 'isolate' }}
-              >
+              {/* ── MAIN FOREGROUND VIDEO LAYER ── */}
+              <div className="relative w-full h-full flex items-center justify-center z-10 pointer-events-none">
                 {isFillMode ? (
                   <video
                     ref={videoRef}
                     src={videoData.url}
-                    className="absolute pointer-events-none"
+                    className="absolute inset-0 w-full h-full pointer-events-none"
                     preload="metadata"
                     style={{
                       ...getFilterStyle(),
-                      width: 'auto',
-                      height: '100%',
-                      minWidth: '100%',
-                      minHeight: '100%',
                       objectFit: 'cover',
                       transform: `translate(${(cropSettings?.x || 0) * 0.5}px, ${(cropSettings?.y || 0) * 0.5}px) scale(${cropSettings?.zoom || 1})`,
-                      transformOrigin: 'center center',
-                      willChange: 'transform'
+                      transformOrigin: 'center center'
                     }}
                     onTimeUpdate={handleTimeUpdateInternal}
                     onEnded={() => setIsPlaying(false)}
@@ -1196,28 +1206,25 @@ function VideoPreviewInner({
                     playsInline
                   />
                 ) : (
-                  <div className="w-full h-full flex items-center justify-center">
-                    <video
-                      ref={videoRef}
-                      src={videoData.url}
-                      className="pointer-events-none"
-                      preload="metadata"
-                      style={{
-                        ...getFilterStyle(),
-                        maxWidth: '100%',
-                        maxHeight: '100%',
-                        width: 'auto',
-                        height: 'auto',
-                        objectFit: 'contain',
-                        willChange: 'transform'
-                      }}
-                      onTimeUpdate={handleTimeUpdateInternal}
-                      onEnded={() => setIsPlaying(false)}
-                      onPlay={() => setIsPlaying(true)}
-                      onPause={() => setIsPlaying(false)}
-                      playsInline
-                    />
-                  </div>
+                  <video
+                    ref={videoRef}
+                    src={videoData.url}
+                    className="w-full h-full pointer-events-none"
+                    preload="metadata"
+                    style={{
+                      ...getFilterStyle(),
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'contain',
+                      objectPosition: 'center',
+                      display: 'block'
+                    }}
+                    onTimeUpdate={handleTimeUpdateInternal}
+                    onEnded={() => setIsPlaying(false)}
+                    onPlay={() => setIsPlaying(true)}
+                    onPause={() => setIsPlaying(false)}
+                    playsInline
+                  />
                 )}
               </div>
 
@@ -1359,7 +1366,7 @@ function VideoPreviewInner({
                 src={videoData.url}
                 className="max-h-[300px] sm:max-h-[420px] w-auto max-w-full object-contain mx-auto transition-all"
                 preload="metadata"
-                style={{ ...getFilterStyle(), willChange: 'transform' }}
+                style={getFilterStyle()}
                 onTimeUpdate={handleTimeUpdateInternal}
                 onEnded={() => setIsPlaying(false)}
                 onPlay={() => setIsPlaying(true)}

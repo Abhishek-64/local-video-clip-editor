@@ -113,6 +113,9 @@ export class ExportRenderer {
     // Preloaded assets
     this.logoBitmap = null;
     this.bgBitmap = null;
+    this.topReelBitmap = null;
+    this.bottomReelBitmap = null;
+    this.reelSettings = null;
 
     // Invariant crop cache
     this._cachedCropBox = null;
@@ -217,6 +220,133 @@ export class ExportRenderer {
       console.warn('Failed to load custom background image for export:', e);
       this.bgBitmap = null;
     }
+  }
+
+  /**
+   * Helper to load an image source (Blob, File, or URL) into an ImageBitmap or HTMLImageElement
+   */
+  async loadBitmap(source) {
+    if (!source) return null;
+    try {
+      if (source instanceof Blob || (typeof File !== 'undefined' && source instanceof File)) {
+        if (typeof createImageBitmap !== 'undefined') {
+          return await createImageBitmap(source);
+        }
+      }
+      const url = typeof source === 'string' ? source : source.url;
+      if (url && typeof fetch !== 'undefined') {
+        const res = await fetch(url);
+        const blob = await res.blob();
+        if (typeof createImageBitmap !== 'undefined') {
+          return await createImageBitmap(blob);
+        } else {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.src = url;
+          await new Promise((r) => { img.onload = r; img.onerror = r; });
+          return img;
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to load bitmap:', e);
+    }
+    return null;
+  }
+
+  /**
+   * Preload and cache top & bottom reel header/footer cover images
+   */
+  async setReelImages(reelImages) {
+    this.topReelBitmap = null;
+    this.bottomReelBitmap = null;
+    this.reelSettings = reelImages || null;
+
+    if (!reelImages) return;
+
+    try {
+      if (reelImages.top?.file || reelImages.top?.url) {
+        this.topReelBitmap = await this.loadBitmap(reelImages.top.file || reelImages.top.url);
+      }
+      if (reelImages.bottom?.file || reelImages.bottom?.url) {
+        this.bottomReelBitmap = await this.loadBitmap(reelImages.bottom.file || reelImages.bottom.url);
+      }
+    } catch (e) {
+      console.warn('Failed to load reel cover images for export:', e);
+    }
+  }
+
+  /**
+   * Draw an image into a designated letterbox slot respecting fit ('contain' | 'cover' | 'fill'),
+   * slot background color, and opacity.
+   */
+  drawSlotImage(ctx, bitmap, slotX, slotY, slotW, slotH, fit = 'contain', bgColor = '#000000', opacity = 1) {
+    if (!bitmap || slotW <= 0 || slotH <= 0) return;
+
+    ctx.save();
+    if (bgColor && bgColor !== 'transparent') {
+      ctx.fillStyle = bgColor;
+      ctx.fillRect(slotX, slotY, slotW, slotH);
+    }
+
+    const imgW = bitmap.width || bitmap.naturalWidth || slotW;
+    const imgH = bitmap.height || bitmap.naturalHeight || slotH;
+    if (!imgW || !imgH) {
+      ctx.restore();
+      return;
+    }
+
+    const imgAspect = imgW / imgH;
+    const slotAspect = slotW / slotH;
+
+    let drawX = slotX;
+    let drawY = slotY;
+    let drawW = slotW;
+    let drawH = slotH;
+
+    if (fit === 'contain') {
+      // 100% visible, ZERO cropping
+      if (imgAspect > slotAspect) {
+        drawW = slotW;
+        drawH = slotW / imgAspect;
+        drawX = slotX;
+        drawY = slotY + (slotH - drawH) / 2;
+      } else {
+        drawH = slotH;
+        drawW = slotH * imgAspect;
+        drawX = slotX + (slotW - drawW) / 2;
+        drawY = slotY;
+      }
+    } else if (fit === 'cover') {
+      // Fill the entire slot
+      ctx.beginPath();
+      ctx.rect(slotX, slotY, slotW, slotH);
+      ctx.clip();
+
+      if (imgAspect > slotAspect) {
+        drawH = slotH;
+        drawW = slotH * imgAspect;
+        drawX = slotX + (slotW - drawW) / 2;
+        drawY = slotY;
+      } else {
+        drawW = slotW;
+        drawH = slotW / imgAspect;
+        drawX = slotX;
+        drawY = slotY + (slotH - drawH) / 2;
+      }
+    } else {
+      // Stretch
+      drawX = slotX;
+      drawY = slotY;
+      drawW = slotW;
+      drawH = slotH;
+    }
+
+    if (opacity !== undefined && opacity < 1) {
+      ctx.globalAlpha = opacity;
+    }
+
+    ctx.drawImage(bitmap, drawX, drawY, drawW, drawH);
+    ctx.restore();
   }
 
   /**
@@ -447,6 +577,25 @@ export class ExportRenderer {
     } else if (isLetterboxed && background.color) {
       ctx.fillStyle = background.color;
       ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+    }
+
+    // 4b. Draw Top and Bottom Reel Cover Images if loaded
+    if (isLetterboxed && cropBox.dy > 0) {
+      const reel = crop?.reelImages || this.reelSettings;
+      if (this.topReelBitmap) {
+        const topFit = reel?.top?.fit || 'contain';
+        const topBg = reel?.top?.bgColor || '#000000';
+        const topOpacity = (reel?.top?.opacity ?? 100) / 100;
+        this.drawSlotImage(ctx, this.topReelBitmap, 0, 0, canvasWidth, cropBox.dy, topFit, topBg, topOpacity);
+      }
+      if (this.bottomReelBitmap) {
+        const bottomFit = reel?.bottom?.fit || 'contain';
+        const bottomBg = reel?.bottom?.bgColor || '#000000';
+        const bottomOpacity = (reel?.bottom?.opacity ?? 100) / 100;
+        const bottomY = cropBox.dy + cropBox.dHeight;
+        const bottomH = Math.max(0, canvasHeight - bottomY);
+        this.drawSlotImage(ctx, this.bottomReelBitmap, 0, bottomY, canvasWidth, bottomH, bottomFit, bottomBg, bottomOpacity);
+      }
     }
 
     // 5. Main Sharp Foreground Video Frame
@@ -802,8 +951,16 @@ export class ExportRenderer {
     if (this.bgBitmap && typeof this.bgBitmap.close === 'function') {
       try { this.bgBitmap.close(); } catch (e) {}
     }
+    if (this.topReelBitmap && typeof this.topReelBitmap.close === 'function') {
+      try { this.topReelBitmap.close(); } catch (e) {}
+    }
+    if (this.bottomReelBitmap && typeof this.bottomReelBitmap.close === 'function') {
+      try { this.bottomReelBitmap.close(); } catch (e) {}
+    }
     this.logoBitmap = null;
     this.bgBitmap = null;
+    this.topReelBitmap = null;
+    this.bottomReelBitmap = null;
     this.blurCanvas = null;
     this.blurCtx = null;
     this.ctx2d = null;

@@ -684,7 +684,9 @@ export async function publishInstagramReel(env, accessToken, igUserId, {
   caption = '',
   shareToFeed = true,
   scheduledAt = null,
-  isAiGenerated = false
+  isAiGenerated = false,
+  onStepUpdate = null,
+  pollOptions = {}
 }) {
   const containerId = await createInstagramReelContainer(env, accessToken, igUserId, {
     b2DownloadUrl,
@@ -695,15 +697,25 @@ export async function publishInstagramReel(env, accessToken, igUserId, {
 
   console.log('[IG Publish] Step 1 ✓ Container created:', containerId, 'Now polling status...');
 
+  // Immediately notify caller so containerId is stored in DB
+  if (onStepUpdate) {
+    try {
+      await onStepUpdate({ step: 'container_created', containerId, status: 'processing' });
+    } catch (stepErr) {
+      console.warn('[IG Publish] onStepUpdate warning:', stepErr.message);
+    }
+  }
+
   let isFinished = false;
-  const maxAttempts = 15; // Max ~35 seconds polling for immediate publish
+  const maxAttempts = pollOptions.maxAttempts || 10; // Bounded window (~20-25s safe for Worker timeout)
   let attempt = 0;
-  let delayMs = 2000;
+  let delayMs = pollOptions.initialDelayMs || 2000;
+  const backoff = pollOptions.backoffMs !== undefined ? pollOptions.backoffMs : 250;
 
   while (!isFinished && attempt < maxAttempts) {
     attempt++;
     await sleep(delayMs);
-    delayMs = Math.min(3500, delayMs + 300);
+    delayMs = Math.min(3000, delayMs + backoff);
 
     const statusInfo = await checkInstagramContainerStatus(env, accessToken, containerId);
     console.log(`[IG Publish] Polling attempt ${attempt}/${maxAttempts} - status:`, statusInfo.statusCode);
@@ -719,7 +731,15 @@ export async function publishInstagramReel(env, accessToken, igUserId, {
   }
 
   if (!isFinished) {
-    throw new Error('Instagram video processing timed out while waiting for Meta to encode the video stream.');
+    console.log(`[IG Publish] Bounded polling window ended. Container ${containerId} is still IN_PROGRESS on Meta.`);
+    return {
+      success: true,
+      status: 'processing',
+      containerId,
+      mediaId: null,
+      postUrl: null,
+      message: 'Video container uploaded to Meta! Meta is currently encoding your video in background. It will automatically publish once transcoding finishes.'
+    };
   }
 
   console.log('[IG Publish] Step 2 ✓ Container FINISHED. Step 3: Publishing media container...');
@@ -842,11 +862,18 @@ export async function reconcileStuckInstagramJobs(env, userId = null) {
 
   try {
     const stuckJobs = await getStuckUploadingInstagramJobs(env.DB, 3, userId);
-    if (stuckJobs.length === 0) return { reconciled: 0, failed: 0, checked: 0 };
+    const processingJobs = await getProcessingInstagramJobs(env.DB, 20, userId);
 
-    console.log(`[IG Reconcile] Found ${stuckJobs.length} stuck uploading Instagram job(s). Reconciling with Meta...`);
+    const jobMap = new Map();
+    for (const j of processingJobs) jobMap.set(j.id, j);
+    for (const j of stuckJobs) jobMap.set(j.id, j);
+    const allJobs = Array.from(jobMap.values());
 
-    for (const job of stuckJobs) {
+    if (allJobs.length === 0) return { reconciled: 0, failed: 0, checked: 0 };
+
+    console.log(`[IG Reconcile] Found ${allJobs.length} Instagram job(s) to reconcile with Meta...`);
+
+    for (const job of allJobs) {
       try {
         const activeToken = await decryptToken(job.access_token, secretKey);
         if (!activeToken) {

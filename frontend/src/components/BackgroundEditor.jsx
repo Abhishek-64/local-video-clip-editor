@@ -1,4 +1,5 @@
 import React, { useRef } from 'react';
+import ReelImagesEditor from './ReelImagesEditor';
 import { Image as ImageIcon, Upload, Sparkles, X, Sliders, SunMedium, Eye } from 'lucide-react';
 
 export default function BackgroundEditor({
@@ -281,6 +282,14 @@ export default function BackgroundEditor({
             <span className="text-xs font-mono text-slate-300">{bgSettings?.color || '#000000'}</span>
           </div>
         </div>
+      )}
+
+      {/* Reel Cover Images (Top & Bottom Banners) */}
+      {cropSettings && onCropChange && (
+        <ReelImagesEditor
+          cropSettings={cropSettings}
+          onCropChange={onCropChange}
+        />
       )}
     </div>
   );

@@ -69,6 +69,80 @@ function getBitrateBps(bitratePreset = 'high') {
   }
 }
 
+/**
+ * Draw an image into a designated letterbox slot respecting fit ('contain' | 'cover' | 'fill'),
+ * slot background color, and opacity.
+ */
+function drawSlotImageHelper(ctx, img, slotX, slotY, slotW, slotH, fit = 'contain', bgColor = '#000000', opacity = 1) {
+  if (!img || slotW <= 0 || slotH <= 0) return;
+
+  ctx.save();
+  if (bgColor && bgColor !== 'transparent') {
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(slotX, slotY, slotW, slotH);
+  }
+
+  const imgW = img.naturalWidth || img.width || slotW;
+  const imgH = img.naturalHeight || img.height || slotH;
+  if (!imgW || !imgH) {
+    ctx.restore();
+    return;
+  }
+
+  const imgAspect = imgW / imgH;
+  const slotAspect = slotW / slotH;
+
+  let drawX = slotX;
+  let drawY = slotY;
+  let drawW = slotW;
+  let drawH = slotH;
+
+  if (fit === 'contain') {
+    // 100% visible, ZERO cropping
+    if (imgAspect > slotAspect) {
+      drawW = slotW;
+      drawH = slotW / imgAspect;
+      drawX = slotX;
+      drawY = slotY + (slotH - drawH) / 2;
+    } else {
+      drawH = slotH;
+      drawW = slotH * imgAspect;
+      drawX = slotX + (slotW - drawW) / 2;
+      drawY = slotY;
+    }
+  } else if (fit === 'cover') {
+    // Fill the entire slot
+    ctx.beginPath();
+    ctx.rect(slotX, slotY, slotW, slotH);
+    ctx.clip();
+
+    if (imgAspect > slotAspect) {
+      drawH = slotH;
+      drawW = slotH * imgAspect;
+      drawX = slotX + (slotW - drawW) / 2;
+      drawY = slotY;
+    } else {
+      drawW = slotW;
+      drawH = slotW / imgAspect;
+      drawX = slotX;
+      drawY = slotY + (slotH - drawH) / 2;
+    }
+  } else {
+    // Stretch
+    drawX = slotX;
+    drawY = slotY;
+    drawW = slotW;
+    drawH = slotH;
+  }
+
+  if (opacity !== undefined && opacity < 1) {
+    ctx.globalAlpha = opacity;
+  }
+
+  ctx.drawImage(img, drawX, drawY, drawW, drawH);
+  ctx.restore();
+}
+
 // Stable cache for wrapped text lines to eliminate redundant text measurements during export
 const TEXT_LAYOUT_CACHE = new Map();
 
@@ -172,6 +246,7 @@ export async function processVideoClipLegacy({
   videoSource,
   startTime,
   endTime,
+  segments = null,
   partNumber = 1,
   settings,
   onProgress = () => {},
@@ -187,7 +262,15 @@ export async function processVideoClipLegacy({
     export: exportConfig = {}
   } = settings;
 
-  const clipDuration = Math.max(0.5, endTime - startTime);
+  const rawSegments = (segments && segments.length > 0)
+    ? segments.filter((s) => (s.endTime - s.startTime) > 0.05)
+    : [{ startTime: startTime || 0, endTime: endTime || 0 }];
+  const activeSegments = [...rawSegments].sort((a, b) => a.startTime - b.startTime);
+
+  const clipDuration = Math.max(0.5, activeSegments.reduce(
+    (sum, s) => sum + Math.max(0, s.endTime - s.startTime),
+    0
+  ));
   const targetFormat = exportConfig.format || 'mp4';
   const mimeType = getSupportedMimeType(targetFormat);
   const isMp4 = mimeType.includes('mp4');
@@ -205,6 +288,8 @@ export async function processVideoClipLegacy({
     let mediaRecorder = null;
     let logoImage = null;
     let bgImage = null;
+    let topReelImg = null;
+    let bottomReelImg = null;
     let hiddenContainer = null;
     let animFrameId = null;
     let heartbeatTimer = null;
@@ -387,6 +472,32 @@ export async function processVideoClipLegacy({
         });
       }
 
+      // 4b. Preload Top & Bottom Reel Images
+      if (crop?.reelImages?.top?.url) {
+        topReelImg = new Image();
+        topReelImg.crossOrigin = 'anonymous';
+        await new Promise((res) => {
+          topReelImg.onload = () => res();
+          topReelImg.onerror = () => {
+            topReelImg = null;
+            res();
+          };
+          topReelImg.src = crop.reelImages.top.url;
+        });
+      }
+      if (crop?.reelImages?.bottom?.url) {
+        bottomReelImg = new Image();
+        bottomReelImg.crossOrigin = 'anonymous';
+        await new Promise((res) => {
+          bottomReelImg.onload = () => res();
+          bottomReelImg.onerror = () => {
+            bottomReelImg = null;
+            res();
+          };
+          bottomReelImg.src = crop.reelImages.bottom.url;
+        });
+      }
+
       // 5a. Preload Background Music if enabled
       if (audio.bgMusicEnabled && audio.bgMusicUrl) {
         musicEl = document.createElement('audio');
@@ -541,8 +652,11 @@ export async function processVideoClipLegacy({
       let lastFaceCheckTime = 0;
       let cachedFaceCenter = null;
 
-      // 10. Pre-seek to start time
-      videoEl.currentTime = startTime;
+      // 10. Multi-Segment Seek & Progression State
+      let currentSegmentIdx = 0;
+      let isSeekingSegment = false;
+
+      videoEl.currentTime = activeSegments[0].startTime;
       await new Promise((res) => {
         videoEl.onseeked = () => res();
       });
@@ -565,7 +679,34 @@ export async function processVideoClipLegacy({
       }
       await videoEl.play();
 
-      videoEl.onended = finishRecording;
+      const advanceSegmentOrFinish = () => {
+        if (isFinished || !videoEl) return;
+        const curSeg = activeSegments[currentSegmentIdx];
+        const isAtSegmentEnd = videoEl.currentTime >= curSeg.endTime - 0.05 || videoEl.ended;
+
+        if (isAtSegmentEnd) {
+          if (currentSegmentIdx < activeSegments.length - 1) {
+            if (!isSeekingSegment) {
+              isSeekingSegment = true;
+              currentSegmentIdx++;
+              const nextSeg = activeSegments[currentSegmentIdx];
+              videoEl.pause();
+              videoEl.currentTime = nextSeg.startTime;
+              videoEl.onseeked = () => {
+                videoEl.onseeked = null;
+                isSeekingSegment = false;
+                if (!isFinished && !signal?.aborted) {
+                  videoEl.play().catch(() => {});
+                }
+              };
+            }
+          } else {
+            finishRecording();
+          }
+        }
+      };
+
+      videoEl.onended = advanceSegmentOrFinish;
 
       // 11. Check if non-default visual effects are active
       const hasCustomFilters =
@@ -598,10 +739,8 @@ export async function processVideoClipLegacy({
       // 13. Secondary Heartbeat Timer to check completion every 150ms
       heartbeatTimer = setInterval(() => {
         if (isFinished || !videoEl) return;
-        const cur = videoEl.currentTime;
-        if (cur >= endTime - 0.05 || videoEl.ended) {
-          finishRecording();
-        } else if (videoEl.paused && !isFinished && !signal?.aborted) {
+        advanceSegmentOrFinish();
+        if (videoEl.paused && !isFinished && !isSeekingSegment && !signal?.aborted) {
           // Attempt resume if mobile browser paused playback when backgrounded
           videoEl.play().catch(() => {});
         }
@@ -611,16 +750,26 @@ export async function processVideoClipLegacy({
       const renderLoop = async () => {
         if (isFinished || signal?.aborted || !videoEl) return;
 
+        const curSeg = activeSegments[currentSegmentIdx];
         const currentPos = videoEl.currentTime;
 
-        // Check if finished
-        if (currentPos >= endTime - 0.05 || videoEl.ended) {
-          finishRecording();
-          return;
+        // Check if finished or transition segment
+        if (currentPos >= curSeg.endTime - 0.05 || videoEl.ended) {
+          advanceSegmentOrFinish();
+          if (currentSegmentIdx >= activeSegments.length - 1 && (currentPos >= curSeg.endTime - 0.05 || videoEl.ended)) {
+            return;
+          }
         }
 
-        // Progress update
-        const progressPct = Math.min(99, Math.max(0, Math.round(((currentPos - startTime) / clipDuration) * 100)));
+        // Progress update calculated across active segments
+        let elapsed = 0;
+        for (let i = 0; i < currentSegmentIdx; i++) {
+          elapsed += Math.max(0, activeSegments[i].endTime - activeSegments[i].startTime);
+        }
+        if (!isSeekingSegment) {
+          elapsed += Math.max(0, Math.min(curSeg.endTime, currentPos) - curSeg.startTime);
+        }
+        const progressPct = Math.min(99, Math.max(0, Math.round((elapsed / clipDuration) * 100)));
         onProgress(progressPct);
 
         // Non-blocking Face Detection
@@ -698,6 +847,25 @@ export async function processVideoClipLegacy({
         } else {
           ctx.fillStyle = '#000000';
           ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        // 15b. Draw Top & Bottom Reel Cover Images if loaded
+        if (isFitLetterbox && cropBox.dy > 0) {
+          const reel = crop?.reelImages;
+          if (topReelImg) {
+            const topFit = reel?.top?.fit || 'contain';
+            const topBg = reel?.top?.bgColor || '#000000';
+            const topOpacity = (reel?.top?.opacity ?? 100) / 100;
+            drawSlotImageHelper(ctx, topReelImg, 0, 0, canvas.width, cropBox.dy, topFit, topBg, topOpacity);
+          }
+          if (bottomReelImg) {
+            const bottomFit = reel?.bottom?.fit || 'contain';
+            const bottomBg = reel?.bottom?.bgColor || '#000000';
+            const bottomOpacity = (reel?.bottom?.opacity ?? 100) / 100;
+            const bottomY = cropBox.dy + cropBox.dHeight;
+            const bottomH = Math.max(0, canvas.height - bottomY);
+            drawSlotImageHelper(ctx, bottomReelImg, 0, bottomY, canvas.width, bottomH, bottomFit, bottomBg, bottomOpacity);
+          }
         }
 
         // 16. Render Main Sharp Video Frame

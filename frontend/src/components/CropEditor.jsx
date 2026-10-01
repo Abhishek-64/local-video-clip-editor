@@ -1,4 +1,5 @@
 import React, { useRef } from 'react';
+import ReelImagesEditor from './ReelImagesEditor';
 import {
   Crop,
   Smartphone,
@@ -32,59 +33,73 @@ export default function CropEditor({
   const platformModes = [
     {
       id: 'original',
-      label: 'Original Source Aspect',
-      badge: 'Auto Native',
+      label: 'Original Source Video',
+      ratio: 'Native',
+      resolution: 'Source Dimensions',
+      platformTags: '100% Native',
       icon: Layers,
       color: 'text-emerald-400',
-      desc: 'Preserves 100% original video dimensions & format'
+      // desc: 'Preserves 100% original video dimensions, aspect ratio & pixel matrix'
     },
     {
       id: '9:16',
-      label: 'Instagram Reel / Shorts / TikTok',
-      badge: '9:16 · 1080×1920',
+      label: 'Instagram & FB Reels / Shorts',
+      ratio: '9:16',
+      resolution: '1080 × 1920',
+      platformTags: 'Reels • Shorts • TikTok',
       icon: Smartphone,
       color: 'text-rose-400',
-      desc: 'Full vertical screen for Reels, Shorts & TikTok'
+      // desc: 'Full vertical screen standard for Instagram Reels, Facebook Reels, YouTube Shorts & TikTok'
     },
     {
       id: '16:9',
-      label: 'YouTube Standard Video',
-      badge: '16:9 · 1920×1080',
+      label: 'YouTube & FB Landscape Video',
+      ratio: '16:9',
+      resolution: '1920 × 1080',
+      platformTags: 'YouTube • Facebook Watch',
       icon: Youtube,
       color: 'text-red-400',
-      desc: 'Widescreen horizontal format for YouTube'
+      // desc: 'Standard widescreen horizontal format for YouTube and Facebook desktop/feed'
     },
     {
       id: '1:1',
-      label: 'Instagram Square Post',
-      badge: '1:1 · 1080×1080',
+      label: 'Instagram & FB Feed Square',
+      ratio: '1:1',
+      resolution: '1080 × 1080',
+      platformTags: 'IG Feed • FB Feed • Square',
       icon: Instagram,
       color: 'text-pink-400',
-      desc: 'Square feed video for Instagram & Facebook'
+      // desc: 'Square feed video standard for Instagram and Facebook feed posts'
     },
     {
       id: '4:5',
-      label: 'Instagram Portrait Feed',
-      badge: '4:5 · 1080×1350',
+      label: 'Instagram & FB Feed Portrait',
+      ratio: '4:5',
+      resolution: '1080 × 1350',
+      platformTags: 'IG Optimal • FB Portrait',
       icon: Instagram,
       color: 'text-purple-400',
-      desc: 'Optimized vertical portrait for Instagram feed'
+      // desc: 'Meta optimal vertical portrait feed ratio for highest mobile screen coverage'
     },
     {
       id: '21:9',
-      label: 'YouTube Ultrawide / Cinema',
-      badge: '21:9 · 2560×1080',
+      label: 'YouTube Ultrawide Cinema',
+      ratio: '21:9',
+      resolution: '2560 × 1080',
+      platformTags: 'Cinematic • Banner Widescreen',
       icon: Film,
       color: 'text-amber-400',
-      desc: 'Cinematic widescreen banner format'
+      // desc: 'Cinematic widescreen banner format for cinematic YouTube videos'
     },
     {
       id: 'custom',
-      label: 'Manual Freeform Crop',
-      badge: 'Interactive 8-Point',
+      label: 'Freeform Custom Area Crop',
+      ratio: 'Custom',
+      resolution: 'Manual Drag Box',
+      platformTags: 'Interactive 8-Point',
       icon: Crop,
       color: 'text-orange-400',
-      desc: 'Custom drag & resize box to crop any area'
+      // desc: 'Drag, resize and position custom 8-point crop handles on video canvas'
     }
   ];
 
@@ -139,7 +154,7 @@ export default function CropEditor({
           </span>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-2.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3">
           {platformModes.map((m) => {
             const Icon = m.icon;
             const isSelected = currentMode === m.id;
@@ -147,25 +162,33 @@ export default function CropEditor({
               <button
                 key={m.id}
                 onClick={() => updateCrop('mode', m.id)}
-                className={`p-3 rounded-xl border text-left transition-all cursor-pointer touch-manipulation ${
+                className={`p-3 rounded-xl border text-left transition-all cursor-pointer touch-manipulation flex flex-col justify-between ${
                   isSelected
                     ? 'bg-orange-500/10 border-orange-500 text-white shadow-md ring-1 ring-orange-500/40'
                     : 'bg-slate-950/70 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
                 }`}
               >
-                <div className="flex items-center justify-between mb-1">
-                  <div className="flex items-center space-x-2 min-w-0">
-                    <Icon className={`w-4 h-4 shrink-0 ${isSelected ? 'text-orange-400' : m.color}`} />
-                    <span className="font-bold text-xs text-white truncate">{m.label}</span>
+                <div>
+                  <div className="flex items-start justify-between gap-1.5 mb-1.5">
+                    <div className="flex items-center space-x-2">
+                      <Icon className={`w-4 h-4 shrink-0 ${isSelected ? 'text-orange-400' : m.color}`} />
+                      <span className="font-bold text-xs text-white leading-tight">{m.label}</span>
+                    </div>
+                    <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded shrink-0 whitespace-nowrap font-bold ${
+                      isSelected
+                        ? 'bg-orange-500/25 text-orange-300 border border-orange-500/40'
+                        : 'bg-slate-900 text-slate-400 border border-slate-800'
+                    }`}>
+                      {m.ratio}
+                    </span>
                   </div>
-                  <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded shrink-0 ml-1 ${
-                    isSelected
-                      ? 'bg-orange-500/20 text-orange-300 font-bold border border-orange-500/30'
-                      : 'bg-slate-900 text-slate-400 border border-slate-800'
-                  }`}>
-                    {m.badge}
-                  </span>
+
+                  <div className="flex items-center justify-between text-[10px] font-mono mb-1.5 text-slate-400">
+                    <span className="text-amber-300/90 font-semibold">{m.resolution}</span>
+                    <span className="text-slate-500 text-[9px] truncate ml-1">{m.platformTags}</span>
+                  </div>
                 </div>
+
                 <p className="text-[11px] text-slate-400 leading-snug">{m.desc}</p>
               </button>
             );
@@ -265,6 +288,12 @@ export default function CropEditor({
               </p>
             </button>
           </div>
+
+          {/* Reel Top & Bottom Cover Images (Letterbox Space) */}
+          <ReelImagesEditor
+            cropSettings={cropSettings}
+            onCropChange={onChange}
+          />
         </div>
       )}
 

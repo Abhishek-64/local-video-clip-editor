@@ -1025,22 +1025,27 @@ export async function getDueInstagramJobs(db, limit = 10) {
 /**
  * Query in-progress Instagram jobs awaiting container processing completion.
  */
-export async function getProcessingInstagramJobs(db, limit = 10) {
-  const res = await db.prepare(`
+export async function getProcessingInstagramJobs(db, limit = 10, userId = null) {
+  let sql = `
     SELECT j.*, a.access_token, a.user_access_token, a.available_accounts
     FROM instagram_upload_jobs j
-    JOIN instagram_accounts a ON j.instagram_account_id = a.id
+    LEFT JOIN instagram_accounts a ON j.instagram_account_id = a.id
     WHERE j.status = 'processing'
       AND j.instagram_container_id IS NOT NULL
-    ORDER BY j.updated_at ASC
-    LIMIT ?
-  `).bind(limit).all();
-
+  `;
+  const params = [];
+  if (userId) {
+    sql += ' AND j.user_id = ?';
+    params.push(userId);
+  }
+  sql += ' ORDER BY j.updated_at ASC LIMIT ?';
+  params.push(limit);
+  const res = await db.prepare(sql).bind(...params).all();
   return res?.results || [];
 }
 
 /**
- * Query Instagram upload jobs that have been stuck in 'uploading' status for longer than minutesThreshold.
+ * Query Instagram upload jobs that have been stuck in 'uploading' or 'processing' status.
  */
 export async function getStuckUploadingInstagramJobs(db, minutesThreshold = 3, userId = null) {
   const timeModifier = `-${Math.max(1, minutesThreshold)} minutes`;
@@ -1048,10 +1053,15 @@ export async function getStuckUploadingInstagramJobs(db, minutesThreshold = 3, u
     SELECT j.*, a.access_token, a.user_access_token, a.available_accounts
     FROM instagram_upload_jobs j
     LEFT JOIN instagram_accounts a ON j.instagram_account_id = a.id
-    WHERE j.status = 'uploading'
+    WHERE (
+      j.status = 'uploading'
       AND (datetime(COALESCE(j.updated_at, j.created_at)) <= datetime('now', '${timeModifier}')
            OR (j.scheduled_at IS NOT NULL AND datetime(j.scheduled_at) <= datetime('now', '${timeModifier}'))
       )
+    ) OR (
+      j.status = 'processing'
+      AND j.instagram_container_id IS NOT NULL
+    )
   `;
   const params = [];
   if (userId) {

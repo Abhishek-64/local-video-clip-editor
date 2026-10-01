@@ -41,7 +41,7 @@ export function calculateCropDimensions({
   } else if (mode === '4:5') {
     targetAspect = 4 / 5;
   } else if (mode === '21:9') {
-    targetAspect = 21 / 9;
+    targetAspect = 2560 / 1080;
   } else if (mode === 'custom') {
     const w = (customWidth / 100) * sourceWidth;
     const h = (customHeight / 100) * sourceHeight;
@@ -174,112 +174,89 @@ export function calculateCropDimensions({
  * Get output width and height for a given mode and resolution quality preset
  */
 export function getTargetResolutionDimensions(mode, resolution = '1080p', sourceWidth = 1920, sourceHeight = 1080, customAspect = 1) {
-  if (resolution === 'original') {
-    if (mode === '9:16') {
-      const h = sourceHeight;
-      const w = Math.round((h * 9) / 16);
-      return { width: makeEven(w), height: makeEven(h) };
-    }
-    if (mode === '1:1') {
-      const side = Math.min(sourceWidth, sourceHeight);
-      return { width: makeEven(side), height: makeEven(side) };
-    }
-    if (mode === '16:9') {
-      const w = sourceWidth;
-      const h = Math.round((w * 9) / 16);
-      return { width: makeEven(w), height: makeEven(h) };
-    }
-    if (mode === '4:5') {
-      const w = sourceWidth;
-      const h = Math.round((w * 5) / 4);
-      return { width: makeEven(w), height: makeEven(h) };
-    }
-    if (mode === '21:9') {
-      const h = sourceHeight;
-      const w = Math.round((h * 21) / 9);
-      return { width: makeEven(w), height: makeEven(h) };
-    }
-    if (mode === 'custom') {
-      const h = sourceHeight;
-      const w = Math.round(h * customAspect);
-      return { width: makeEven(w), height: makeEven(h) };
-    }
+  // 1. If mode is 'original', strictly preserve 100% of source video dimensions
+  if (mode === 'original') {
     return { width: makeEven(sourceWidth), height: makeEven(sourceHeight) };
   }
 
-  // Standard resolutions based on platform presets
+  // Detect if source media is Ultra HD 4K or 2K 1440p
+  const maxSrcDim = Math.max(sourceWidth || 1920, sourceHeight || 1080);
+  const isSource4K = maxSrcDim >= 3840;
+  const isSource1440p = maxSrcDim >= 2560 && !isSource4K;
+
+  // Resolve 'original' resolution quality to the best native tier for the chosen platform aspect ratio
+  const effectiveResolution = (resolution === 'original')
+    ? (isSource4K ? '4k' : isSource1440p ? '1440p' : '1080p')
+    : resolution;
+
+  // 2. Standard resolutions adhering to official Meta (Instagram & Facebook), YouTube, and TikTok specs
   if (mode === '9:16') {
-    // Instagram Reel / YouTube Shorts / TikTok
-    switch (resolution) {
+    // Instagram Reels / Stories, Facebook Reels, YouTube Shorts, TikTok
+    switch (effectiveResolution) {
       case '720p':
         return { width: 720, height: 1280 };
-      case '1080p':
-        return { width: 1080, height: 1920 };
       case '1440p':
         return { width: 1440, height: 2560 };
       case '4k':
         return { width: 2160, height: 3840 };
+      case '1080p':
       default:
         return { width: 1080, height: 1920 };
     }
   } else if (mode === '1:1') {
-    // Instagram Feed Post Square
-    switch (resolution) {
+    // Instagram Feed Square, Facebook Feed Square, LinkedIn
+    switch (effectiveResolution) {
       case '720p':
         return { width: 720, height: 720 };
-      case '1080p':
-        return { width: 1080, height: 1080 };
       case '1440p':
         return { width: 1440, height: 1440 };
       case '4k':
         return { width: 2160, height: 2160 };
+      case '1080p':
       default:
         return { width: 1080, height: 1080 };
     }
   } else if (mode === '4:5') {
-    // Instagram Feed Portrait Post
-    switch (resolution) {
+    // Instagram Portrait Feed (Optimal 4:5), Facebook Feed Portrait
+    switch (effectiveResolution) {
       case '720p':
         return { width: 720, height: 900 };
-      case '1080p':
-        return { width: 1080, height: 1350 };
       case '1440p':
         return { width: 1440, height: 1800 };
       case '4k':
         return { width: 2160, height: 2700 };
+      case '1080p':
       default:
         return { width: 1080, height: 1350 };
     }
   } else if (mode === '21:9') {
-    // YouTube Ultrawide / Cinematic Banner
-    switch (resolution) {
+    // YouTube Ultrawide Cinema Banner (64:27 / 2560×1080)
+    switch (effectiveResolution) {
       case '720p':
-        return { width: 1280, height: 548 };
-      case '1080p':
-        return { width: 2560, height: 1080 };
+        return { width: 1680, height: 720 };
       case '1440p':
         return { width: 3440, height: 1440 };
       case '4k':
         return { width: 5120, height: 2160 };
+      case '1080p':
       default:
         return { width: 2560, height: 1080 };
     }
   } else if (mode === 'custom') {
     // Custom aspect ratio resolution scaling
-    const targetH = resolution === '720p' ? 720 : resolution === '1440p' ? 1440 : resolution === '4k' ? 2160 : 1080;
+    const targetH = effectiveResolution === '720p' ? 720 : effectiveResolution === '1440p' ? 1440 : effectiveResolution === '4k' ? 2160 : 1080;
     const targetW = Math.round(targetH * (customAspect || 1));
     return { width: makeEven(targetW), height: makeEven(targetH) };
   } else {
-    // 16:9 YouTube Standard Landscape Video
-    switch (resolution) {
+    // 16:9 YouTube Standard Landscape Video, Facebook Landscape Video
+    switch (effectiveResolution) {
       case '720p':
         return { width: 1280, height: 720 };
-      case '1080p':
-        return { width: 1920, height: 1080 };
       case '1440p':
         return { width: 2560, height: 1440 };
       case '4k':
         return { width: 3840, height: 2160 };
+      case '1080p':
       default:
         return { width: 1920, height: 1080 };
     }

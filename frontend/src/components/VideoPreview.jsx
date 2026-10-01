@@ -11,7 +11,6 @@ import {
   Move,
   Smartphone,
   LayoutGrid,
-  GripVertical,
   Scissors,
   Camera,
   Image as ImageIcon,
@@ -76,9 +75,66 @@ function VideoPreviewInner({
   const [draggingExtraId, setDraggingExtraId] = useState(null);
   const [isDraggingLogo, setIsDraggingLogo] = useState(false);
 
+  // Stable refs for drag handlers to avoid tearing down window listeners on every frame
+  const textSettingsRef = useRef(textSettings);
+  const cropSettingsRef = useRef(cropSettings);
+  const logoSettingsRef = useRef(logoSettings);
+  const onTextChangeRef = useRef(onTextChange);
+  const onCropChangeRef = useRef(onCropChange);
+  const onLogoChangeRef = useRef(onLogoChange);
+  const textDragRafRef = useRef(null);
+
+  useEffect(() => { textSettingsRef.current = textSettings; }, [textSettings]);
+  useEffect(() => { cropSettingsRef.current = cropSettings; }, [cropSettings]);
+  useEffect(() => { logoSettingsRef.current = logoSettings; }, [logoSettings]);
+  useEffect(() => { onTextChangeRef.current = onTextChange; }, [onTextChange]);
+  useEffect(() => { onCropChangeRef.current = onCropChange; }, [onCropChange]);
+  useEffect(() => { onLogoChangeRef.current = onLogoChange; }, [onLogoChange]);
+
+  const getActiveViewportRect = useCallback(() => {
+    const el = phoneViewportRef.current || framingViewportRef.current || containerRef.current;
+    return el ? el.getBoundingClientRect() : null;
+  }, []);
+
   const isVerticalCrop = cropSettings?.mode === '9:16';
   const isCustomCrop = cropSettings?.mode === 'custom';
   const isFillMode = cropSettings?.fillMode === 'fill';
+
+  const reelImages = cropSettings?.reelImages;
+  const topReel = reelImages?.top;
+  const bottomReel = reelImages?.bottom;
+  const hasTopReel = Boolean(topReel?.url);
+  const hasBottomReel = Boolean(bottomReel?.url);
+
+  // Compute letterbox slot percentage for 9:16 (or current mode)
+  const slotMetrics = useMemo(() => {
+    const vW = videoRef.current?.videoWidth || videoData?.width || 1920;
+    const vH = videoRef.current?.videoHeight || videoData?.height || 1080;
+    const videoAspect = (vW && vH) ? (vW / vH) : (16 / 9);
+
+    let targetAspect = 9 / 16;
+    if (cropSettings?.mode === '1:1') targetAspect = 1;
+    else if (cropSettings?.mode === '4:5') targetAspect = 4 / 5;
+    else if (cropSettings?.mode === '16:9') targetAspect = 16 / 9;
+    else if (cropSettings?.mode === '21:9') targetAspect = 2560 / 1080;
+
+    // If video is wider than target aspect, letterbox on top & bottom
+    if (videoAspect > targetAspect) {
+      const videoHeightRatio = targetAspect / videoAspect;
+      const videoHeightPct = videoHeightRatio * 100;
+      const slotHeightPct = Math.max(0, (100 - videoHeightPct) / 2);
+      return {
+        hasSlots: true,
+        slotHeightPct,
+        videoHeightPct
+      };
+    }
+    return {
+      hasSlots: false,
+      slotHeightPct: 0,
+      videoHeightPct: 100
+    };
+  }, [videoData?.width, videoData?.height, cropSettings?.mode]);
 
   const bgType = bgSettings?.type || 'blur-video';
   const bgBlur = bgSettings?.blur ?? 20;
@@ -339,11 +395,11 @@ function VideoPreviewInner({
 
   // ── Drag-to-Reposition Primary Text ─────────────────────────────────────────
   const handleTextMouseDown = (e) => {
-    if (!onTextChange || !textSettings?.enabled) return;
+    if (!onTextChangeRef.current || !textSettingsRef.current?.enabled) return;
     e.preventDefault();
     e.stopPropagation();
 
-    const parentRect = (phoneViewportRef.current || containerRef.current)?.getBoundingClientRect();
+    const parentRect = getActiveViewportRect();
     if (!parentRect) return;
 
     setIsDraggingText(true);
@@ -353,15 +409,15 @@ function VideoPreviewInner({
       startY: e.clientY,
       parentWidth: parentRect.width,
       parentHeight: parentRect.height,
-      currentYPct: textSettings.customY ?? 10,
-      currentXPct: textSettings.customX ?? 50
+      currentYPct: textSettingsRef.current.customY ?? 10,
+      currentXPct: textSettingsRef.current.customX ?? 50
     };
   };
 
   const handleTextTouchStart = (e) => {
-    if (!onTextChange || !textSettings?.enabled) return;
+    if (!onTextChangeRef.current || !textSettingsRef.current?.enabled) return;
     const touch = e.touches[0];
-    const parentRect = (phoneViewportRef.current || containerRef.current)?.getBoundingClientRect();
+    const parentRect = getActiveViewportRect();
     if (!parentRect) return;
 
     setIsDraggingText(true);
@@ -371,18 +427,18 @@ function VideoPreviewInner({
       startY: touch.clientY,
       parentWidth: parentRect.width,
       parentHeight: parentRect.height,
-      currentYPct: textSettings.customY ?? 10,
-      currentXPct: textSettings.customX ?? 50
+      currentYPct: textSettingsRef.current.customY ?? 10,
+      currentXPct: textSettingsRef.current.customX ?? 50
     };
   };
 
   // ── Drag-to-Reposition Extra Text Overlays ──────────────────────────────────
   const handleExtraTextMouseDown = (e, item) => {
-    if (!onTextChange || !item.enabled) return;
+    if (!onTextChangeRef.current || !item.enabled) return;
     e.preventDefault();
     e.stopPropagation();
 
-    const parentRect = (phoneViewportRef.current || containerRef.current)?.getBoundingClientRect();
+    const parentRect = getActiveViewportRect();
     if (!parentRect) return;
 
     setDraggingExtraId(item.id);
@@ -399,9 +455,9 @@ function VideoPreviewInner({
   };
 
   const handleExtraTextTouchStart = (e, item) => {
-    if (!onTextChange || !item.enabled) return;
+    if (!onTextChangeRef.current || !item.enabled) return;
     const touch = e.touches[0];
-    const parentRect = (phoneViewportRef.current || framingViewportRef.current || containerRef.current)?.getBoundingClientRect();
+    const parentRect = getActiveViewportRect();
     if (!parentRect) return;
 
     setDraggingExtraId(item.id);
@@ -419,11 +475,11 @@ function VideoPreviewInner({
 
   // ── Drag-to-Reposition Logo ────────────────────────────────────────────────
   const handleLogoMouseDown = (e) => {
-    if (!onLogoChange || !logoSettings?.enabled) return;
+    if (!onLogoChangeRef.current || !logoSettingsRef.current?.enabled) return;
     e.preventDefault();
     e.stopPropagation();
 
-    const parentRect = (phoneViewportRef.current || framingViewportRef.current || containerRef.current)?.getBoundingClientRect();
+    const parentRect = getActiveViewportRect();
     if (!parentRect) return;
 
     setIsDraggingLogo(true);
@@ -433,15 +489,15 @@ function VideoPreviewInner({
       startY: e.clientY,
       parentWidth: parentRect.width,
       parentHeight: parentRect.height,
-      currentYPct: logoSettings.customY ?? 6,
-      currentXPct: logoSettings.customX ?? 94
+      currentYPct: logoSettingsRef.current.customY ?? 6,
+      currentXPct: logoSettingsRef.current.customX ?? 94
     };
   };
 
   const handleLogoTouchStart = (e) => {
-    if (!onLogoChange || !logoSettings?.enabled) return;
+    if (!onLogoChangeRef.current || !logoSettingsRef.current?.enabled) return;
     const touch = e.touches[0];
-    const parentRect = (phoneViewportRef.current || framingViewportRef.current || containerRef.current)?.getBoundingClientRect();
+    const parentRect = getActiveViewportRect();
     if (!parentRect) return;
 
     setIsDraggingLogo(true);
@@ -451,16 +507,19 @@ function VideoPreviewInner({
       startY: touch.clientY,
       parentWidth: parentRect.width,
       parentHeight: parentRect.height,
-      currentYPct: logoSettings.customY ?? 6,
-      currentXPct: logoSettings.customX ?? 94
+      currentYPct: logoSettingsRef.current.customY ?? 6,
+      currentXPct: logoSettingsRef.current.customX ?? 94
     };
   };
 
+  const isAnyDragging = isDraggingCrop || isDraggingText || Boolean(draggingExtraId) || isDraggingLogo;
 
   useEffect(() => {
+    if (!isAnyDragging) return;
+
     const handleMouseMove = (e) => {
       // 1. Crop box drag / resize
-      if (dragCropRef.current.active && onCropChange) {
+      if (dragCropRef.current.active && onCropChangeRef.current) {
         const dx = e.clientX - dragCropRef.current.startX;
         const dy = e.clientY - dragCropRef.current.startY;
         const h = dragCropRef.current.handle;
@@ -468,7 +527,7 @@ function VideoPreviewInner({
         if (h === 'center') {
           const newX = Math.max(-200, Math.min(200, dragCropRef.current.startCropX + dx * 1.5));
           const newY = Math.max(-200, Math.min(200, dragCropRef.current.startCropY + dy * 1.5));
-          onCropChange({ ...cropSettings, x: Math.round(newX), y: Math.round(newY) });
+          onCropChangeRef.current({ ...cropSettingsRef.current, x: Math.round(newX), y: Math.round(newY) });
         } else {
           let deltaW = 0;
           let deltaH = 0;
@@ -481,8 +540,8 @@ function VideoPreviewInner({
           const newW = Math.max(15, Math.min(100, Math.round(dragCropRef.current.startWidth + deltaW)));
           const newH = Math.max(15, Math.min(100, Math.round(dragCropRef.current.startHeight + deltaH)));
 
-          onCropChange({
-            ...cropSettings,
+          onCropChangeRef.current({
+            ...cropSettingsRef.current,
             mode: 'custom',
             customWidth: newW,
             customHeight: newH
@@ -490,8 +549,8 @@ function VideoPreviewInner({
         }
       }
 
-      // 2. Primary text overlay drag
-      if (dragTextRef.current.active && onTextChange) {
+      // 2. Primary text overlay drag (throttled via rAF)
+      if (dragTextRef.current.active && onTextChangeRef.current) {
         const dy = e.clientY - dragTextRef.current.startY;
         const dx = e.clientX - dragTextRef.current.startX;
 
@@ -501,16 +560,19 @@ function VideoPreviewInner({
         const newYPct = Math.max(4, Math.min(96, dragTextRef.current.currentYPct + deltaYPct));
         const newXPct = Math.max(4, Math.min(96, dragTextRef.current.currentXPct + deltaXPct));
 
-        onTextChange({
-          ...textSettings,
-          customY: Math.round(newYPct),
-          customX: Math.round(newXPct),
-          position: 'center'
+        if (textDragRafRef.current) cancelAnimationFrame(textDragRafRef.current);
+        textDragRafRef.current = requestAnimationFrame(() => {
+          onTextChangeRef.current?.({
+            ...textSettingsRef.current,
+            customY: Math.round(newYPct),
+            customX: Math.round(newXPct),
+            position: 'center'
+          });
         });
       }
 
-      // 3. Extra text overlay drag
-      if (dragExtraTextRef.current.active && onTextChange && textSettings?.extraTexts) {
+      // 3. Extra text overlay drag (throttled via rAF)
+      if (dragExtraTextRef.current.active && onTextChangeRef.current && textSettingsRef.current?.extraTexts) {
         const dy = e.clientY - dragExtraTextRef.current.startY;
         const dx = e.clientX - dragExtraTextRef.current.startX;
 
@@ -520,7 +582,7 @@ function VideoPreviewInner({
         const newYPct = Math.max(4, Math.min(96, dragExtraTextRef.current.currentYPct + deltaYPct));
         const newXPct = Math.max(4, Math.min(96, dragExtraTextRef.current.currentXPct + deltaXPct));
 
-        const updatedExtras = textSettings.extraTexts.map((item) => {
+        const updatedExtras = textSettingsRef.current.extraTexts.map((item) => {
           if (item.id === dragExtraTextRef.current.extraId) {
             return {
               ...item,
@@ -531,14 +593,17 @@ function VideoPreviewInner({
           return item;
         });
 
-        onTextChange({
-          ...textSettings,
-          extraTexts: updatedExtras
+        if (textDragRafRef.current) cancelAnimationFrame(textDragRafRef.current);
+        textDragRafRef.current = requestAnimationFrame(() => {
+          onTextChangeRef.current?.({
+            ...textSettingsRef.current,
+            extraTexts: updatedExtras
+          });
         });
       }
 
       // 4. Logo overlay drag
-      if (dragLogoRef.current.active && onLogoChange) {
+      if (dragLogoRef.current.active && onLogoChangeRef.current) {
         const dy = e.clientY - dragLogoRef.current.startY;
         const dx = e.clientX - dragLogoRef.current.startX;
 
@@ -548,13 +613,12 @@ function VideoPreviewInner({
         const newYPct = Math.max(3, Math.min(97, dragLogoRef.current.currentYPct + deltaYPct));
         const newXPct = Math.max(3, Math.min(97, dragLogoRef.current.currentXPct + deltaXPct));
 
-        onLogoChange({
-          ...logoSettings,
+        onLogoChangeRef.current({
+          ...logoSettingsRef.current,
           customY: Math.round(newYPct),
           customX: Math.round(newXPct)
         });
       }
-
     };
 
     const handleTouchMove = (e) => {
@@ -562,7 +626,7 @@ function VideoPreviewInner({
       if (!touch) return;
 
       // 1. Crop box drag / resize on touch
-      if (dragCropRef.current.active && onCropChange) {
+      if (dragCropRef.current.active && onCropChangeRef.current) {
         const dx = touch.clientX - dragCropRef.current.startX;
         const dy = touch.clientY - dragCropRef.current.startY;
         const h = dragCropRef.current.handle;
@@ -570,7 +634,7 @@ function VideoPreviewInner({
         if (h === 'center') {
           const newX = Math.max(-200, Math.min(200, dragCropRef.current.startCropX + dx * 1.5));
           const newY = Math.max(-200, Math.min(200, dragCropRef.current.startCropY + dy * 1.5));
-          onCropChange({ ...cropSettings, x: Math.round(newX), y: Math.round(newY) });
+          onCropChangeRef.current({ ...cropSettingsRef.current, x: Math.round(newX), y: Math.round(newY) });
         } else {
           let deltaW = 0;
           let deltaH = 0;
@@ -583,8 +647,8 @@ function VideoPreviewInner({
           const newW = Math.max(15, Math.min(100, Math.round(dragCropRef.current.startWidth + deltaW)));
           const newH = Math.max(15, Math.min(100, Math.round(dragCropRef.current.startHeight + deltaH)));
 
-          onCropChange({
-            ...cropSettings,
+          onCropChangeRef.current({
+            ...cropSettingsRef.current,
             mode: 'custom',
             customWidth: newW,
             customHeight: newH
@@ -592,7 +656,7 @@ function VideoPreviewInner({
         }
       }
 
-      if (dragTextRef.current.active && onTextChange) {
+      if (dragTextRef.current.active && onTextChangeRef.current) {
         const dy = touch.clientY - dragTextRef.current.startY;
         const dx = touch.clientX - dragTextRef.current.startX;
 
@@ -602,15 +666,18 @@ function VideoPreviewInner({
         const newYPct = Math.max(4, Math.min(96, dragTextRef.current.currentYPct + deltaYPct));
         const newXPct = Math.max(4, Math.min(96, dragTextRef.current.currentXPct + deltaXPct));
 
-        onTextChange({
-          ...textSettings,
-          customY: Math.round(newYPct),
-          customX: Math.round(newXPct),
-          position: 'center'
+        if (textDragRafRef.current) cancelAnimationFrame(textDragRafRef.current);
+        textDragRafRef.current = requestAnimationFrame(() => {
+          onTextChangeRef.current?.({
+            ...textSettingsRef.current,
+            customY: Math.round(newYPct),
+            customX: Math.round(newXPct),
+            position: 'center'
+          });
         });
       }
 
-      if (dragExtraTextRef.current.active && onTextChange && textSettings?.extraTexts) {
+      if (dragExtraTextRef.current.active && onTextChangeRef.current && textSettingsRef.current?.extraTexts) {
         const dy = touch.clientY - dragExtraTextRef.current.startY;
         const dx = touch.clientX - dragExtraTextRef.current.startX;
 
@@ -620,7 +687,7 @@ function VideoPreviewInner({
         const newYPct = Math.max(4, Math.min(96, dragExtraTextRef.current.currentYPct + deltaYPct));
         const newXPct = Math.max(4, Math.min(96, dragExtraTextRef.current.currentXPct + deltaXPct));
 
-        const updatedExtras = textSettings.extraTexts.map((item) => {
+        const updatedExtras = textSettingsRef.current.extraTexts.map((item) => {
           if (item.id === dragExtraTextRef.current.extraId) {
             return {
               ...item,
@@ -631,13 +698,16 @@ function VideoPreviewInner({
           return item;
         });
 
-        onTextChange({
-          ...textSettings,
-          extraTexts: updatedExtras
+        if (textDragRafRef.current) cancelAnimationFrame(textDragRafRef.current);
+        textDragRafRef.current = requestAnimationFrame(() => {
+          onTextChangeRef.current?.({
+            ...textSettingsRef.current,
+            extraTexts: updatedExtras
+          });
         });
       }
 
-      if (dragLogoRef.current.active && onLogoChange) {
+      if (dragLogoRef.current.active && onLogoChangeRef.current) {
         const dy = touch.clientY - dragLogoRef.current.startY;
         const dx = touch.clientX - dragLogoRef.current.startX;
 
@@ -647,16 +717,19 @@ function VideoPreviewInner({
         const newYPct = Math.max(3, Math.min(97, dragLogoRef.current.currentYPct + deltaYPct));
         const newXPct = Math.max(3, Math.min(97, dragLogoRef.current.currentXPct + deltaXPct));
 
-        onLogoChange({
-          ...logoSettings,
+        onLogoChangeRef.current({
+          ...logoSettingsRef.current,
           customY: Math.round(newYPct),
           customX: Math.round(newXPct)
         });
       }
-
     };
 
     const handleEnd = () => {
+      if (textDragRafRef.current) {
+        cancelAnimationFrame(textDragRafRef.current);
+        textDragRafRef.current = null;
+      }
       dragCropRef.current.active = false;
       dragTextRef.current.active = false;
       dragExtraTextRef.current.active = false;
@@ -673,12 +746,16 @@ function VideoPreviewInner({
     window.addEventListener('touchend', handleEnd);
 
     return () => {
+      if (textDragRafRef.current) {
+        cancelAnimationFrame(textDragRafRef.current);
+        textDragRafRef.current = null;
+      }
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleEnd);
       window.removeEventListener('touchmove', handleTouchMove);
       window.removeEventListener('touchend', handleEnd);
     };
-  }, [onCropChange, cropSettings, onTextChange, textSettings, onLogoChange, logoSettings]);
+  }, [isAnyDragging]);
 
   // Memoized: only recomputes when currentTime crosses a part boundary or text settings change
   const renderedText = useMemo(() => {
@@ -916,11 +993,26 @@ function VideoPreviewInner({
         height: `${cropSettings.customHeight ?? 85}%`
       };
     }
-    if (cropSettings?.mode === '9:16') return { width: '42%', height: '88%' };
-    if (cropSettings?.mode === '1:1') return { width: '62%', height: '70%' };
-    if (cropSettings?.mode === '4:5') return { width: '52%', height: '75%' };
-    if (cropSettings?.mode === '21:9') return { width: '92%', height: '40%' };
-    return { width: '88%', height: '60%' };
+    const srcW = videoData?.width || 1920;
+    const srcH = videoData?.height || 1080;
+    const videoAspect = (srcW && srcH) ? srcW / srcH : 16 / 9;
+
+    let targetAspect = 16 / 9;
+    if (cropSettings?.mode === '9:16') targetAspect = 9 / 16;
+    else if (cropSettings?.mode === '1:1') targetAspect = 1;
+    else if (cropSettings?.mode === '4:5') targetAspect = 4 / 5;
+    else if (cropSettings?.mode === '21:9') targetAspect = 2560 / 1080;
+    else if (cropSettings?.mode === '16:9') targetAspect = 16 / 9;
+
+    if (targetAspect <= videoAspect) {
+      const hPct = 92;
+      const wPct = Math.round(hPct * (targetAspect / videoAspect) * 10) / 10;
+      return { width: `${wPct}%`, height: `${hPct}%` };
+    } else {
+      const wPct = 94;
+      const hPct = Math.round(wPct * (videoAspect / targetAspect) * 10) / 10;
+      return { width: `${wPct}%`, height: `${hPct}%` };
+    }
   };
 
   const cropDims = getCropBoxDimensions();
@@ -965,6 +1057,11 @@ function VideoPreviewInner({
                 4:5
               </span>
             )}
+            {cropSettings?.mode === '21:9' && (
+              <span className="text-[9px] sm:text-[10px] border px-1.5 sm:px-2 py-0.5 rounded font-mono bg-amber-500/10 text-amber-300 border-amber-500/30 shrink-0">
+                21:9
+              </span>
+            )}
           </span>
         </div>
 
@@ -974,14 +1071,14 @@ function VideoPreviewInner({
             <button
               onClick={() => setPreviewMode('vertical')}
               className={`px-2 sm:px-2.5 py-1 text-[11px] sm:text-xs font-medium rounded-md transition-colors cursor-pointer flex items-center space-x-1 touch-manipulation ${
-                previewMode === 'vertical'
+                previewMode === 'vertical' || previewMode === 'canvas'
                   ? 'bg-orange-500 text-white font-semibold shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
-              title="Full 9:16 Vertical Screen Preview"
+              title="Full Output Screen Canvas Preview"
             >
               <Smartphone className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-              <span>Phone</span>
+              <span>Canvas ({cropSettings?.mode || '9:16'})</span>
             </button>
 
             <button
@@ -1011,20 +1108,33 @@ function VideoPreviewInner({
         )}
 
         {videoData?.url ? (
-          previewMode === 'vertical' && isVerticalCrop && !isCustomCrop ? (
-            /* ── VERTICAL 9:16 PHONE VIEWPORT ── */
+          (previewMode === 'vertical' || previewMode === 'canvas') && cropSettings?.mode !== 'original' && !isCustomCrop ? (
+            /* ── OUTPUT CANVAS VIEWPORT (Dynamically matches active platform aspect ratio) ── */
             <div
               ref={phoneViewportRef}
-              className="relative rounded-2xl overflow-hidden shadow-2xl border-2 border-slate-700 bg-black flex items-center justify-center select-none"
+              className="relative rounded-sm overflow-hidden bg-black flex items-center justify-center select-none"
               style={{
-                aspectRatio: '9 / 16',
+                aspectRatio: cropSettings?.mode === '1:1'
+                  ? '1 / 1'
+                  : cropSettings?.mode === '4:5'
+                  ? '4 / 5'
+                  : cropSettings?.mode === '16:9'
+                  ? '16 / 9'
+                  : cropSettings?.mode === '21:9'
+                  ? '2560 / 1080'
+                  : '9 / 16',
                 height: '360px',
                 maxHeight: '44vh'
               }}
             >
               {/* ── BACKGROUND LAYER (Hardware Fast Canvas Blit) ── */}
+              {/* Wrapped in isolation:isolate so CSS blur is GPU-composited separately
+                  and never bleeds into the sharp video layer above it */}
               {!isFillMode && (
-                <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
+                <div
+                  className="absolute inset-0 pointer-events-none z-0"
+                  style={{ isolation: 'isolate', contain: 'strict' }}
+                >
                   {bgType === 'blur-video' ? (
                     <canvas
                       ref={bgCanvasRef}
@@ -1033,8 +1143,8 @@ function VideoPreviewInner({
                       className="absolute inset-0 w-full h-full object-cover pointer-events-none"
                       style={{
                         filter: `blur(${bgBlur}px) brightness(${bgOpacity})`,
-                        transform: 'scale(1.15)',
-                        transformOrigin: 'center'
+                        transformOrigin: 'center',
+                        willChange: 'contents'
                       }}
                     />
                   ) : bgType === 'image' && bgSettings?.imageUrl ? (
@@ -1057,8 +1167,11 @@ function VideoPreviewInner({
                 </div>
               )}
 
-              {/* ── MAIN VIDEO LAYER ── */}
-              <div className="relative w-full h-full overflow-hidden flex items-center justify-center z-10 pointer-events-none">
+              {/* ── MAIN VIDEO LAYER — isolation:isolate ensures it composes above the blur layer cleanly ── */}
+              <div
+                className="relative w-full h-full flex items-center justify-center z-10 pointer-events-none"
+                style={{ isolation: 'isolate' }}
+              >
                 {isFillMode ? (
                   <video
                     ref={videoRef}
@@ -1083,13 +1196,21 @@ function VideoPreviewInner({
                     playsInline
                   />
                 ) : (
-                  <div className="w-full flex items-center justify-center">
+                  <div className="w-full h-full flex items-center justify-center">
                     <video
                       ref={videoRef}
                       src={videoData.url}
-                      className="w-full h-auto max-h-full object-contain pointer-events-none shadow-2xl"
+                      className="pointer-events-none"
                       preload="metadata"
-                      style={{ ...getFilterStyle(), willChange: 'transform' }}
+                      style={{
+                        ...getFilterStyle(),
+                        maxWidth: '100%',
+                        maxHeight: '100%',
+                        width: 'auto',
+                        height: 'auto',
+                        objectFit: 'contain',
+                        willChange: 'transform'
+                      }}
                       onTimeUpdate={handleTimeUpdateInternal}
                       onEnded={() => setIsPlaying(false)}
                       onPlay={() => setIsPlaying(true)}
@@ -1099,6 +1220,48 @@ function VideoPreviewInner({
                   </div>
                 )}
               </div>
+
+              {/* ── TOP REEL IMAGE (Above Video Letterbox Space) ── */}
+              {!isFillMode && hasTopReel && slotMetrics.hasSlots && (
+                <div
+                  className="absolute top-0 inset-x-0 overflow-hidden flex items-center justify-center pointer-events-none z-15"
+                  style={{
+                    height: `${slotMetrics.slotHeightPct}%`,
+                    backgroundColor: topReel.bgColor || 'transparent'
+                  }}
+                >
+                  <img
+                    src={topReel.url}
+                    alt="Top Reel Header"
+                    className="w-full h-full"
+                    style={{
+                      objectFit: topReel.fit || 'contain',
+                      opacity: (topReel.opacity ?? 100) / 100
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* ── BOTTOM REEL IMAGE (Below Video Letterbox Space) ── */}
+              {!isFillMode && hasBottomReel && slotMetrics.hasSlots && (
+                <div
+                  className="absolute bottom-0 inset-x-0 overflow-hidden flex items-center justify-center pointer-events-none z-15"
+                  style={{
+                    height: `${slotMetrics.slotHeightPct}%`,
+                    backgroundColor: bottomReel.bgColor || 'transparent'
+                  }}
+                >
+                  <img
+                    src={bottomReel.url}
+                    alt="Bottom Reel Footer"
+                    className="w-full h-full"
+                    style={{
+                      objectFit: bottomReel.fit || 'contain',
+                      opacity: (bottomReel.opacity ?? 100) / 100
+                    }}
+                  />
+                </div>
+              )}
 
               {/* ── PRIMARY DRAGGABLE TEXT OVERLAY ── */}
               {textSettings?.enabled && (
@@ -1115,11 +1278,6 @@ function VideoPreviewInner({
                 >
                   <div className="flex items-center space-x-1">
                     <span>{getRenderedText()}</span>
-                  </div>
-
-                  <div className="absolute -top-5 left-1/2 -translate-x-1/2 opacity-0 group-hover/text:opacity-100 transition-opacity bg-black/80 text-amber-300 text-[9px] px-2 py-0.5 rounded-full border border-amber-500/40 pointer-events-none flex items-center space-x-1 font-mono whitespace-nowrap shadow-lg">
-                    <GripVertical className="w-2.5 h-2.5" />
-                    <span>Drag title</span>
                   </div>
                 </div>
               )}
@@ -1143,11 +1301,6 @@ function VideoPreviewInner({
                     title="Click and drag anywhere on screen to reposition text"
                   >
                     <span>{extra.text}</span>
-
-                    <div className="absolute -top-5 left-1/2 -translate-x-1/2 opacity-0 group-hover/extra:opacity-100 transition-opacity bg-black/80 text-emerald-300 text-[9px] px-2 py-0.5 rounded-full border border-emerald-500/40 pointer-events-none flex items-center space-x-1 font-mono whitespace-nowrap shadow-lg">
-                      <GripVertical className="w-2.5 h-2.5" />
-                      <span>Drag text</span>
-                    </div>
                   </div>
                 );
               })}
@@ -1176,18 +1329,23 @@ function VideoPreviewInner({
                     }}
                     className="w-full h-auto object-contain pointer-events-none"
                   />
-
-                  <div className="absolute -top-5 left-1/2 -translate-x-1/2 opacity-0 group-hover/logo:opacity-100 transition-opacity bg-black/80 text-emerald-300 text-[9px] px-2 py-0.5 rounded-full border border-emerald-500/40 pointer-events-none flex items-center space-x-1 font-mono whitespace-nowrap shadow-lg">
-                    <GripVertical className="w-2.5 h-2.5" />
-                    <span>Drag logo</span>
-                  </div>
                 </div>
               )}
 
 
               {/* Phone Status bar */}
               <div className="absolute top-2 inset-x-0 flex justify-between px-3 sm:px-4 text-[9px] font-mono text-white/50 pointer-events-none z-30 drop-shadow">
-                <span>9:16 SHORTS / REELS</span>
+                <span>
+                  {cropSettings?.mode === '1:1'
+                    ? '1:1 SQUARE FEED'
+                    : cropSettings?.mode === '4:5'
+                    ? '4:5 PORTRAIT FEED'
+                    : cropSettings?.mode === '16:9'
+                    ? '16:9 WIDESCREEN'
+                    : cropSettings?.mode === '21:9'
+                    ? '21:9 ULTRAWIDE'
+                    : '9:16 SHORTS / REELS'}
+                </span>
                 <span className={!isFillMode ? 'text-emerald-400 font-semibold' : 'text-amber-400 font-semibold'}>
                   {!isFillMode ? (bgType === 'blur-video' ? 'BLURRED BACKDROP' : bgType === 'image' ? 'CUSTOM BACKDROP' : 'FIT') : 'ZOOM FILL'}
                 </span>
@@ -1209,78 +1367,103 @@ function VideoPreviewInner({
                 playsInline
               />
 
-              {/* ── 8-POINT INTERACTIVE MANUAL CROP RECTANGLE ── */}
+              {/* ── INTERACTIVE CROP FRAME (Professional solid bracket-style, NO dashed lines) ── */}
               {showCropGuide && cropSettings?.mode !== 'original' && (
                 <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
                   <div
-                    className={`relative border-2 border-dashed rounded-lg pointer-events-auto select-none transition-shadow touch-manipulation ${
-                      isDraggingCrop
-                        ? 'border-orange-400 shadow-[0_0_0_9999px_rgba(0,0,0,0.65)] ring-2 ring-orange-500/50'
-                        : 'border-amber-400/90 shadow-[0_0_0_9999px_rgba(0,0,0,0.55)] hover:border-amber-300'
-                    }`}
+                    className="relative pointer-events-auto select-none touch-manipulation"
                     style={{
                       width: cropDims.width,
                       height: cropDims.height,
-                      transform: `translate(${(cropSettings?.x || 0) * 0.35}px, ${(cropSettings?.y || 0) * 0.35}px) scale(${cropSettings?.zoom || 1})`
+                      transform: `translate(${(cropSettings?.x || 0) * 0.35}px, ${(cropSettings?.y || 0) * 0.35}px) scale(${cropSettings?.zoom || 1})`,
+                      /* Dark overlay outside crop area */
+                      boxShadow: isDraggingCrop
+                        ? '0 0 0 9999px rgba(0,0,0,0.60)'
+                        : '0 0 0 9999px rgba(0,0,0,0.50)',
+                      /* Clean solid 1px outline — NO dashes */
+                      outline: isDraggingCrop
+                        ? '1.5px solid rgba(251,146,60,0.95)'
+                        : '1.5px solid rgba(255,255,255,0.70)',
+                      outlineOffset: '0px'
                     }}
                     onMouseDown={(e) => startCropDrag(e, 'center')}
                     onTouchStart={(e) => startCropDrag(e, 'center')}
                   >
-                    {/* 4 Corner Resize Handles */}
-                    <div
-                      className="absolute -top-2.5 -left-2.5 w-5 h-5 bg-amber-400 hover:bg-white rounded-full border-2 border-black cursor-nwse-resize z-30 shadow touch-manipulation"
+                    {/* ── L-shaped corner brackets (top-left) ── */}
+                    <div className="absolute top-0 left-0 w-5 h-0.5 pointer-events-none"
+                      style={{ background: isDraggingCrop ? '#fb923c' : '#ffffff', boxShadow: '0 0 3px rgba(0,0,0,0.8)' }} />
+                    <div className="absolute top-0 left-0 w-0.5 h-5 pointer-events-none"
+                      style={{ background: isDraggingCrop ? '#fb923c' : '#ffffff', boxShadow: '0 0 3px rgba(0,0,0,0.8)' }} />
+
+                    {/* ── L-shaped corner brackets (top-right) ── */}
+                    <div className="absolute top-0 right-0 w-5 h-0.5 pointer-events-none"
+                      style={{ background: isDraggingCrop ? '#fb923c' : '#ffffff', boxShadow: '0 0 3px rgba(0,0,0,0.8)' }} />
+                    <div className="absolute top-0 right-0 w-0.5 h-5 pointer-events-none"
+                      style={{ background: isDraggingCrop ? '#fb923c' : '#ffffff', boxShadow: '0 0 3px rgba(0,0,0,0.8)' }} />
+
+                    {/* ── L-shaped corner brackets (bottom-left) ── */}
+                    <div className="absolute bottom-0 left-0 w-5 h-0.5 pointer-events-none"
+                      style={{ background: isDraggingCrop ? '#fb923c' : '#ffffff', boxShadow: '0 0 3px rgba(0,0,0,0.8)' }} />
+                    <div className="absolute bottom-0 left-0 w-0.5 h-5 pointer-events-none"
+                      style={{ background: isDraggingCrop ? '#fb923c' : '#ffffff', boxShadow: '0 0 3px rgba(0,0,0,0.8)' }} />
+
+                    {/* ── L-shaped corner brackets (bottom-right) ── */}
+                    <div className="absolute bottom-0 right-0 w-5 h-0.5 pointer-events-none"
+                      style={{ background: isDraggingCrop ? '#fb923c' : '#ffffff', boxShadow: '0 0 3px rgba(0,0,0,0.8)' }} />
+                    <div className="absolute bottom-0 right-0 w-0.5 h-5 pointer-events-none"
+                      style={{ background: isDraggingCrop ? '#fb923c' : '#ffffff', boxShadow: '0 0 3px rgba(0,0,0,0.8)' }} />
+
+                    {/* ── Invisible hit-zone resize handles (full corners & edges) ── */}
+                    {/* Top-left corner resize */}
+                    <div className="absolute -top-3 -left-3 w-8 h-8 cursor-nwse-resize z-30 touch-manipulation"
                       onMouseDown={(e) => startCropDrag(e, 'tl')}
                       onTouchStart={(e) => startCropDrag(e, 'tl')}
                       title="Drag to resize top-left"
                     />
-                    <div
-                      className="absolute -top-2.5 -right-2.5 w-5 h-5 bg-amber-400 hover:bg-white rounded-full border-2 border-black cursor-nesw-resize z-30 shadow touch-manipulation"
+                    {/* Top-right corner resize */}
+                    <div className="absolute -top-3 -right-3 w-8 h-8 cursor-nesw-resize z-30 touch-manipulation"
                       onMouseDown={(e) => startCropDrag(e, 'tr')}
                       onTouchStart={(e) => startCropDrag(e, 'tr')}
                       title="Drag to resize top-right"
                     />
-                    <div
-                      className="absolute -bottom-2.5 -left-2.5 w-5 h-5 bg-amber-400 hover:bg-white rounded-full border-2 border-black cursor-nesw-resize z-30 shadow touch-manipulation"
+                    {/* Bottom-left corner resize */}
+                    <div className="absolute -bottom-3 -left-3 w-8 h-8 cursor-nesw-resize z-30 touch-manipulation"
                       onMouseDown={(e) => startCropDrag(e, 'bl')}
                       onTouchStart={(e) => startCropDrag(e, 'bl')}
                       title="Drag to resize bottom-left"
                     />
-                    <div
-                      className="absolute -bottom-2.5 -right-2.5 w-5 h-5 bg-amber-400 hover:bg-white rounded-full border-2 border-black cursor-nwse-resize z-30 shadow touch-manipulation"
+                    {/* Bottom-right corner resize */}
+                    <div className="absolute -bottom-3 -right-3 w-8 h-8 cursor-nwse-resize z-30 touch-manipulation"
                       onMouseDown={(e) => startCropDrag(e, 'br')}
                       onTouchStart={(e) => startCropDrag(e, 'br')}
                       title="Drag to resize bottom-right"
                     />
 
-                    {/* 4 Edge Resize Handles */}
-                    <div
-                      className="absolute top-0 inset-x-8 h-3 -translate-y-1.5 bg-transparent hover:bg-amber-400/50 cursor-ns-resize z-20 touch-manipulation"
+                    {/* Edge resize handles */}
+                    <div className="absolute top-0 inset-x-8 h-3 -translate-y-1.5 bg-transparent cursor-ns-resize z-20 touch-manipulation"
                       onMouseDown={(e) => startCropDrag(e, 't')}
                       onTouchStart={(e) => startCropDrag(e, 't')}
                       title="Resize height"
                     />
-                    <div
-                      className="absolute bottom-0 inset-x-8 h-3 translate-y-1.5 bg-transparent hover:bg-amber-400/50 cursor-ns-resize z-20 touch-manipulation"
+                    <div className="absolute bottom-0 inset-x-8 h-3 translate-y-1.5 bg-transparent cursor-ns-resize z-20 touch-manipulation"
                       onMouseDown={(e) => startCropDrag(e, 'b')}
                       onTouchStart={(e) => startCropDrag(e, 'b')}
                       title="Resize height"
                     />
-                    <div
-                      className="absolute left-0 inset-y-8 w-3 -translate-x-1.5 bg-transparent hover:bg-amber-400/50 cursor-ew-resize z-20 touch-manipulation"
+                    <div className="absolute left-0 inset-y-8 w-3 -translate-x-1.5 bg-transparent cursor-ew-resize z-20 touch-manipulation"
                       onMouseDown={(e) => startCropDrag(e, 'l')}
                       onTouchStart={(e) => startCropDrag(e, 'l')}
                       title="Resize width"
                     />
-                    <div
-                      className="absolute right-0 inset-y-8 w-3 translate-x-1.5 bg-transparent hover:bg-amber-400/50 cursor-ew-resize z-20 touch-manipulation"
+                    <div className="absolute right-0 inset-y-8 w-3 translate-x-1.5 bg-transparent cursor-ew-resize z-20 touch-manipulation"
                       onMouseDown={(e) => startCropDrag(e, 'r')}
                       onTouchStart={(e) => startCropDrag(e, 'r')}
                       title="Resize width"
                     />
 
-                    {/* Center Move Badge */}
-                    <div className="absolute inset-0 flex items-center justify-center cursor-move">
-                      <div className="flex items-center space-x-1 text-[9px] sm:text-[10px] font-bold text-amber-300 bg-black/80 px-2 sm:px-2.5 py-1 rounded-full border border-amber-500/40 backdrop-blur-sm shadow-lg pointer-events-none">
+                    {/* Center move label */}
+                    <div className="absolute inset-0 flex items-center justify-center cursor-move pointer-events-none">
+                      <div className="flex items-center space-x-1 text-[9px] sm:text-[10px] font-bold text-white/90 bg-black/70 px-2 sm:px-2.5 py-1 rounded-full backdrop-blur-sm shadow-lg">
                         <Move className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
                         <span className="truncate max-w-[150px] sm:max-w-none">
                           {cropSettings?.mode === 'custom'
@@ -1371,11 +1554,43 @@ function VideoPreviewInner({
             {/* Top Text / Title Overlay Live Preview */}
             <div className="relative z-10 w-full text-center">
               {textSettings?.enabled && (
-                <div style={getTextOverlayStyle()} className="rounded px-2 py-1 max-w-full">
+                <div
+                  style={getTextOverlayStyle()}
+                  onMouseDown={handleTextMouseDown}
+                  onTouchStart={handleTextTouchStart}
+                  className={`group/text rounded px-2 py-1 max-w-full cursor-move transition-shadow touch-manipulation select-none ${
+                    isDraggingText
+                      ? 'ring-2 ring-amber-400 ring-offset-2 ring-offset-black/50 shadow-2xl scale-105'
+                      : 'hover:ring-1 hover:ring-amber-400/60'
+                  }`}
+                  title="Click and drag anywhere on screen to reposition title"
+                >
                   {getRenderedText()}
                 </div>
               )}
             </div>
+
+            {/* Extra Text Overlays in Studio Viewport */}
+            {extraTextsList.map((extra) => {
+              if (!extra.enabled || !extra.text) return null;
+              const isThisDragging = draggingExtraId === extra.id;
+              return (
+                <div
+                  key={extra.id}
+                  style={getExtraTextStyle(extra)}
+                  onMouseDown={(e) => handleExtraTextMouseDown(e, extra)}
+                  onTouchStart={(e) => handleExtraTextTouchStart(e, extra)}
+                  className={`group/extra transition-shadow touch-manipulation select-none ${
+                    isThisDragging
+                      ? 'ring-2 ring-emerald-400 ring-offset-2 ring-offset-black/50 shadow-2xl scale-105'
+                      : 'hover:ring-1 hover:ring-emerald-400/60'
+                  }`}
+                  title="Click and drag anywhere on screen to reposition text"
+                >
+                  <span>{extra.text}</span>
+                </div>
+              );
+            })}
 
             {/* Center Studio Mockup / Dropzone Callout */}
             <div className="relative z-10 flex flex-col items-center justify-center text-center p-3.5 bg-slate-950/75 backdrop-blur-md rounded-2xl border border-slate-700/70 shadow-2xl max-w-[210px] sm:max-w-[240px]">

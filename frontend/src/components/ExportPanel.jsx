@@ -22,9 +22,11 @@ import { detectCapabilities } from '../services/capabilityDetector';
 import { sanitizeFilename } from '../utils/filename';
 import { cleanVideoFilename } from '../utils/titleCleaner';
 import { formatTime } from '../utils/time';
+import { getTargetResolutionDimensions } from '../utils/crop';
 
 export default function ExportPanel({
   exportSettings = {},
+  cropSettings = {},
   onChange,
   sourceResolution,
   detectedQuality,
@@ -158,11 +160,28 @@ export default function ExportPanel({
       .replace(/\{part\}/gi, partFormatted)
   )}.${ext}`;
 
-  const displayResolution = sourceResolution
-    ? `${sourceResolution.width} × ${sourceResolution.height}`
-    : videoData?.width && videoData?.height
-    ? `${videoData.width} × ${videoData.height}`
-    : 'Original Native Resolution';
+  const srcW = sourceResolution?.width || videoData?.width || 1920;
+  const srcH = sourceResolution?.height || videoData?.height || 1080;
+  const activeCropMode = cropSettings?.mode || 'original';
+  const targetDims = getTargetResolutionDimensions(
+    activeCropMode,
+    exportSettings?.resolution || 'original',
+    srcW,
+    srcH,
+    (cropSettings?.customWidth && cropSettings?.customHeight) ? cropSettings.customWidth / cropSettings.customHeight : 1
+  );
+
+  const platformFormatLabels = {
+    '9:16': 'Instagram & FB Reels / Shorts / TikTok (9:16 Full HD)',
+    '16:9': 'YouTube & FB Landscape Video (16:9 Full HD)',
+    '1:1': 'Instagram & FB Feed Square (1:1 Square)',
+    '4:5': 'Instagram & FB Feed Portrait (4:5 Portrait Optimal)',
+    '21:9': 'YouTube Ultrawide Cinema (21:9 Banner)',
+    'original': '100% Native Source Resolution',
+    'custom': 'Custom Crop Geometry'
+  };
+
+  const isOutputReformatted = activeCropMode !== 'original';
 
   const displayFps = detectedFps
     ? `${detectedFps} FPS (Source Matched)`
@@ -200,15 +219,15 @@ export default function ExportPanel({
             </div>
             <div className="min-w-0">
               <div className="flex items-center space-x-2">
-                <h4 className="text-xs sm:text-sm font-bold text-white">Original Source Media Form</h4>
+                <h4 className="text-xs sm:text-sm font-bold text-white">Target Export &amp; Source Media Form</h4>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-bold">
-                  100% Original
+                  {activeCropMode.toUpperCase()}
                 </span>
               </div>
             </div>
           </div>
           <span className="text-[10px] text-slate-400">
-            Auto-synced to uploaded video
+            Standard Platform Specifications
           </span>
         </div>
 
@@ -218,12 +237,19 @@ export default function ExportPanel({
             <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0 mt-0.5">
               <Video className="w-3.5 h-3.5" />
             </div>
-            <div className="min-w-0">
-              <span className="text-[11px] font-medium text-slate-400 block">Video Resolution &amp; Dimensions</span>
+            <div className="min-w-0 flex-1">
+              <span className="text-[11px] font-medium text-slate-400 block">Export Output Resolution</span>
               <p className="text-xs font-bold font-mono text-emerald-300 truncate">
-                {displayResolution}
+                {targetDims.width} × {targetDims.height}
               </p>
-              <span className="text-[10px] text-slate-500 block">Preserves native pixel matrix</span>
+              <span className="text-[10px] text-amber-300/90 font-medium block truncate">
+                {platformFormatLabels[activeCropMode] || 'Platform Standard'}
+              </span>
+              {isOutputReformatted && (
+                <span className="text-[9px] text-slate-500 font-mono block mt-0.5">
+                  Source: {srcW} × {srcH}
+                </span>
+              )}
             </div>
           </div>
 

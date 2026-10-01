@@ -230,12 +230,15 @@ export class ExportVideoDecoder {
     if (this.isClosed) return null;
     if (this.signal?.aborted) throw new Error('Export cancelled by user');
 
-    // 1. Check if the target is significantly behind current decoder state (e.g. clip jump or loop)
-    // If target timestamp is before last decoded frame minus a tolerance margin, seek back to keyframe
-    const toleranceMarginUs = 100_000; // 100ms
+    // 1. Check if the target is significantly behind current decoder state (loop/reverse)
+    // or significantly ahead (jumping across cut segments in merged exports).
+    const backwardSeekMarginUs = 100_000; // 100ms
+    const forwardSeekMarginUs = 1_500_000; // 1.5s (avoid decoding >45 frames linearly across cut gaps)
     const needsSeek =
-      this.lastDecodedPtsUs > 0 &&
-      timestampUs < this.lastDecodedPtsUs - toleranceMarginUs;
+      (this.lastDecodedPtsUs > 0 &&
+        (timestampUs < this.lastDecodedPtsUs - backwardSeekMarginUs ||
+         timestampUs > this.lastDecodedPtsUs + forwardSeekMarginUs)) ||
+      (this.lastDecodedPtsUs < 0 && timestampUs > forwardSeekMarginUs);
 
     if (needsSeek) {
       // Clear current queue and close all queued frames
@@ -271,6 +274,7 @@ export class ExportVideoDecoder {
         // If next frame timestamp is past target time (with small half-frame tolerance),
         // the current candidateFrame is the best match
         if (candidateFrame && nextFrame.timestamp > timestampUs) {
+          this.lastDecodedPtsUs = candidateFrame.timestamp;
           return candidateFrame;
         }
 
@@ -282,6 +286,7 @@ export class ExportVideoDecoder {
 
         // If candidateFrame is already at or past target, return it
         if (candidateFrame.timestamp >= timestampUs) {
+          this.lastDecodedPtsUs = candidateFrame.timestamp;
           return candidateFrame;
         }
       } else {
@@ -300,6 +305,9 @@ export class ExportVideoDecoder {
             } catch (e) {}
           }
           if (this.decodedQueue.length === 0) {
+            if (candidateFrame) {
+              this.lastDecodedPtsUs = candidateFrame.timestamp;
+            }
             return candidateFrame;
           }
         }
@@ -317,6 +325,10 @@ export class ExportVideoDecoder {
         frame.close();
       } catch (e) {}
     }
+    for (const waiter of this.pendingWaiters) {
+      try { waiter.resolve(); } catch (_) {}
+    }
+    this.pendingWaiters = [];
   }
 
   /**

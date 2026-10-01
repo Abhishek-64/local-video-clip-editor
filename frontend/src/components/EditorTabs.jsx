@@ -394,6 +394,7 @@ export default function EditorTabs({
         {normalizedTab === 'export' && (
           <ExportPanel
             exportSettings={exportSettings}
+            cropSettings={cropSettings}
             onChange={onExportChange}
             sourceResolution={sourceResolution}
             detectedQuality={detectedQuality}

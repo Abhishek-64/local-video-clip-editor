@@ -2,11 +2,14 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import {
   Scissors, Clock, Layers, Hash, Film, ListOrdered, Plus, Trash2,
   Play, RefreshCw, ChevronDown, ChevronUp, Copy, ArrowUp, ArrowDown,
-  Target, Edit3, Check, Sparkles, Magnet, ShieldCheck, Zap, RotateCcw
+  Target, Edit3, Check, Sparkles, Magnet, ShieldCheck, Zap, RotateCcw,
+  Image as ImageIcon
 } from 'lucide-react';
 import { formatTime, parseTimeToSeconds, splitKeptParts } from '../utils/time';
+import { generateTimelineThumbnails } from '../utils/thumbnailGenerator';
 
 function TimelineInner({
+  videoUrl = '',
   duration = 0,
   startTime = 0,
   endTime = 0,
@@ -31,9 +34,14 @@ function TimelineInner({
   // Active playing/previewing part ID
   const [activePreviewPartId, setActivePreviewPartId] = useState(null);
 
+  // Video Filmstrip Thumbnails state
+  const [thumbnails, setThumbnails] = useState([]);
+  const [isLoadingThumbnails, setIsLoadingThumbnails] = useState(false);
+
   // Direct Drag-and-Drop State on the Timeline Track
   const [dragState, setDragState] = useState(null);
   const trackRef = useRef(null);
+  const playheadRafRef = useRef(null);
 
   // ── Stable refs for drag handler — avoids re-attaching listeners on every tick ──
   const durationRef = useRef(duration);
@@ -45,6 +53,7 @@ function TimelineInner({
   const clipDurationRef = useRef(clipDuration);
   const onStartChangeRef = useRef(onStartChange);
   const onEndChangeRef = useRef(onEndChange);
+  const onCurrentTimeChangeRef = useRef(onCurrentTimeChange);
   const onCustomPartsChangeRef = useRef(onCustomPartsChange);
 
   // Keep refs in sync with latest props/state (no re-render cost)
@@ -55,7 +64,42 @@ function TimelineInner({
   useEffect(() => { clipDurationRef.current = clipDuration; }, [clipDuration]);
   useEffect(() => { onStartChangeRef.current = onStartChange; }, [onStartChange]);
   useEffect(() => { onEndChangeRef.current = onEndChange; }, [onEndChange]);
+  useEffect(() => { onCurrentTimeChangeRef.current = onCurrentTimeChange; }, [onCurrentTimeChange]);
   useEffect(() => { onCustomPartsChangeRef.current = onCustomPartsChange; }, [onCustomPartsChange]);
+
+  // ── Extract video frame thumbnails for filmstrip in timeline ──
+  useEffect(() => {
+    if (!videoUrl || !duration || duration <= 0) {
+      setThumbnails([]);
+      return;
+    }
+
+    const abortController = new AbortController();
+    setIsLoadingThumbnails(true);
+
+    generateTimelineThumbnails(videoUrl, duration, {
+      count: 12,
+      signal: abortController.signal,
+      onProgress: (thumbs) => {
+        setThumbnails(thumbs);
+      }
+    })
+      .then((finalThumbs) => {
+        if (!abortController.signal.aborted) {
+          setThumbnails(finalThumbs);
+          setIsLoadingThumbnails(false);
+        }
+      })
+      .catch(() => {
+        if (!abortController.signal.aborted) {
+          setIsLoadingThumbnails(false);
+        }
+      });
+
+    return () => {
+      abortController.abort();
+    };
+  }, [videoUrl, duration]);
 
   const selectedDuration = Math.max(0, endTime - startTime);
 
@@ -63,7 +107,7 @@ function TimelineInner({
   const keptParts = useMemo(() => (customParts || []).filter(p => !p.isDeleted), [customParts]);
   const deletedParts = useMemo(() => (customParts || []).filter(p => p.isDeleted), [customParts]);
 
-  // Pointer Down handler for drag handles
+  // Pointer Down handler for drag handles & playhead
   const handlePointerDown = useCallback((e, type, index = 0) => {
     e.stopPropagation();
     e.preventDefault();
@@ -111,6 +155,15 @@ function TimelineInner({
         if (targetTime > startTimeRef.current + 0.5) {
           onEndChangeRef.current?.(targetTime);
         }
+      } else if (dragState.type === 'playhead') {
+        targetTime = applyMagneticSnapRef.current(targetTime);
+        targetTime = Math.max(0, Math.min(dur, targetTime));
+        if (playheadRafRef.current) {
+          cancelAnimationFrame(playheadRafRef.current);
+        }
+        playheadRafRef.current = requestAnimationFrame(() => {
+          onCurrentTimeChangeRef.current?.(targetTime);
+        });
       } else if (dragState.type === 'split-boundary') {
         const currentList = customPartsRef.current && customPartsRef.current.length > 0
           ? [...customPartsRef.current]
@@ -141,6 +194,10 @@ function TimelineInner({
     };
 
     const handlePointerUp = () => {
+      if (playheadRafRef.current) {
+        cancelAnimationFrame(playheadRafRef.current);
+        playheadRafRef.current = null;
+      }
       setDragState(null);
     };
 
@@ -150,6 +207,10 @@ function TimelineInner({
     window.addEventListener('touchend', handlePointerUp);
 
     return () => {
+      if (playheadRafRef.current) {
+        cancelAnimationFrame(playheadRafRef.current);
+        playheadRafRef.current = null;
+      }
       window.removeEventListener('mousemove', handlePointerMove);
       window.removeEventListener('mouseup', handlePointerUp);
       window.removeEventListener('touchmove', handlePointerMove);
@@ -556,18 +617,64 @@ function TimelineInner({
         <div className="overflow-hidden pb-1">
           <div
             ref={trackRef}
-            className="relative h-14 sm:h-16 w-full bg-slate-950 rounded-xl overflow-hidden border border-slate-800 cursor-pointer select-none shadow-inner"
-            onClick={(e) => {
+            className="relative h-14 sm:h-16 w-full bg-slate-950 rounded-xl overflow-hidden border border-slate-800 cursor-pointer select-none shadow-inner group/track"
+            onMouseDown={(e) => {
               if (!duration || !onCurrentTimeChange || dragState?.isDragging) return;
+              // If click happened on the track itself (not on a split handle or range handle)
               const rect = e.currentTarget.getBoundingClientRect();
               const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
               const rawTime = pos * duration;
-              onCurrentTimeChange(applyMagneticSnap(rawTime));
+              const snapped = applyMagneticSnap(rawTime);
+              onCurrentTimeChange(snapped);
+              setDragState({ type: 'playhead', startX: e.clientX, isDragging: true });
+            }}
+            onTouchStart={(e) => {
+              if (!duration || !onCurrentTimeChange || dragState?.isDragging) return;
+              const touch = e.touches[0];
+              const rect = e.currentTarget.getBoundingClientRect();
+              const pos = Math.max(0, Math.min(1, (touch.clientX - rect.left) / rect.width));
+              const rawTime = pos * duration;
+              const snapped = applyMagneticSnap(rawTime);
+              onCurrentTimeChange(snapped);
+              setDragState({ type: 'playhead', startX: touch.clientX, isDragging: true });
             }}
           >
+            {/* ── Filmstrip Video Frame Thumbnails Track ── */}
+            {thumbnails.length > 0 ? (
+              <div className="absolute inset-0 flex overflow-hidden pointer-events-none select-none z-0">
+                {thumbnails.map((thumb, idx) => (
+                  <div
+                    key={idx}
+                    className="h-full flex-1 relative border-r border-slate-900/60 overflow-hidden bg-slate-950"
+                  >
+                    <img
+                      src={thumb.dataUrl}
+                      alt=""
+                      className="w-full h-full object-cover select-none pointer-events-none filter brightness-95 contrast-105"
+                      loading="eager"
+                    />
+                  </div>
+                ))}
+              </div>
+            ) : isLoadingThumbnails ? (
+              /* Loading filmstrip placeholder */
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none z-0 bg-slate-950/80">
+                <div className="flex items-center space-x-1.5 text-slate-400 text-xs font-mono">
+                  <Film className="w-3.5 h-3.5 animate-pulse text-orange-400" />
+                  <span>Loading video filmstrip...</span>
+                </div>
+              </div>
+            ) : (
+              /* Default subtle filmstrip pattern */
+              <div className="absolute inset-0 opacity-15 bg-[repeating-linear-gradient(90deg,transparent,transparent_20px,rgba(255,255,255,0.06)_20px,rgba(255,255,255,0.06)_40px)] pointer-events-none select-none z-0" />
+            )}
+
+            {/* Cinematic dark scrim over filmstrip for high-contrast legible labels */}
+            <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-black/20 to-black/70 pointer-events-none z-[1]" />
+
             {/* Active Global Range Highlight */}
             <div
-              className="absolute top-0 bottom-0 bg-slate-900/60 border-y border-amber-500/30 transition-all pointer-events-none"
+              className="absolute top-0 bottom-0 bg-amber-500/10 border-y border-amber-500/40 transition-all pointer-events-none z-[2]"
               style={{
                 left: `${startPercent}%`,
                 width: `${Math.max(0, endPercent - startPercent)}%`
@@ -576,7 +683,7 @@ function TimelineInner({
 
             {/* Individual Part Markers & Visual Segments */}
             {duration > 0 && displayPartsList.length > 0 && (
-              <div className="absolute inset-0 pointer-events-none">
+              <div className="absolute inset-0 pointer-events-none z-10">
                 {displayPartsList.map((part, idx) => {
                   const segLeftPct = (part.startTime / duration) * 100;
                   const segWidthPct = ((part.endTime - part.startTime) / duration) * 100;
@@ -588,21 +695,21 @@ function TimelineInner({
                       key={part.id || idx}
                       className={`absolute top-0 bottom-0 border-r flex flex-col justify-between p-1 transition-all ${
                         isCut
-                          ? 'bg-[repeating-linear-gradient(45deg,rgba(225,29,72,0.15),rgba(225,29,72,0.15)_8px,rgba(15,23,42,0.8)_8px,rgba(15,23,42,0.8)_16px)] border-r-2 border-r-rose-500/70 border-dashed border-rose-500/50'
+                          ? 'bg-[repeating-linear-gradient(45deg,rgba(225,29,72,0.45),rgba(225,29,72,0.45)_8px,rgba(15,23,42,0.85)_8px,rgba(15,23,42,0.85)_16px)] border-r-2 border-r-rose-500/90 border-dashed border-rose-500/70 shadow-inner'
                           : isSelected
-                          ? 'bg-amber-500/25 border-r-2 border-r-amber-400 border-dashed shadow-[inset_0_0_12px_rgba(245,158,11,0.2)]'
+                          ? 'bg-amber-500/30 border-r-2 border-r-amber-400 border-dashed shadow-[inset_0_0_12px_rgba(245,158,11,0.25)]'
                           : idx % 2 === 0
-                          ? 'bg-orange-500/15 border-r border-dashed border-amber-400/50'
-                          : 'bg-indigo-500/15 border-r border-dashed border-amber-400/50'
+                          ? 'bg-orange-500/15 border-r border-dashed border-amber-400/60 hover:bg-orange-500/25'
+                          : 'bg-indigo-500/15 border-r border-dashed border-amber-400/60 hover:bg-indigo-500/25'
                       }`}
                       style={{ left: `${segLeftPct}%`, width: `${Math.max(1, segWidthPct)}%` }}
                     >
                       <div className="flex items-center justify-between gap-1">
                         <span
-                          className={`text-[8px] sm:text-[9px] font-mono font-bold px-1 rounded truncate border ${
+                          className={`text-[8px] sm:text-[9px] font-mono font-bold px-1 rounded truncate border backdrop-blur-sm ${
                             isCut
-                              ? 'bg-rose-950/90 text-rose-300 border-rose-500/50 line-through'
-                              : 'bg-black/80 text-amber-200 border-amber-500/30'
+                              ? 'bg-rose-950/95 text-rose-300 border-rose-500/60 line-through'
+                              : 'bg-black/85 text-amber-200 border-amber-500/40 shadow-sm'
                           }`}
                         >
                           {isCut ? '✂️ CUT' : `Part ${part.partNumber || idx + 1}`}
@@ -610,10 +717,10 @@ function TimelineInner({
                       </div>
 
                       <span
-                        className={`text-[8px] font-mono px-1 rounded truncate self-start border ${
+                        className={`text-[8px] font-mono px-1 rounded truncate self-start border backdrop-blur-sm ${
                           isCut
-                            ? 'text-rose-400/80 bg-rose-950/90 border-rose-900/60 line-through'
-                            : 'text-slate-300 bg-slate-950/80 border-slate-800'
+                            ? 'text-rose-400/90 bg-rose-950/95 border-rose-900/80 line-through'
+                            : 'text-slate-200 bg-slate-950/90 border-slate-700/80 shadow-sm font-semibold'
                         }`}
                       >
                         {formatTime(part.duration || (part.endTime - part.startTime) || 0)}
@@ -723,12 +830,28 @@ function TimelineInner({
               </div>
             </div>
 
-            {/* Current Playhead Indicator */}
+            {/* Current Playhead Indicator with Interactive Drag Handle */}
             <div
-              className="absolute top-0 bottom-0 w-0.5 bg-white shadow-[0_0_8px_white] z-20 pointer-events-none transition-all"
+              className="absolute top-0 bottom-0 z-50 pointer-events-auto cursor-ew-resize group/playhead"
               style={{ left: `${currentPercent}%` }}
+              onMouseDown={(e) => handlePointerDown(e, 'playhead')}
+              onTouchStart={(e) => handlePointerDown(e, 'playhead')}
+              title={`Playhead: ${formatTime(currentTime)} (Click & drag to scrub)`}
             >
-              <div className="w-3 h-3 bg-white -ml-1.5 -mt-0.5 rounded-full shadow border-2 border-orange-500" />
+              {/* Expanded touch/click grab area for effortless scrubbing */}
+              <div className="absolute top-0 bottom-0 -ml-3 w-6 cursor-ew-resize" />
+
+              {/* Playhead vertical needle line with clean crisp glow */}
+              <div className="absolute top-0 bottom-0 -ml-[1px] w-[2px] bg-white shadow-[0_0_8px_rgba(255,255,255,0.95)] transition-colors group-hover/playhead:bg-amber-300 pointer-events-none" />
+
+              {/* Tooltip when dragging playhead */}
+              <div
+                className={`absolute -top-7 -ml-6 px-1.5 py-0.5 bg-slate-900 border border-orange-500/80 text-orange-300 font-mono text-[9px] font-bold rounded shadow-xl pointer-events-none transition-opacity whitespace-nowrap ${
+                  dragState?.type === 'playhead' ? 'opacity-100 scale-105' : 'opacity-0 group-hover/playhead:opacity-100'
+                }`}
+              >
+                {formatTime(currentTime)}
+              </div>
             </div>
           </div>
         </div>
@@ -1139,4 +1262,15 @@ function TimelineInner({
   );
 }
 
-export default React.memo(TimelineInner);
+export default React.memo(TimelineInner, (prev, next) => {
+  if (prev.videoUrl !== next.videoUrl) return false;
+  if (prev.duration !== next.duration) return false;
+  if (prev.startTime !== next.startTime) return false;
+  if (prev.endTime !== next.endTime) return false;
+  if (prev.clipDuration !== next.clipDuration) return false;
+  if (prev.movieName !== next.movieName) return false;
+  if (prev.customParts !== next.customParts) return false;
+  // Only re-render for currentTime when difference is significant (≥ 0.08s) or near boundaries
+  if (Math.abs(prev.currentTime - next.currentTime) >= 0.08) return false;
+  return true;
+});

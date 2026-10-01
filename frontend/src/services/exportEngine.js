@@ -429,6 +429,9 @@ async function runMainThreadSequentialWebCodecsPipeline({
   if (background.type === 'image') {
     await renderer.setBackgroundSource(background);
   }
+  if (crop.reelImages) {
+    await renderer.setReelImages(crop.reelImages);
+  }
   renderer.prepareStaticOverlay(settings, partNumber);
 
   // 4. Setup MP4 Muxer

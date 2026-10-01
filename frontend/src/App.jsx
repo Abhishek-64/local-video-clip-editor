@@ -178,7 +178,11 @@ export default function App() {
     x: 0,
     y: 0,
     zoom: 1,
-    faceTracking: false
+    faceTracking: false,
+    reelImages: {
+      top: { url: null, file: null, name: '', fit: 'contain', bgColor: '#000000', opacity: 100 },
+      bottom: { url: null, file: null, name: '', fit: 'contain', bgColor: '#000000', opacity: 100 }
+    }
   });
 
   // Top & Bottom Background Backdrop Settings
@@ -585,7 +589,9 @@ export default function App() {
       });
 
       const publishedUrl = res?.postUrl || (res?.media_id ? `https://www.instagram.com/reel/${res.media_id}` : null);
-      if (publishedUrl) {
+      if (res?.status === 'processing') {
+        showToast(`Part ${partNum} uploaded! Meta is encoding your video in background.`, 'info');
+      } else if (publishedUrl) {
         setIgPublishedMap(prev => ({ ...prev, [clip.id]: publishedUrl }));
         showToast(`Published Part ${partNum} to Instagram Reels!`, 'success');
       } else {
@@ -1164,7 +1170,8 @@ export default function App() {
   }, [completedClips.length, downloadAllZip, exportSettings.movieName, textSettings.movieName, showToast]);
 
   const handleCropReset = () => {
-    setCropSettings({
+    setCropSettings((prev) => ({
+      ...prev,
       mode: '9:16',
       fillMode: 'fit',
       customWidth: 60,
@@ -1173,7 +1180,7 @@ export default function App() {
       y: 0,
       zoom: 1,
       faceTracking: false
-    });
+    }));
     showToast('Crop settings reset to default.', 'info');
   };
 
@@ -1425,7 +1432,9 @@ export default function App() {
         if (igUrl) {
           setIgPublishedMap(prev => ({ ...prev, [completedJob.id]: igUrl }));
         }
-        if (instagram.scheduledAt) {
+        if (igRes?.status === 'processing') {
+          showToast(`Part ${igPartNum} uploaded! Meta is encoding your video in background.`, 'info');
+        } else if (instagram.scheduledAt) {
           showToast(`Part ${igPartNum} scheduled on Instagram for ${new Date(instagram.scheduledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, 'success');
         } else {
           showToast(`Part ${igPartNum} published to Instagram!`, 'success');
@@ -1766,7 +1775,9 @@ export default function App() {
           if (publishedUrl) {
             setIgPublishedMap(prev => ({ ...prev, [clipWithBlob.id]: publishedUrl }));
           }
-          if (igScheduledAt) {
+          if (igRes?.status === 'processing') {
+            showToast(`Part ${partNum} uploaded! Meta is encoding your video in background.`, 'info');
+          } else if (igScheduledAt) {
             showToast(`Part ${partNum} scheduled on Instagram for ${new Date(igScheduledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, 'success');
           } else {
             showToast(`Part ${partNum} published to Instagram!`, 'success');
@@ -2060,6 +2071,7 @@ export default function App() {
                 {/* Timeline Range Scrubber & Manual Parts Time Table (When video is loaded) */}
                 {videoData && (
                   <Timeline
+                    videoUrl={videoData.url}
                     duration={videoData.duration}
                     startTime={startTime}
                     endTime={endTime}

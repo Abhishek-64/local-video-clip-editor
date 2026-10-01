@@ -2093,23 +2093,30 @@ app.post('/api/instagram/publish', withUser, async (c) => {
         caption: fullCaption,
         shareToFeed,
         isAiGenerated,
-        scheduledAt: null // Immediate publish
+        scheduledAt: null, // Immediate publish
+        onStepUpdate: async ({ containerId, status }) => {
+          await updateInstagramUploadJob(c.env.DB, job.id, {
+            instagram_container_id: containerId,
+            status: status || 'processing'
+          });
+        }
       });
     }
 
-    console.log(`[IG Ingest] Media published successfully (${publishResult.mediaId}). Retaining B2 file ${b2FileName} for dependent platforms.`);
+    const isProcessing = publishResult.status === 'processing';
+    console.log(`[IG Ingest] Media result: status=${publishResult.status} mediaId=${publishResult.mediaId || 'none'} containerId=${publishResult.containerId}`);
 
     // 4. Update job in D1
     await updateInstagramUploadJob(c.env.DB, job.id, {
       status: publishResult.status || 'published',
       instagram_container_id: publishResult.containerId,
-      instagram_media_id: publishResult.mediaId,
-      instagram_post_url: publishResult.postUrl,
-      published_at: new Date().toISOString()
+      instagram_media_id: publishResult.mediaId || null,
+      instagram_post_url: publishResult.postUrl || null,
+      published_at: isProcessing ? null : new Date().toISOString()
     });
 
-    // 5. Clean up temporary B2 file if no other pending/scheduled jobs need it (and not retained for multi-platform publish)
-    if (b2FileName && !retainB2) {
+    // 5. Clean up temporary B2 file if no other pending/scheduled jobs need it (and not retained for multi-platform publish, and NOT still processing)
+    if (b2FileName && !retainB2 && !isProcessing) {
       const needed = await isB2FileNeededByOtherJobs(c.env.DB, b2FileName, job.id);
       if (!needed && b2FileId) {
         try {
@@ -2121,16 +2128,20 @@ app.post('/api/instagram/publish', withUser, async (c) => {
       } else {
         console.log(`[IG Ingest] Retaining B2 file ${b2FileName} for dependent platforms.`);
       }
+    } else if (isProcessing) {
+      console.log(`[IG Ingest] Retaining B2 file ${b2FileName} while Meta encodes the video stream in background.`);
     } else if (retainB2) {
       console.log(`[IG Ingest] Retaining B2 file ${b2FileName} as requested for multi-platform publishing.`);
     }
 
     return c.json({
       success: true,
-      media_id: publishResult.mediaId,
+      media_id: publishResult.mediaId || null,
+      container_id: publishResult.containerId,
       ig_user_id: activeIgUserId,
       status: publishResult.status,
-      postUrl: publishResult.postUrl
+      postUrl: publishResult.postUrl || null,
+      message: publishResult.message || undefined
     });
   } catch (err) {
     console.error('Instagram publish error:', err);
@@ -2738,24 +2749,71 @@ app.post('/api/social/publish-now', withUser, async (c) => {
           isAiGenerated: Boolean(job.is_ai_generated)
         });
       } else {
+        // If container was already created on a previous attempt, check its status on Meta first
+        if (job.instagram_container_id) {
+          try {
+            const st = await checkInstagramContainerStatus(c.env, activeToken, job.instagram_container_id);
+            if (st.isFinished) {
+              const pub = await publishInstagramMediaContainer(c.env, activeToken, job.ig_user_id || account.ig_user_id, job.instagram_container_id);
+              await updateInstagramUploadJob(c.env.DB, job.id, {
+                status: 'published',
+                instagram_media_id: pub.mediaId,
+                instagram_post_url: pub.postUrl,
+                published_at: new Date().toISOString()
+              });
+              if (job.b2_file_name) {
+                const needed = await isB2FileNeededByOtherJobs(c.env.DB, job.b2_file_name, job.id);
+                if (!needed && job.b2_file_id) {
+                  try { await b2DeleteFile(c.env, job.b2_file_id, job.b2_file_name); } catch {}
+                }
+              }
+              return c.json({
+                success: true,
+                message: 'Instagram Reel published successfully!',
+                mediaId: pub.mediaId,
+                postUrl: pub.postUrl,
+                status: 'published'
+              });
+            } else if (!st.isError && !st.isExpired) {
+              // Still in progress on Meta
+              await updateInstagramUploadJob(c.env.DB, job.id, { status: 'processing' });
+              return c.json({
+                success: true,
+                message: 'Meta is still encoding this video in the background. It will publish automatically once finished.',
+                containerId: job.instagram_container_id,
+                status: 'processing'
+              });
+            }
+          } catch (checkErr) {
+            console.warn('[Publish Now] Container check warning:', checkErr.message);
+          }
+        }
+
         publishResult = await publishInstagramReel(c.env, activeToken, job.ig_user_id || account.ig_user_id, {
           b2DownloadUrl,
           caption: fullCaption,
           shareToFeed: true,
-          isAiGenerated: Boolean(job.is_ai_generated)
+          isAiGenerated: Boolean(job.is_ai_generated),
+          onStepUpdate: async ({ containerId, status }) => {
+            await updateInstagramUploadJob(c.env.DB, job.id, {
+              instagram_container_id: containerId,
+              status: status || 'processing'
+            });
+          }
         });
       }
 
+      const isProc = publishResult.status === 'processing';
       await updateInstagramUploadJob(c.env.DB, job.id, {
-        status: 'published',
+        status: publishResult.status || 'published',
         instagram_container_id: publishResult.containerId,
-        instagram_media_id: publishResult.mediaId,
-        instagram_post_url: publishResult.postUrl,
-        published_at: new Date().toISOString()
+        instagram_media_id: publishResult.mediaId || null,
+        instagram_post_url: publishResult.postUrl || null,
+        published_at: isProc ? null : new Date().toISOString()
       });
 
-      // Safe B2 lifecycle check
-      if (job.b2_file_name) {
+      // Safe B2 lifecycle check: only clean up if fully published
+      if (job.b2_file_name && !isProc) {
         const needed = await isB2FileNeededByOtherJobs(c.env.DB, job.b2_file_name, job.id);
         if (!needed && job.b2_file_id) {
           try {
@@ -2769,10 +2827,11 @@ app.post('/api/social/publish-now', withUser, async (c) => {
 
       return c.json({
         success: true,
-        message: 'Instagram Reel published successfully!',
-        mediaId: publishResult.mediaId,
-        postUrl: publishResult.postUrl,
-        status: 'published'
+        message: isProc ? 'Instagram Reel is being processed by Meta. It will automatically publish once finished.' : 'Instagram Reel published successfully!',
+        mediaId: publishResult.mediaId || null,
+        containerId: publishResult.containerId,
+        postUrl: publishResult.postUrl || null,
+        status: publishResult.status
       });
     } catch (err) {
       console.error('[Publish Now] Instagram publish error:', err);

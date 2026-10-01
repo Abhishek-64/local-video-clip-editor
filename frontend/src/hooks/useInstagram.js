@@ -432,8 +432,10 @@ export function useInstagram({ isAuthenticated = false } = {}) {
       setPublishStage('done');
       setLastPublishedPost({
         mediaId: publishResult.media_id || publishResult.mediaId,
+        containerId: publishResult.container_id || publishResult.containerId,
         postUrl: publishResult.postUrl,
         status: publishResult.status,
+        message: publishResult.message,
         scheduledAt
       });
 

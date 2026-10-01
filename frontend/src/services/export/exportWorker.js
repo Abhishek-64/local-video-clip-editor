@@ -110,6 +110,9 @@ async function runExportInWorker(payload) {
   if (settings.background) {
     await renderer.setBackgroundSource(settings.background);
   }
+  if (settings.crop?.reelImages) {
+    await renderer.setReelImages(settings.crop.reelImages);
+  }
 
   // Pre-render static text overlays and logo once if invariant across frames
   renderer.prepareStaticOverlay(settings, partNumber);

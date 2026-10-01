@@ -317,7 +317,7 @@ export default function SocialUploadHistorySection({
 
         showToast(`Retrying Instagram upload for "${item.title}"...`, 'info');
 
-        await publishToInstagramPipeline(targetBlob, {
+        const res = await publishToInstagramPipeline(targetBlob, {
           clipId: item.id,
           b2FileId,
           b2FileName,
@@ -331,7 +331,11 @@ export default function SocialUploadHistorySection({
           scheduledAt: null
         });
 
-        showToast(`Instagram upload retried successfully!`, 'success');
+        if (res && res.status === 'processing') {
+          showToast('Instagram upload initiated! Meta is processing your video in background.', 'info');
+        } else {
+          showToast('Instagram upload retried successfully!', 'success');
+        }
         await fetchHistory();
       }
     } catch (err) {

@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "deploy": "vite build && wrangler deploy -c wrangler.jsonc",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test:crop": "node src/utils/crop.test.js"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",

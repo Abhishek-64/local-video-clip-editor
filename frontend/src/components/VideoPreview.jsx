@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { formatTime } from '../utils/time';
 import { resolveVideoPlacement } from '../utils/crop';
+import { PreviewRenderer } from '../services/preview/PreviewRenderer';
 
 function VideoPreviewInner({
   videoData,
@@ -41,6 +42,8 @@ function VideoPreviewInner({
   isSuspended = false
 }) {
   const videoRef = useRef(null);
+  const previewCanvasRef = useRef(null);
+  const previewRendererRef = useRef(null);
   const bgCanvasRef = useRef(null);
   const containerRef = useRef(null);
   const phoneViewportRef = useRef(null);
@@ -107,8 +110,8 @@ function VideoPreviewInner({
   const hasTopReel = Boolean(topReel?.url);
   const hasBottomReel = Boolean(bottomReel?.url);
 
-  // Compute letterbox slot percentage using shared resolveVideoPlacement
-  const slotMetrics = useMemo(() => {
+  // Logical placement calculated by shared placement engine (resolveVideoPlacement)
+  const currentPlacement = useMemo(() => {
     const vW = videoRef.current?.videoWidth || videoData?.width || 1920;
     const vH = videoRef.current?.videoHeight || videoData?.height || 1080;
     let targetW = 1080;
@@ -118,22 +121,40 @@ function VideoPreviewInner({
     else if (cropSettings?.mode === '16:9') { targetW = 1920; targetH = 1080; }
     else if (cropSettings?.mode === '21:9') { targetW = 2560; targetH = 1080; }
 
-    const placement = resolveVideoPlacement({
+    return resolveVideoPlacement({
       sourceWidth: vW,
       sourceHeight: vH,
       stageWidth: targetW,
       stageHeight: targetH,
       mode: cropSettings?.mode || '9:16',
-      fillMode: cropSettings?.fillMode || 'fit'
+      fillMode: cropSettings?.fillMode || 'fit',
+      zoom: cropSettings?.zoom || 1,
+      x: cropSettings?.x || 0,
+      y: cropSettings?.y || 0,
+      customWidth: cropSettings?.customWidth ?? 100,
+      customHeight: cropSettings?.customHeight ?? 100
     });
+  }, [
+    videoData?.width,
+    videoData?.height,
+    cropSettings?.mode,
+    cropSettings?.fillMode,
+    cropSettings?.zoom,
+    cropSettings?.x,
+    cropSettings?.y,
+    cropSettings?.customWidth,
+    cropSettings?.customHeight
+  ]);
 
-    const hasSlots = placement.letterbox.top > 0;
+  // Compute letterbox slot percentage for overlay elements
+  const slotMetrics = useMemo(() => {
+    const hasSlots = currentPlacement.letterbox.top > 0;
     return {
       hasSlots,
-      slotHeightPct: placement.letterboxPct.topPct,
-      videoHeightPct: Math.max(0, 100 - (placement.letterboxPct.topPct * 2))
+      slotHeightPct: currentPlacement.letterboxPct.topPct,
+      videoHeightPct: Math.max(0, 100 - (currentPlacement.letterboxPct.topPct * 2))
     };
-  }, [videoData?.width, videoData?.height, cropSettings?.mode, cropSettings?.fillMode]);
+  }, [currentPlacement]);
 
   const bgType = bgSettings?.type || 'blur-video';
   const bgBlur = bgSettings?.blur ?? 20;
@@ -177,85 +198,92 @@ function VideoPreviewInner({
     }
   }, [onCaptureFrame]);
 
-  // Frame-Driven Background Canvas Blit — throttled to ≤15fps for blur backdrop.
-  // At 15fps the human eye cannot perceive blur-background changes; this halves
-  // GPU canvas-blit work vs. running at full video frame rate.
+  // ── Initialize WebGL2 PreviewRenderer ──
+  useEffect(() => {
+    if (previewCanvasRef.current) {
+      previewRendererRef.current = new PreviewRenderer(previewCanvasRef.current);
+    }
+    return () => {
+      if (previewRendererRef.current) {
+        previewRendererRef.current.destroy();
+        previewRendererRef.current = null;
+      }
+    };
+  }, []);
+
+  // ── Render Current Frame to GPU ──
+  const renderGpuFrame = useCallback(() => {
+    if (
+      !previewRendererRef.current ||
+      !videoRef.current ||
+      isSuspended ||
+      previewMode === 'framing' ||
+      cropSettings?.mode === 'original' ||
+      isCustomCrop
+    ) {
+      return;
+    }
+    previewRendererRef.current.render({
+      video: videoRef.current,
+      placement: currentPlacement,
+      bgSettings,
+      effectsSettings
+    });
+  }, [currentPlacement, bgSettings, effectsSettings, isSuspended, previewMode, cropSettings?.mode, isCustomCrop]);
+
+  // ── Resize Observer for Stage Dimensions & DPR ──
+  useEffect(() => {
+    const el = phoneViewportRef.current;
+    if (!el) return;
+
+    const handleResize = () => {
+      if (!phoneViewportRef.current || !previewRendererRef.current) return;
+      const rect = phoneViewportRef.current.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      let targetW = 1080;
+      let targetH = 1920;
+      if (cropSettings?.mode === '1:1') { targetW = 1080; targetH = 1080; }
+      else if (cropSettings?.mode === '4:5') { targetW = 1080; targetH = 1350; }
+      else if (cropSettings?.mode === '16:9') { targetW = 1920; targetH = 1080; }
+      else if (cropSettings?.mode === '21:9') { targetW = 2560; targetH = 1080; }
+
+      previewRendererRef.current.resize(rect.width, rect.height, dpr, targetW, targetH);
+      renderGpuFrame();
+    };
+
+    const ro = new ResizeObserver(handleResize);
+    ro.observe(el);
+    handleResize();
+
+    return () => ro.disconnect();
+  }, [cropSettings?.mode, renderGpuFrame]);
+
+  // ── Video Frame Presentation Loop via requestVideoFrameCallback ──
   useEffect(() => {
     if (isSuspended) return;
 
     let animId = null;
     let rVfcId = null;
     let isCancelled = false;
-    let lastBlitMs = 0;
-    const BLIT_INTERVAL_MS = 67; // ~15fps cap for blur canvas
 
-    const renderBgFrame = (nowMs = 0) => {
-      if (
-        bgCanvasRef.current &&
-        videoRef.current &&
-        videoRef.current.videoWidth > 0 &&
-        !isFillMode &&
-        bgType === 'blur-video'
-      ) {
-        // Throttle: only blit if ≥67ms have elapsed since last blit (~15fps)
-        if (nowMs - lastBlitMs >= BLIT_INTERVAL_MS || nowMs === 0) {
-          lastBlitMs = nowMs;
-          const bgCanvas = bgCanvasRef.current;
-          const bgCtx = bgCanvas.getContext('2d', { alpha: false, willReadFrequently: false });
-          if (bgCtx) {
-            const v = videoRef.current;
-            const vW = v.videoWidth;
-            const vH = v.videoHeight;
-            const cW = bgCanvas.width;
-            const cH = bgCanvas.height;
-            if (vW > 0 && vH > 0 && cW > 0 && cH > 0) {
-              const bgPlacement = resolveVideoPlacement({
-                sourceWidth: vW,
-                sourceHeight: vH,
-                stageWidth: cW,
-                stageHeight: cH,
-                fillMode: 'fill'
-              });
-              bgCtx.imageSmoothingEnabled = true;
-              bgCtx.imageSmoothingQuality = 'medium';
-              bgCtx.drawImage(
-                v,
-                bgPlacement.sourceX,
-                bgPlacement.sourceY,
-                bgPlacement.sourceWidth,
-                bgPlacement.sourceHeight,
-                0,
-                0,
-                cW,
-                cH
-              );
-            }
-          }
-        }
-      }
-    };
-
-    const scheduleNextFrame = (nowMs) => {
+    const onFrame = () => {
       if (isCancelled || isSuspended) return;
-      renderBgFrame(nowMs);
+      renderGpuFrame();
 
       const video = videoRef.current;
       if (video && isPlaying && !video.paused && !video.ended) {
         if ('requestVideoFrameCallback' in video) {
-          rVfcId = video.requestVideoFrameCallback((now) => {
-            scheduleNextFrame(now);
-          });
+          rVfcId = video.requestVideoFrameCallback(onFrame);
         } else {
-          animId = requestAnimationFrame(scheduleNextFrame);
+          animId = requestAnimationFrame(onFrame);
         }
       }
     };
 
-    // Trigger frame update on play state change or seek
     if (isPlaying && !isSuspended) {
-      scheduleNextFrame(0);
+      onFrame();
     } else {
-      renderBgFrame(0);
+      renderGpuFrame();
     }
 
     return () => {
@@ -267,10 +295,7 @@ function VideoPreviewInner({
         } catch (e) {}
       }
     };
-  // currentTime intentionally removed: the rVfc/rAF chain is self-sustaining
-  // while playing, and re-triggering the effect on every throttled tick would
-  // cause the blur canvas loop to teardown and restart unnecessarily.
-  }, [isPlaying, isFillMode, bgType, isSuspended]);
+  }, [isPlaying, isSuspended, renderGpuFrame]);
 
   // Suspend playback when background video is suspended by modal preview
   useEffect(() => {
@@ -1153,83 +1178,26 @@ function VideoPreviewInner({
                 maxHeight: '70vh'
               }}
             >
-              {/* ── BACKGROUND LAYER (Clean Blur / Picture / Solid Backdrop) ── */}
-              {!isFillMode && (
-                <div className="absolute inset-0 pointer-events-none z-0">
-                  {bgType === 'blur-video' ? (
-                    <canvas
-                      ref={bgCanvasRef}
-                      width={360}
-                      height={640}
-                      className="absolute inset-0 w-full h-full object-cover pointer-events-none"
-                      style={{
-                        filter: `blur(${bgBlur}px) brightness(${bgOpacity})`,
-                        transform: 'scale(1.10)',
-                        transformOrigin: 'center'
-                      }}
-                    />
-                  ) : bgType === 'image' && bgSettings?.imageUrl ? (
-                    <img
-                      src={bgSettings.imageUrl}
-                      alt="Background Backdrop"
-                      className="absolute inset-0 w-full h-full object-cover"
-                      style={{
-                        filter: `blur(${bgBlur}px) brightness(${bgOpacity})`,
-                        transform: 'scale(1.10)',
-                        transformOrigin: 'center'
-                      }}
-                    />
-                  ) : (
-                    <div
-                      className="absolute inset-0"
-                      style={{ backgroundColor: bgSettings?.color || '#000000' }}
-                    />
-                  )}
-                </div>
-              )}
+              {/* ── GPU-COMPOSITED PREVIEW STAGE (WebGL2 Texture Quads) ── */}
+              <canvas
+                ref={previewCanvasRef}
+                className="absolute inset-0 w-full h-full block pointer-events-none select-none z-0"
+              />
 
-              {/* ── MAIN FOREGROUND VIDEO LAYER ── */}
-              <div className="relative w-full h-full flex items-center justify-center z-10 pointer-events-none">
-                {isFillMode ? (
-                  <video
-                    ref={videoRef}
-                    src={videoData.url}
-                    className="absolute inset-0 w-full h-full pointer-events-none"
-                    preload="metadata"
-                    style={{
-                      ...getFilterStyle(),
-                      objectFit: 'cover',
-                      transform: `translate(${(cropSettings?.x || 0) * 0.5}px, ${(cropSettings?.y || 0) * 0.5}px) scale(${cropSettings?.zoom || 1})`,
-                      transformOrigin: 'center center'
-                    }}
-                    onTimeUpdate={handleTimeUpdateInternal}
-                    onEnded={() => setIsPlaying(false)}
-                    onPlay={() => setIsPlaying(true)}
-                    onPause={() => setIsPlaying(false)}
-                    playsInline
-                  />
-                ) : (
-                  <video
-                    ref={videoRef}
-                    src={videoData.url}
-                    className="w-full h-full pointer-events-none"
-                    preload="metadata"
-                    style={{
-                      ...getFilterStyle(),
-                      width: '100%',
-                      height: '100%',
-                      objectFit: 'contain',
-                      objectPosition: 'center',
-                      display: 'block'
-                    }}
-                    onTimeUpdate={handleTimeUpdateInternal}
-                    onEnded={() => setIsPlaying(false)}
-                    onPlay={() => setIsPlaying(true)}
-                    onPause={() => setIsPlaying(false)}
-                    playsInline
-                  />
-                )}
-              </div>
+              {/* ── HIDDEN AUDIO/PLAYBACK SYNC SOURCE ── */}
+              <video
+                ref={videoRef}
+                src={videoData.url}
+                className="absolute opacity-0 pointer-events-none -z-50 w-px h-px"
+                preload="metadata"
+                onTimeUpdate={handleTimeUpdateInternal}
+                onEnded={() => setIsPlaying(false)}
+                onPlay={() => setIsPlaying(true)}
+                onPause={() => setIsPlaying(false)}
+                onSeeked={renderGpuFrame}
+                onLoadedData={renderGpuFrame}
+                playsInline
+              />
 
               {/* ── TOP REEL IMAGE (Above Video Letterbox Space) ── */}
               {!isFillMode && hasTopReel && slotMetrics.hasSlots && (

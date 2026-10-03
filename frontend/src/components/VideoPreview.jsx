@@ -76,6 +76,27 @@ function VideoPreviewInner({
   const [draggingExtraId, setDraggingExtraId] = useState(null);
   const [isDraggingLogo, setIsDraggingLogo] = useState(false);
 
+  // Stable refs for drag handlers to avoid tearing down window listeners on every frame
+  const textSettingsRef = useRef(textSettings);
+  const cropSettingsRef = useRef(cropSettings);
+  const logoSettingsRef = useRef(logoSettings);
+  const onTextChangeRef = useRef(onTextChange);
+  const onCropChangeRef = useRef(onCropChange);
+  const onLogoChangeRef = useRef(onLogoChange);
+  const textDragRafRef = useRef(null);
+
+  useEffect(() => { textSettingsRef.current = textSettings; }, [textSettings]);
+  useEffect(() => { cropSettingsRef.current = cropSettings; }, [cropSettings]);
+  useEffect(() => { logoSettingsRef.current = logoSettings; }, [logoSettings]);
+  useEffect(() => { onTextChangeRef.current = onTextChange; }, [onTextChange]);
+  useEffect(() => { onCropChangeRef.current = onCropChange; }, [onCropChange]);
+  useEffect(() => { onLogoChangeRef.current = onLogoChange; }, [onLogoChange]);
+
+  const getActiveViewportRect = useCallback(() => {
+    const el = phoneViewportRef.current || framingViewportRef.current || containerRef.current;
+    return el ? el.getBoundingClientRect() : null;
+  }, []);
+
   const isVerticalCrop = cropSettings?.mode === '9:16';
   const isCustomCrop = cropSettings?.mode === 'custom';
   const isFillMode = cropSettings?.fillMode === 'fill';
@@ -339,11 +360,11 @@ function VideoPreviewInner({
 
   // ── Drag-to-Reposition Primary Text ─────────────────────────────────────────
   const handleTextMouseDown = (e) => {
-    if (!onTextChange || !textSettings?.enabled) return;
+    if (!onTextChangeRef.current || !textSettingsRef.current?.enabled) return;
     e.preventDefault();
     e.stopPropagation();
 
-    const parentRect = (phoneViewportRef.current || containerRef.current)?.getBoundingClientRect();
+    const parentRect = getActiveViewportRect();
     if (!parentRect) return;
 
     setIsDraggingText(true);
@@ -353,15 +374,15 @@ function VideoPreviewInner({
       startY: e.clientY,
       parentWidth: parentRect.width,
       parentHeight: parentRect.height,
-      currentYPct: textSettings.customY ?? 10,
-      currentXPct: textSettings.customX ?? 50
+      currentYPct: textSettingsRef.current.customY ?? 10,
+      currentXPct: textSettingsRef.current.customX ?? 50
     };
   };
 
   const handleTextTouchStart = (e) => {
-    if (!onTextChange || !textSettings?.enabled) return;
+    if (!onTextChangeRef.current || !textSettingsRef.current?.enabled) return;
     const touch = e.touches[0];
-    const parentRect = (phoneViewportRef.current || containerRef.current)?.getBoundingClientRect();
+    const parentRect = getActiveViewportRect();
     if (!parentRect) return;
 
     setIsDraggingText(true);
@@ -371,18 +392,18 @@ function VideoPreviewInner({
       startY: touch.clientY,
       parentWidth: parentRect.width,
       parentHeight: parentRect.height,
-      currentYPct: textSettings.customY ?? 10,
-      currentXPct: textSettings.customX ?? 50
+      currentYPct: textSettingsRef.current.customY ?? 10,
+      currentXPct: textSettingsRef.current.customX ?? 50
     };
   };
 
   // ── Drag-to-Reposition Extra Text Overlays ──────────────────────────────────
   const handleExtraTextMouseDown = (e, item) => {
-    if (!onTextChange || !item.enabled) return;
+    if (!onTextChangeRef.current || !item.enabled) return;
     e.preventDefault();
     e.stopPropagation();
 
-    const parentRect = (phoneViewportRef.current || containerRef.current)?.getBoundingClientRect();
+    const parentRect = getActiveViewportRect();
     if (!parentRect) return;
 
     setDraggingExtraId(item.id);
@@ -399,9 +420,9 @@ function VideoPreviewInner({
   };
 
   const handleExtraTextTouchStart = (e, item) => {
-    if (!onTextChange || !item.enabled) return;
+    if (!onTextChangeRef.current || !item.enabled) return;
     const touch = e.touches[0];
-    const parentRect = (phoneViewportRef.current || framingViewportRef.current || containerRef.current)?.getBoundingClientRect();
+    const parentRect = getActiveViewportRect();
     if (!parentRect) return;
 
     setDraggingExtraId(item.id);
@@ -419,11 +440,11 @@ function VideoPreviewInner({
 
   // ── Drag-to-Reposition Logo ────────────────────────────────────────────────
   const handleLogoMouseDown = (e) => {
-    if (!onLogoChange || !logoSettings?.enabled) return;
+    if (!onLogoChangeRef.current || !logoSettingsRef.current?.enabled) return;
     e.preventDefault();
     e.stopPropagation();
 
-    const parentRect = (phoneViewportRef.current || framingViewportRef.current || containerRef.current)?.getBoundingClientRect();
+    const parentRect = getActiveViewportRect();
     if (!parentRect) return;
 
     setIsDraggingLogo(true);
@@ -433,15 +454,15 @@ function VideoPreviewInner({
       startY: e.clientY,
       parentWidth: parentRect.width,
       parentHeight: parentRect.height,
-      currentYPct: logoSettings.customY ?? 6,
-      currentXPct: logoSettings.customX ?? 94
+      currentYPct: logoSettingsRef.current.customY ?? 6,
+      currentXPct: logoSettingsRef.current.customX ?? 94
     };
   };
 
   const handleLogoTouchStart = (e) => {
-    if (!onLogoChange || !logoSettings?.enabled) return;
+    if (!onLogoChangeRef.current || !logoSettingsRef.current?.enabled) return;
     const touch = e.touches[0];
-    const parentRect = (phoneViewportRef.current || framingViewportRef.current || containerRef.current)?.getBoundingClientRect();
+    const parentRect = getActiveViewportRect();
     if (!parentRect) return;
 
     setIsDraggingLogo(true);
@@ -451,16 +472,19 @@ function VideoPreviewInner({
       startY: touch.clientY,
       parentWidth: parentRect.width,
       parentHeight: parentRect.height,
-      currentYPct: logoSettings.customY ?? 6,
-      currentXPct: logoSettings.customX ?? 94
+      currentYPct: logoSettingsRef.current.customY ?? 6,
+      currentXPct: logoSettingsRef.current.customX ?? 94
     };
   };
 
+  const isAnyDragging = isDraggingCrop || isDraggingText || Boolean(draggingExtraId) || isDraggingLogo;
 
   useEffect(() => {
+    if (!isAnyDragging) return;
+
     const handleMouseMove = (e) => {
       // 1. Crop box drag / resize
-      if (dragCropRef.current.active && onCropChange) {
+      if (dragCropRef.current.active && onCropChangeRef.current) {
         const dx = e.clientX - dragCropRef.current.startX;
         const dy = e.clientY - dragCropRef.current.startY;
         const h = dragCropRef.current.handle;
@@ -468,7 +492,7 @@ function VideoPreviewInner({
         if (h === 'center') {
           const newX = Math.max(-200, Math.min(200, dragCropRef.current.startCropX + dx * 1.5));
           const newY = Math.max(-200, Math.min(200, dragCropRef.current.startCropY + dy * 1.5));
-          onCropChange({ ...cropSettings, x: Math.round(newX), y: Math.round(newY) });
+          onCropChangeRef.current({ ...cropSettingsRef.current, x: Math.round(newX), y: Math.round(newY) });
         } else {
           let deltaW = 0;
           let deltaH = 0;
@@ -481,8 +505,8 @@ function VideoPreviewInner({
           const newW = Math.max(15, Math.min(100, Math.round(dragCropRef.current.startWidth + deltaW)));
           const newH = Math.max(15, Math.min(100, Math.round(dragCropRef.current.startHeight + deltaH)));
 
-          onCropChange({
-            ...cropSettings,
+          onCropChangeRef.current({
+            ...cropSettingsRef.current,
             mode: 'custom',
             customWidth: newW,
             customHeight: newH
@@ -490,8 +514,8 @@ function VideoPreviewInner({
         }
       }
 
-      // 2. Primary text overlay drag
-      if (dragTextRef.current.active && onTextChange) {
+      // 2. Primary text overlay drag (throttled via rAF)
+      if (dragTextRef.current.active && onTextChangeRef.current) {
         const dy = e.clientY - dragTextRef.current.startY;
         const dx = e.clientX - dragTextRef.current.startX;
 
@@ -501,16 +525,19 @@ function VideoPreviewInner({
         const newYPct = Math.max(4, Math.min(96, dragTextRef.current.currentYPct + deltaYPct));
         const newXPct = Math.max(4, Math.min(96, dragTextRef.current.currentXPct + deltaXPct));
 
-        onTextChange({
-          ...textSettings,
-          customY: Math.round(newYPct),
-          customX: Math.round(newXPct),
-          position: 'center'
+        if (textDragRafRef.current) cancelAnimationFrame(textDragRafRef.current);
+        textDragRafRef.current = requestAnimationFrame(() => {
+          onTextChangeRef.current?.({
+            ...textSettingsRef.current,
+            customY: Math.round(newYPct),
+            customX: Math.round(newXPct),
+            position: 'center'
+          });
         });
       }
 
-      // 3. Extra text overlay drag
-      if (dragExtraTextRef.current.active && onTextChange && textSettings?.extraTexts) {
+      // 3. Extra text overlay drag (throttled via rAF)
+      if (dragExtraTextRef.current.active && onTextChangeRef.current && textSettingsRef.current?.extraTexts) {
         const dy = e.clientY - dragExtraTextRef.current.startY;
         const dx = e.clientX - dragExtraTextRef.current.startX;
 
@@ -520,7 +547,7 @@ function VideoPreviewInner({
         const newYPct = Math.max(4, Math.min(96, dragExtraTextRef.current.currentYPct + deltaYPct));
         const newXPct = Math.max(4, Math.min(96, dragExtraTextRef.current.currentXPct + deltaXPct));
 
-        const updatedExtras = textSettings.extraTexts.map((item) => {
+        const updatedExtras = textSettingsRef.current.extraTexts.map((item) => {
           if (item.id === dragExtraTextRef.current.extraId) {
             return {
               ...item,
@@ -531,14 +558,17 @@ function VideoPreviewInner({
           return item;
         });
 
-        onTextChange({
-          ...textSettings,
-          extraTexts: updatedExtras
+        if (textDragRafRef.current) cancelAnimationFrame(textDragRafRef.current);
+        textDragRafRef.current = requestAnimationFrame(() => {
+          onTextChangeRef.current?.({
+            ...textSettingsRef.current,
+            extraTexts: updatedExtras
+          });
         });
       }
 
       // 4. Logo overlay drag
-      if (dragLogoRef.current.active && onLogoChange) {
+      if (dragLogoRef.current.active && onLogoChangeRef.current) {
         const dy = e.clientY - dragLogoRef.current.startY;
         const dx = e.clientX - dragLogoRef.current.startX;
 
@@ -548,13 +578,12 @@ function VideoPreviewInner({
         const newYPct = Math.max(3, Math.min(97, dragLogoRef.current.currentYPct + deltaYPct));
         const newXPct = Math.max(3, Math.min(97, dragLogoRef.current.currentXPct + deltaXPct));
 
-        onLogoChange({
-          ...logoSettings,
+        onLogoChangeRef.current({
+          ...logoSettingsRef.current,
           customY: Math.round(newYPct),
           customX: Math.round(newXPct)
         });
       }
-
     };
 
     const handleTouchMove = (e) => {
@@ -562,7 +591,7 @@ function VideoPreviewInner({
       if (!touch) return;
 
       // 1. Crop box drag / resize on touch
-      if (dragCropRef.current.active && onCropChange) {
+      if (dragCropRef.current.active && onCropChangeRef.current) {
         const dx = touch.clientX - dragCropRef.current.startX;
         const dy = touch.clientY - dragCropRef.current.startY;
         const h = dragCropRef.current.handle;
@@ -570,7 +599,7 @@ function VideoPreviewInner({
         if (h === 'center') {
           const newX = Math.max(-200, Math.min(200, dragCropRef.current.startCropX + dx * 1.5));
           const newY = Math.max(-200, Math.min(200, dragCropRef.current.startCropY + dy * 1.5));
-          onCropChange({ ...cropSettings, x: Math.round(newX), y: Math.round(newY) });
+          onCropChangeRef.current({ ...cropSettingsRef.current, x: Math.round(newX), y: Math.round(newY) });
         } else {
           let deltaW = 0;
           let deltaH = 0;
@@ -583,8 +612,8 @@ function VideoPreviewInner({
           const newW = Math.max(15, Math.min(100, Math.round(dragCropRef.current.startWidth + deltaW)));
           const newH = Math.max(15, Math.min(100, Math.round(dragCropRef.current.startHeight + deltaH)));
 
-          onCropChange({
-            ...cropSettings,
+          onCropChangeRef.current({
+            ...cropSettingsRef.current,
             mode: 'custom',
             customWidth: newW,
             customHeight: newH
@@ -592,7 +621,7 @@ function VideoPreviewInner({
         }
       }
 
-      if (dragTextRef.current.active && onTextChange) {
+      if (dragTextRef.current.active && onTextChangeRef.current) {
         const dy = touch.clientY - dragTextRef.current.startY;
         const dx = touch.clientX - dragTextRef.current.startX;
 
@@ -602,15 +631,18 @@ function VideoPreviewInner({
         const newYPct = Math.max(4, Math.min(96, dragTextRef.current.currentYPct + deltaYPct));
         const newXPct = Math.max(4, Math.min(96, dragTextRef.current.currentXPct + deltaXPct));
 
-        onTextChange({
-          ...textSettings,
-          customY: Math.round(newYPct),
-          customX: Math.round(newXPct),
-          position: 'center'
+        if (textDragRafRef.current) cancelAnimationFrame(textDragRafRef.current);
+        textDragRafRef.current = requestAnimationFrame(() => {
+          onTextChangeRef.current?.({
+            ...textSettingsRef.current,
+            customY: Math.round(newYPct),
+            customX: Math.round(newXPct),
+            position: 'center'
+          });
         });
       }
 
-      if (dragExtraTextRef.current.active && onTextChange && textSettings?.extraTexts) {
+      if (dragExtraTextRef.current.active && onTextChangeRef.current && textSettingsRef.current?.extraTexts) {
         const dy = touch.clientY - dragExtraTextRef.current.startY;
         const dx = touch.clientX - dragExtraTextRef.current.startX;
 
@@ -620,7 +652,7 @@ function VideoPreviewInner({
         const newYPct = Math.max(4, Math.min(96, dragExtraTextRef.current.currentYPct + deltaYPct));
         const newXPct = Math.max(4, Math.min(96, dragExtraTextRef.current.currentXPct + deltaXPct));
 
-        const updatedExtras = textSettings.extraTexts.map((item) => {
+        const updatedExtras = textSettingsRef.current.extraTexts.map((item) => {
           if (item.id === dragExtraTextRef.current.extraId) {
             return {
               ...item,
@@ -631,13 +663,16 @@ function VideoPreviewInner({
           return item;
         });
 
-        onTextChange({
-          ...textSettings,
-          extraTexts: updatedExtras
+        if (textDragRafRef.current) cancelAnimationFrame(textDragRafRef.current);
+        textDragRafRef.current = requestAnimationFrame(() => {
+          onTextChangeRef.current?.({
+            ...textSettingsRef.current,
+            extraTexts: updatedExtras
+          });
         });
       }
 
-      if (dragLogoRef.current.active && onLogoChange) {
+      if (dragLogoRef.current.active && onLogoChangeRef.current) {
         const dy = touch.clientY - dragLogoRef.current.startY;
         const dx = touch.clientX - dragLogoRef.current.startX;
 
@@ -647,16 +682,19 @@ function VideoPreviewInner({
         const newYPct = Math.max(3, Math.min(97, dragLogoRef.current.currentYPct + deltaYPct));
         const newXPct = Math.max(3, Math.min(97, dragLogoRef.current.currentXPct + deltaXPct));
 
-        onLogoChange({
-          ...logoSettings,
+        onLogoChangeRef.current({
+          ...logoSettingsRef.current,
           customY: Math.round(newYPct),
           customX: Math.round(newXPct)
         });
       }
-
     };
 
     const handleEnd = () => {
+      if (textDragRafRef.current) {
+        cancelAnimationFrame(textDragRafRef.current);
+        textDragRafRef.current = null;
+      }
       dragCropRef.current.active = false;
       dragTextRef.current.active = false;
       dragExtraTextRef.current.active = false;
@@ -673,12 +711,16 @@ function VideoPreviewInner({
     window.addEventListener('touchend', handleEnd);
 
     return () => {
+      if (textDragRafRef.current) {
+        cancelAnimationFrame(textDragRafRef.current);
+        textDragRafRef.current = null;
+      }
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleEnd);
       window.removeEventListener('touchmove', handleTouchMove);
       window.removeEventListener('touchend', handleEnd);
     };
-  }, [onCropChange, cropSettings, onTextChange, textSettings, onLogoChange, logoSettings]);
+  }, [isAnyDragging]);
 
   // Memoized: only recomputes when currentTime crosses a part boundary or text settings change
   const renderedText = useMemo(() => {
@@ -1057,8 +1099,8 @@ function VideoPreviewInner({
                 </div>
               )}
 
-              {/* ── MAIN VIDEO LAYER ── */}
-              <div className="relative w-full h-full overflow-hidden flex items-center justify-center z-10 pointer-events-none">
+              {/* ── MAIN VIDEO LAYER & TOP/BOTTOM BANNER IMAGES ── */}
+              <div className="relative w-full h-full overflow-hidden flex flex-col items-center justify-between z-10 pointer-events-none">
                 {isFillMode ? (
                   <video
                     ref={videoRef}
@@ -1083,20 +1125,47 @@ function VideoPreviewInner({
                     playsInline
                   />
                 ) : (
-                  <div className="w-full flex items-center justify-center">
-                    <video
-                      ref={videoRef}
-                      src={videoData.url}
-                      className="w-full h-auto max-h-full object-contain pointer-events-none shadow-2xl"
-                      preload="metadata"
-                      style={{ ...getFilterStyle(), willChange: 'transform' }}
-                      onTimeUpdate={handleTimeUpdateInternal}
-                      onEnded={() => setIsPlaying(false)}
-                      onPlay={() => setIsPlaying(true)}
-                      onPause={() => setIsPlaying(false)}
-                      playsInline
-                    />
-                  </div>
+                  <>
+                    {/* Top Section Banner (Above Video) */}
+                    <div className="w-full flex-1 overflow-hidden flex items-center justify-center relative min-h-0 pointer-events-none">
+                      {bgSettings?.topImageUrl && (
+                        <img
+                          src={bgSettings.topImageUrl}
+                          alt="Top Section Backdrop"
+                          className="w-full h-full pointer-events-none select-none shadow-md"
+                          style={{ objectFit: bgSettings.topImageFit || 'cover' }}
+                        />
+                      )}
+                    </div>
+
+                    {/* Centered Video Section */}
+                    <div className="w-full shrink-0 flex items-center justify-center relative">
+                      <video
+                        ref={videoRef}
+                        src={videoData.url}
+                        className="w-full h-auto max-h-full object-contain pointer-events-none shadow-2xl"
+                        preload="metadata"
+                        style={{ ...getFilterStyle(), willChange: 'transform' }}
+                        onTimeUpdate={handleTimeUpdateInternal}
+                        onEnded={() => setIsPlaying(false)}
+                        onPlay={() => setIsPlaying(true)}
+                        onPause={() => setIsPlaying(false)}
+                        playsInline
+                      />
+                    </div>
+
+                    {/* Bottom Section Banner (Below Video) */}
+                    <div className="w-full flex-1 overflow-hidden flex items-center justify-center relative min-h-0 pointer-events-none">
+                      {bgSettings?.bottomImageUrl && (
+                        <img
+                          src={bgSettings.bottomImageUrl}
+                          alt="Bottom Section Backdrop"
+                          className="w-full h-full pointer-events-none select-none shadow-md"
+                          style={{ objectFit: bgSettings.bottomImageFit || 'cover' }}
+                        />
+                      )}
+                    </div>
+                  </>
                 )}
               </div>
 
@@ -1115,11 +1184,6 @@ function VideoPreviewInner({
                 >
                   <div className="flex items-center space-x-1">
                     <span>{getRenderedText()}</span>
-                  </div>
-
-                  <div className="absolute -top-5 left-1/2 -translate-x-1/2 opacity-0 group-hover/text:opacity-100 transition-opacity bg-black/80 text-amber-300 text-[9px] px-2 py-0.5 rounded-full border border-amber-500/40 pointer-events-none flex items-center space-x-1 font-mono whitespace-nowrap shadow-lg">
-                    <GripVertical className="w-2.5 h-2.5" />
-                    <span>Drag title</span>
                   </div>
                 </div>
               )}
@@ -1143,11 +1207,6 @@ function VideoPreviewInner({
                     title="Click and drag anywhere on screen to reposition text"
                   >
                     <span>{extra.text}</span>
-
-                    <div className="absolute -top-5 left-1/2 -translate-x-1/2 opacity-0 group-hover/extra:opacity-100 transition-opacity bg-black/80 text-emerald-300 text-[9px] px-2 py-0.5 rounded-full border border-emerald-500/40 pointer-events-none flex items-center space-x-1 font-mono whitespace-nowrap shadow-lg">
-                      <GripVertical className="w-2.5 h-2.5" />
-                      <span>Drag text</span>
-                    </div>
                   </div>
                 );
               })}
@@ -1368,14 +1427,72 @@ function VideoPreviewInner({
               }}
             />
 
+            {/* Top Banner Image in Studio Preview */}
+            {bgSettings?.topImageUrl && (
+              <div className="absolute top-0 left-0 right-0 h-[30%] overflow-hidden pointer-events-none z-0">
+                <img
+                  src={bgSettings.topImageUrl}
+                  alt="Top Banner Backdrop"
+                  className="w-full h-full"
+                  style={{ objectFit: bgSettings.topImageFit || 'cover' }}
+                />
+                <div className="absolute inset-0 bg-gradient-to-b from-transparent to-slate-950/70" />
+              </div>
+            )}
+
+            {/* Bottom Banner Image in Studio Preview */}
+            {bgSettings?.bottomImageUrl && (
+              <div className="absolute bottom-0 left-0 right-0 h-[30%] overflow-hidden pointer-events-none z-0">
+                <img
+                  src={bgSettings.bottomImageUrl}
+                  alt="Bottom Banner Backdrop"
+                  className="w-full h-full"
+                  style={{ objectFit: bgSettings.bottomImageFit || 'cover' }}
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-transparent to-slate-950/70" />
+              </div>
+            )}
+
             {/* Top Text / Title Overlay Live Preview */}
             <div className="relative z-10 w-full text-center">
               {textSettings?.enabled && (
-                <div style={getTextOverlayStyle()} className="rounded px-2 py-1 max-w-full">
+                <div
+                  style={getTextOverlayStyle()}
+                  onMouseDown={handleTextMouseDown}
+                  onTouchStart={handleTextTouchStart}
+                  className={`group/text rounded px-2 py-1 max-w-full cursor-move transition-shadow touch-manipulation select-none ${
+                    isDraggingText
+                      ? 'ring-2 ring-amber-400 ring-offset-2 ring-offset-black/50 shadow-2xl scale-105'
+                      : 'hover:ring-1 hover:ring-amber-400/60'
+                  }`}
+                  title="Click and drag anywhere on screen to reposition title"
+                >
                   {getRenderedText()}
                 </div>
               )}
             </div>
+
+            {/* Extra Text Overlays in Studio Viewport */}
+            {extraTextsList.map((extra) => {
+              if (!extra.enabled || !extra.text) return null;
+              const isThisDragging = draggingExtraId === extra.id;
+              return (
+                <div
+                  key={extra.id}
+                  style={getExtraTextStyle(extra)}
+                  onMouseDown={(e) => handleExtraTextMouseDown(e, extra)}
+                  onTouchStart={(e) => handleExtraTextTouchStart(e, extra)}
+                  className={`group/extra transition-shadow touch-manipulation select-none ${
+                    isThisDragging
+                      ? 'ring-2 ring-emerald-400 ring-offset-2 ring-offset-black/50 shadow-2xl scale-105'
+                      : 'hover:ring-1 hover:ring-emerald-400/60'
+                  }`}
+                  title="Click and drag anywhere on screen to reposition text"
+                >
+                  <span>{extra.text}</span>
+                </div>
+              );
+            })}
 
             {/* Center Studio Mockup / Dropzone Callout */}
             <div className="relative z-10 flex flex-col items-center justify-center text-center p-3.5 bg-slate-950/75 backdrop-blur-md rounded-2xl border border-slate-700/70 shadow-2xl max-w-[210px] sm:max-w-[240px]">

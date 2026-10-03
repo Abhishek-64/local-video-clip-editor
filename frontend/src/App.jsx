@@ -188,7 +188,13 @@ export default function App() {
     opacity: 65,
     imageFile: null,
     imageUrl: null,
-    color: '#000000'
+    color: '#000000',
+    topImageFile: null,
+    topImageUrl: null,
+    topImageFit: 'cover',
+    bottomImageFile: null,
+    bottomImageUrl: null,
+    bottomImageFit: 'cover'
   });
 
   const [textSettings, setTextSettings] = useState({

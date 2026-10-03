@@ -17,7 +17,6 @@ import {
   ZoomIn,
   ZoomOut,
   Maximize,
-  Move,
   Film,
   Palette,
   ChevronRight,
@@ -82,7 +81,7 @@ function wrapCanvasText(ctx, text, maxWidth) {
   return lines;
 }
 
-export default function PhotoEditor({
+function PhotoEditorInner({
   initialImage = null,
   movieName = 'My Movie',
   videoData = null,
@@ -243,6 +242,95 @@ export default function PhotoEditor({
       reader.readAsDataURL(file);
     }
   };
+
+  // ── Drag-and-Drop Text Overlay State & Handlers on Canvas ─────────────────
+  const [isDraggingText, setIsDraggingText] = useState(false);
+  const dragTextRef = useRef({
+    active: false,
+    startX: 0,
+    startY: 0,
+    startPosX: 50,
+    startPosY: 82,
+    canvasRect: null
+  });
+  const textDragBoxRef = useRef(null);
+  const textRafRef = useRef(null);
+
+  const handleTextDragStart = useCallback((e) => {
+    if (!textConfig.enabled || !canvasRef.current) return;
+    e.stopPropagation();
+    e.preventDefault();
+
+    const canvasRect = canvasRef.current.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+    setIsDraggingText(true);
+    dragTextRef.current = {
+      active: true,
+      startX: clientX,
+      startY: clientY,
+      startPosX: textConfig.positionX ?? 50,
+      startPosY: textConfig.positionY ?? 82,
+      canvasRect
+    };
+  }, [textConfig.enabled, textConfig.positionX, textConfig.positionY]);
+
+  useEffect(() => {
+    if (!isDraggingText) return;
+
+    const handlePointerMove = (e) => {
+      const drag = dragTextRef.current;
+      if (!drag.active || !drag.canvasRect) return;
+
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+      const deltaX = clientX - drag.startX;
+      const deltaY = clientY - drag.startY;
+
+      const deltaXPct = (deltaX / drag.canvasRect.width) * 100;
+      const deltaYPct = (deltaY / drag.canvasRect.height) * 100;
+
+      const newX = Math.max(5, Math.min(95, Math.round(drag.startPosX + deltaXPct)));
+      const newY = Math.max(5, Math.min(95, Math.round(drag.startPosY + deltaYPct)));
+
+      // Throttled visual and state update via rAF
+      if (textRafRef.current) cancelAnimationFrame(textRafRef.current);
+      textRafRef.current = requestAnimationFrame(() => {
+        setTextConfig((prev) => ({
+          ...prev,
+          positionX: newX,
+          positionY: newY
+        }));
+      });
+    };
+
+    const handlePointerUp = () => {
+      if (textRafRef.current) {
+        cancelAnimationFrame(textRafRef.current);
+        textRafRef.current = null;
+      }
+      dragTextRef.current.active = false;
+      setIsDraggingText(false);
+    };
+
+    window.addEventListener('mousemove', handlePointerMove);
+    window.addEventListener('mouseup', handlePointerUp);
+    window.addEventListener('touchmove', handlePointerMove, { passive: false });
+    window.addEventListener('touchend', handlePointerUp);
+
+    return () => {
+      if (textRafRef.current) {
+        cancelAnimationFrame(textRafRef.current);
+        textRafRef.current = null;
+      }
+      window.removeEventListener('mousemove', handlePointerMove);
+      window.removeEventListener('mouseup', handlePointerUp);
+      window.removeEventListener('touchmove', handlePointerMove);
+      window.removeEventListener('touchend', handlePointerUp);
+    };
+  }, [isDraggingText]);
 
   // Apply Filter Preset
   const applyPreset = (presetId) => {
@@ -543,9 +631,12 @@ export default function PhotoEditor({
     }
   }, [loadedImage, loadedLogo, selectedRatio, fitMode, zoom, panX, panY, filters, backdrop, textConfig, logoConfig]);
 
-  // Re-render whenever parameters change
+  // Re-render whenever parameters change (synchronized with display refresh)
   useEffect(() => {
-    renderCanvas();
+    let animId = requestAnimationFrame(() => {
+      renderCanvas();
+    });
+    return () => cancelAnimationFrame(animId);
   }, [renderCanvas]);
 
   // Export as Data URL
@@ -668,11 +759,35 @@ export default function PhotoEditor({
 
         {/* Canvas Display Area */}
         <div className="flex-1 w-full flex items-center justify-center p-2 min-h-[360px] sm:min-h-[460px] bg-slate-950/80 rounded-2xl border border-slate-800/80 relative overflow-hidden group">
-          <div className="relative shadow-2xl rounded-xl overflow-hidden max-h-[60vh] max-w-full flex items-center justify-center">
+          <div className="relative shadow-2xl rounded-xl overflow-hidden max-h-[60vh] max-w-full flex items-center justify-center select-none">
             <canvas
               ref={canvasRef}
-              className="max-h-[55vh] max-w-full object-contain rounded-lg shadow-2xl transition-transform"
+              className="max-h-[55vh] max-w-full object-contain rounded-lg shadow-2xl transition-transform block"
             />
+
+            {/* Interactive Draggable Text Overlay Box on Canvas */}
+            {textConfig.enabled && (textConfig.title || textConfig.subtitle) && (
+              <div
+                ref={textDragBoxRef}
+                style={{
+                  left: `${textConfig.positionX ?? 50}%`,
+                  top: `${textConfig.positionY ?? 82}%`,
+                  transform: 'translate(-50%, -50%)',
+                  width: '84%',
+                  maxWidth: '540px',
+                  height: '24%',
+                  minHeight: '64px'
+                }}
+                onMouseDown={handleTextDragStart}
+                onTouchStart={handleTextDragStart}
+                className={`absolute z-30 cursor-move touch-manipulation select-none transition-all rounded-xl ${
+                  isDraggingText
+                    ? 'border-2 border-dashed border-orange-400/90 bg-orange-500/10 shadow-2xl'
+                    : 'hover:border-2 hover:border-dashed hover:border-amber-400/50'
+                }`}
+                title="Click and drag to reposition text overlay"
+              />
+            )}
           </div>
         </div>
 
@@ -1399,3 +1514,5 @@ export default function PhotoEditor({
     </div>
   );
 }
+
+export default React.memo(PhotoEditorInner);

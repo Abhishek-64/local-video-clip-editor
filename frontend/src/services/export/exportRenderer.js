@@ -113,6 +113,10 @@ export class ExportRenderer {
     // Preloaded assets
     this.logoBitmap = null;
     this.bgBitmap = null;
+    this.topBgBitmap = null;
+    this.topBgFit = 'cover';
+    this.bottomBgBitmap = null;
+    this.bottomBgFit = 'cover';
 
     // Invariant crop cache
     this._cachedCropBox = null;
@@ -189,34 +193,85 @@ export class ExportRenderer {
   }
 
   /**
-   * Preload and cache custom background image
+   * Helper to load bitmap from URL or Blob
    */
-  async setBackgroundSource(bgSettings) {
-    if (bgSettings?.type !== 'image' || !bgSettings?.imageUrl) {
-      this.bgBitmap = null;
-      return;
-    }
-
+  async loadBitmapResource(url, fallbackBitmap) {
+    if (fallbackBitmap) return fallbackBitmap;
+    if (!url) return null;
     try {
-      if (bgSettings.imageBitmap) {
-        this.bgBitmap = bgSettings.imageBitmap;
-      } else if (bgSettings.imageUrl) {
-        const res = await fetch(bgSettings.imageUrl);
-        const blob = await res.blob();
-        if (typeof createImageBitmap !== 'undefined') {
-          this.bgBitmap = await createImageBitmap(blob);
-        } else {
-          const img = new Image();
-          img.crossOrigin = 'anonymous';
-          img.src = bgSettings.imageUrl;
-          await new Promise((r) => { img.onload = r; img.onerror = r; });
-          this.bgBitmap = img;
-        }
+      const res = await fetch(url);
+      const blob = await res.blob();
+      if (typeof createImageBitmap !== 'undefined') {
+        return await createImageBitmap(blob);
+      } else {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.src = url;
+        await new Promise((r) => { img.onload = r; img.onerror = r; });
+        return img;
       }
     } catch (e) {
-      console.warn('Failed to load custom background image for export:', e);
+      console.warn('Failed to load image resource for export:', e);
+      return null;
+    }
+  }
+
+  /**
+   * Preload and cache custom background, top banner, and bottom banner images
+   */
+  async setBackgroundSource(bgSettings) {
+    if (bgSettings?.type === 'image' && bgSettings?.imageUrl) {
+      this.bgBitmap = await this.loadBitmapResource(bgSettings.imageUrl, bgSettings.imageBitmap);
+    } else {
       this.bgBitmap = null;
     }
+
+    if (bgSettings?.topImageUrl) {
+      this.topBgBitmap = await this.loadBitmapResource(bgSettings.topImageUrl, bgSettings.topImageBitmap);
+      this.topBgFit = bgSettings.topImageFit || 'cover';
+    } else {
+      this.topBgBitmap = null;
+    }
+
+    if (bgSettings?.bottomImageUrl) {
+      this.bottomBgBitmap = await this.loadBitmapResource(bgSettings.bottomImageUrl, bgSettings.bottomImageBitmap);
+      this.bottomBgFit = bgSettings.bottomImageFit || 'cover';
+    } else {
+      this.bottomBgBitmap = null;
+    }
+  }
+
+  /**
+   * Draw bitmap with contain or cover fit inside destination rectangle
+   */
+  drawFittedImage(ctx, bitmap, targetX, targetY, targetW, targetH, fit = 'cover') {
+    if (!bitmap || targetW <= 0 || targetH <= 0) return;
+    const bW = bitmap.width || bitmap.naturalWidth || targetW;
+    const bH = bitmap.height || bitmap.naturalHeight || targetH;
+    if (!bW || !bH) return;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(targetX, targetY, targetW, targetH);
+    ctx.clip();
+
+    if (fit === 'contain') {
+      const scale = Math.min(targetW / bW, targetH / bH);
+      const dW = bW * scale;
+      const dH = bH * scale;
+      const dX = targetX + (targetW - dW) / 2;
+      const dY = targetY + (targetH - dH) / 2;
+      ctx.drawImage(bitmap, dX, dY, dW, dH);
+    } else {
+      // cover
+      const scale = Math.max(targetW / bW, targetH / bH);
+      const dW = bW * scale;
+      const dH = bH * scale;
+      const dX = targetX + (targetW - dW) / 2;
+      const dY = targetY + (targetH - dH) / 2;
+      ctx.drawImage(bitmap, dX, dY, dW, dH);
+    }
+    ctx.restore();
   }
 
   /**
@@ -447,6 +502,16 @@ export class ExportRenderer {
     } else if (isLetterboxed && background.color) {
       ctx.fillStyle = background.color;
       ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+    }
+
+    // 4b. Reel Top & Bottom Banner Images (Above & Below centered video)
+    if (cropBox.dy > 0 && this.topBgBitmap) {
+      this.drawFittedImage(ctx, this.topBgBitmap, 0, 0, canvasWidth, cropBox.dy, this.topBgFit || 'cover');
+    }
+    const bottomY = cropBox.dy + cropBox.dHeight;
+    const bottomH = canvasHeight - bottomY;
+    if (bottomH > 0 && this.bottomBgBitmap) {
+      this.drawFittedImage(ctx, this.bottomBgBitmap, 0, bottomY, canvasWidth, bottomH, this.bottomBgFit || 'cover');
     }
 
     // 5. Main Sharp Foreground Video Frame
